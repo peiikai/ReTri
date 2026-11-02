@@ -26,8 +26,19 @@ static const GameVersion versions[] = {
 #undef GA_RELEASE
 };
 
+// Other games on the same engine (experimental, game_addresses/games.h): no address table (all zero: nothing of LA's
+// may run), their own sdk load address.
+static const GameAddrs ga_none;
+static const struct { GameVersion v; uint64_t sdk_base; } games[] = {
+#define GA_GAME(key, label, build_id, sdk_base) {{#key, label, build_id, &ga_none}, sdk_base},
+#include "game_addresses/games.h"
+#undef GA_GAME
+};
+
 const GameAddrs *g_ga;
 static const GameVersion *g_version;
+static const char *g_other_game;
+static uint64_t g_sdk_base = SDK_BASE;
 
 static int hexval(char c) { return c <= '9' ? c - '0' : c - 'A' + 10; }
 
@@ -73,6 +84,17 @@ bool game_version_select(const char *game_dir, char *why, size_t why_size) {
         return false;
     }
     const GameVersion *v = game_version_by_build_id(id);
+    for (size_t i = 0; !v && i < sizeof games / sizeof *games; i++) {
+        const char *h = games[i].v.build_id;
+        int k = 0;
+        while (k < 20 && id[k] == (uint8_t)(hexval(h[2 * k]) << 4 | hexval(h[2 * k + 1]))) k++;
+        if (k < 20) continue;
+        v = &games[i].v;
+        g_other_game = v->key;
+        g_sdk_base = games[i].sdk_base;
+        LOG("[game] %s (main build ID %.16s): experimental, LA features off, sdk at %llx\n", v->label, v->build_id,
+            (unsigned long long)g_sdk_base);
+    }
     if (!v) {
         snprintf(why, why_size, "these game files are an unsupported version of the game (main build ID "
                  "%02X%02X%02X%02X%02X%02X%02X%02X): LAS Recomp needs version 1.0.0, 1.0.1 or 1.1.0",
@@ -81,6 +103,7 @@ bool game_version_select(const char *game_dir, char *why, size_t why_size) {
     }
     g_version = v;
     g_ga = v->addrs;
+    if (g_other_game) return true;
     char label[32];
     LOG("[game] version %s (main build ID %.16s, address table %s)\n",
         game_release_label(exefs, label, sizeof label), v->build_id, v->key);
@@ -88,6 +111,8 @@ bool game_version_select(const char *game_dir, char *why, size_t why_size) {
 }
 
 const GameVersion *game_version(void) { return g_version; }
+const char *game_other(void) { return g_other_game; }
+uint64_t game_sdk_base(void) { return g_sdk_base; }
 
 uint64_t game_romfs_bytes(const GameVersion *v) {
     if (!v) return 0;

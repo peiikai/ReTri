@@ -330,6 +330,7 @@ void widescreen_present_crop(uint64_t frame, double shape, float crop[4], double
 // Current level name for logs ("-" when not in play).
 const char *game_level_name(void) {
     extern int game_in_play(void);
+    if (!game_in_play()) return "-";  // (also another game on the engine: no LA state to read)
     uint64_t ps = LD64(GA(PLAYER_STATUS_PTR));
     return game_in_play() && ps && *(const char *)(uintptr_t)ps ? (const char *)(uintptr_t)ps : "-";
 }

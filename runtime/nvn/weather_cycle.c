@@ -98,6 +98,7 @@ static void next(void) {
 static int g_on = -1;
 static char g_dir[300] = "\1";
 bool weather_cycle_on(void) {
+    if (game_other()) return false;
     static int env = -1;
     if (env < 0) env = getenv("LARECOMP_WEATHER_CYCLE") && atoi(getenv("LARECOMP_WEATHER_CYCLE"));
     if (env) return true;

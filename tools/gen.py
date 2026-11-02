@@ -511,6 +511,20 @@ def write_if_changed(path, text):
         f.write(text)
 
 
+def table_base_adr(m, i):
+    """True if the ADR at word i is a jump table's base (newer compilers: adr xT, case0; ldrb wI, [table, idx];
+    add xT, xT, wI, sxtw #2; br xT): its target is a case label, not a function, and must not split the function."""
+    regs = {m.words[i] & 31}
+    for w in m.words[i + 1:i + 9]:
+        if (w & 0xFFFFFC1F) == 0xD61F0000:  # BR
+            return bits(w, 5, 5) in regs
+        if (w & 0x1F000000) == 0x0B000000 and bits(w, 5, 5) in regs:  # ADD/SUB (shifted or extended register)
+            regs.add(w & 31)
+        elif (w & 0x7C000000) == 0x14000000 or (w & 0xFE000000) in (0x54000000, 0xD6000000):  # other branches
+            return False
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('name')
@@ -574,7 +588,7 @@ def main():
             imm = ((w >> 5) & 0x7FFFF) << 2 | ((w >> 29) & 3)
             if imm & (1 << 20):
                 imm -= 1 << 21
-            if m.in_text(pc + imm):
+            if m.in_text(pc + imm) and not (args.game != 'la' and table_base_adr(m, i)):
                 start_set.add(pc + imm)
         elif (w & 0x9F000000) == 0x90000000:  # ADRP
             imm = ((w >> 5) & 0x7FFFF) << 2 | ((w >> 29) & 3)

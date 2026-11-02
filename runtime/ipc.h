@@ -17,6 +17,7 @@ typedef struct IpcReq {
     IpcBuf x[8], a[8], b[8], c[8];
     int nx, na, nb, nc;
     uint32_t domain_obj;  // 0 if not a domain message
+    bool tipc;            // a TIPC message (newer SDKs' sm:): data unaligned, no SFCI header
     uint32_t domain_in_objs[8];
     int ndomain_in;
 } IpcReq;

@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "../game_addresses.h"
 #include "imgui.h"
 #include "i18n.h"
 #include "option_rows.h"
@@ -1117,14 +1118,15 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     const double tw = target_w, th = target_h;
 #endif
     bool open = g_open.load();
-    bool inv = !open && inventory_overlay_wanted();
-    bool trk = !open && tracker_overlay_wanted();
-    bool trkd = !open && tracker_dungeon_wanted();
-    bool chaos = !open && chaos_overlay_wanted();
+    bool la = !game_other();  // (another game on the engine: none of LA's overlays - they read LA's game state)
+    bool inv = la && !open && inventory_overlay_wanted();
+    bool trk = la && !open && tracker_overlay_wanted();
+    bool trkd = la && !open && tracker_dungeon_wanted();
+    bool chaos = la && !open && chaos_overlay_wanted();
     bool kbd = g_kbd.load() == 1;
-    bool race = race_overlay_wanted();  // (run timer, race seed hash: race_overlay.mm)
-    bool flyin = pickup_flyin_wanted() && !open;  // (a silent pickup's card)
-    bool dpad = !open && dpad_overlay_wanted();
+    bool race = la && race_overlay_wanted();  // (run timer, race seed hash: race_overlay.mm)
+    bool flyin = la && pickup_flyin_wanted() && !open;  // (a silent pickup's card)
+    bool dpad = la && !open && dpad_overlay_wanted();
 #ifdef __APPLE__
     plastic_perf_note(cb, open);  // (LARECOMP_UI_PERF test only)
 #else

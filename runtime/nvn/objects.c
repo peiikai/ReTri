@@ -30,7 +30,11 @@ static uint32_t device_integer(uint32_t which) {
         [50] = 256, [51] = 1, [52] = 0, [53] = 0, [54] = 0, [55] = 256, [56] = 1, [57] = 0x1000,
         [58] = 1, [59] = 1, [60] = 1, [61] = 1, [62] = 1, [63] = 1, [64] = 1,
     };
-    return which < sizeof v / sizeof *v ? v[which] : 0;
+    if (which < sizeof v / sizeof *v) return v[which];
+    static int k = -1;  // LARECOMP_NVN_UNKNOWN_INT (experiment): what an unknown query gets (default 0x1000: a size and an
+    if (k < 0) { const char *e = getenv("LARECOMP_NVN_UNKNOWN_INT"); k = e ? (int)strtol(e, NULL, 0) : 0x1000; }  // alignment)
+    LOG("[nvn] GetInteger(%u): unknown, %#x\n", which, k);  // (newer SDKs ask for more)
+    return (uint32_t)k;
 }
 
 NVN(nvnDeviceBuilderSetDefaults) { G(uint32_t, A(0), 0) = 0; }
@@ -378,7 +382,7 @@ NVN(nvnTextureBuilderGetPackagedTextureData) { RET(TB(uint64_t, 0x48)); }
 NVN(nvnTextureBuilderGetPackagedTextureLayout) { RET(0); }
 NVN(nvnTextureBuilderGetGLTextureName) { RET(TB(uint32_t, 0x58)); }
 NVN(nvnTextureBuilderGetSparseTileLayout) { RET(0); }
-NVN(nvnTextureBuilderGetZCullStorageSize) { RET(0); }
+NVN(nvnTextureBuilderGetZCullStorageSize) { RET(0x1000); }  // (ZCull is not emulated, its save/restore are no-ops; newer games allocate this size, 0 breaks their allocator)
 NVN(nvnTextureBuilderGetStorageClass) { RET(0); }
 NVN(nvnTextureBuilderGetRawStorageClass) { RET(0); }
 
@@ -496,7 +500,7 @@ NVN(nvnTextureGetViewOffset) { RET(0); }
 NVN(nvnTextureGetStorageClass) { RET(0); }
 NVN(nvnTextureGetRawStorageClass) { RET(0); }
 NVN(nvnTextureGetSparseTileLayout) { RET(0); }
-NVN(nvnTextureGetZCullStorageSize) { RET(0); }
+NVN(nvnTextureGetZCullStorageSize) { RET(0x1000); }  // (as above)
 NVN(nvnTextureCompare) { RET(A(0) == A(1)); }
 NVN(nvnTextureFlushTexels) { (void)c; }
 NVN(nvnTextureInvalidateTexels) { (void)c; }

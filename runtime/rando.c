@@ -142,7 +142,7 @@ void rando_boot(void) {
     nwords = 0;
     g_active = false;
     g_seed_dir[0] = 0;
-    init();
+    if (!game_other()) init();  // (another game: always vanilla)
     __atomic_store_n(&g_inited, 1, __ATOMIC_RELEASE);
     pthread_mutex_unlock(&g_init_lock);
 }

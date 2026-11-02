@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "game_addresses.h"
 #include "rt.h"
 
 Module g_modules[4];
@@ -174,7 +175,7 @@ static void relocate(Module *m) {
 
 void loader_load(const char *exefs) {
     char path[1024];
-    static const struct { const char *name; uint64_t base; } mods[] = {{"main", MAIN_BASE}, {"sdk", SDK_BASE}};
+    const struct { const char *name; uint64_t base; } mods[] = {{"main", MAIN_BASE}, {"sdk", game_sdk_base()}};
     for (unsigned i = 0; i < 2; i++) {
         Module *m = &g_modules[g_nmodules++];
         m->name = mods[i].name;

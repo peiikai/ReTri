@@ -91,7 +91,7 @@ void warp_request(const char *level, const char *locator) {
 int g_start_screen;  // runtime/ui/launcher.mm: the start screen is up - before the first boot nothing is loaded here
 
 int game_in_play(void) {
-    if (g_start_screen) return 0;
+    if (g_start_screen || game_other()) return 0;  // (another game: LA's features never see it in play)
     uint64_t gm = LD64(GA(GAME_MGR));
     return gm && LD64(gm + 0x4b8) != 0;
 }

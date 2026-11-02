@@ -134,6 +134,35 @@ int ipc_handle_request(Cpu *c, uint32_t handle) {
         req.nc = ncd;
     }
 
+    if (req.type == 15 || req.type >= 16) {  // TIPC (newer SDKs' sm:): type = 16 + command, raw data unaligned, no
+        // SFCI/SFCO headers; the response carries the result as its first raw word
+        if (req.type == 15) {  // close
+            LOG("[ipc] close tipc session %s (handle %x)\n", sess->svc->name, handle);
+            service_release(sess->svc);
+            return 0;
+        }
+        req.cmd = req.type - 16;
+        req.data = (uint8_t *)raw;
+        req.data_size = raw_words * 4;
+        req.tipc = true;
+        sess->svc->handler(sess->svc, &req, &resp);
+        for (int i = 0; i < resp.nobjects; i++) resp.move_handles[resp.nmove++] = session_new(resp.objects[i]);
+        uint32_t type = req.type;
+        memset(msg, 0, 0x100);
+        uint32_t *w = msg;
+        int has_handles = resp.ncopy || resp.nmove;
+        w[0] = type;
+        w[1] = (1 + (resp.data_size + 3) / 4) | (has_handles ? 0x80000000u : 0);
+        uint32_t *q = w + 2;
+        if (has_handles) {
+            *q++ = (resp.ncopy << 1) | (resp.nmove << 5);
+            for (int i = 0; i < resp.ncopy; i++) *q++ = resp.copy_handles[i];
+            for (int i = 0; i < resp.nmove; i++) *q++ = resp.move_handles[i];
+        }
+        q[0] = resp.result;
+        memcpy(q + 1, resp.data, resp.data_size);
+        return 0;
+    }
     if (req.type == 2) {  // close
         LOG("[ipc] close session %s (handle %x)\n", sess->svc->name, handle);
         if (!sess->domain) service_release(sess->svc);  // (a domain's objects stay: closed one by one)

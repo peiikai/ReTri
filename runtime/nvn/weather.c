@@ -208,6 +208,7 @@ static double host_now(void) {
 
 static bool level_is_field(void);
 void weather_player_tick(Cpu *c, uint64_t frame) {
+    if (game_other()) return;
     static int tm = -1;  // LARECOMP_SNOW_TIME=1 (test): this tick's CPU time (game thread), mean every 120 frames
     if (tm < 0) tm = getenv("LARECOMP_SNOW_TIME") != NULL;
     uint64_t t0 = tm ? cpu_ns() : 0;
@@ -670,6 +671,7 @@ static bool wx_off(int why, uint64_t frame) {
 }
 
 bool weather_frame(WeatherFrame *f, uint64_t frame, const float probe[WEATHER_PROBES]) {
+    if (game_other()) return false;  // (LA's weather: LA's game state)
     g_ntrees = g_trees_next, g_trees_next = 0;  // (the trees the scene drew this frame: weather_snow_tree)
     // host time, counted only while the overworld is on screen (a menu or a door stops it)
     static double last = 0;
