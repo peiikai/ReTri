@@ -524,13 +524,23 @@ def main():
     ap.add_argument('--limit', type=int, default=0)
     ap.add_argument('--simd', choices=('asm', 'c'),
                     default='asm' if platform.machine().lower() in ('arm64', 'aarch64') else 'c')
+    ap.add_argument('--game', default='la')  # another game on the same engine (runtime/game_addresses/games.h): no
+    # patches, hooks or randomizer code (all of them are LA addresses)
     args = ap.parse_args()
 
     t0 = time.time()
     m = Module(args.name, args.nso, args.base, args.simd)
-    if args.name == 'main':
+    import game_addresses
+    if args.game != 'la':
+        global RANDO_CODE
+        RANDO_CODE = {}
+        if args.game not in game_addresses.GAMES:
+            sys.exit(f'{args.name}: unknown game {args.game}')
+        if args.name == 'main' and game_addresses.game_for_build_id(m.nso.build_id) != args.game:
+            sys.exit(f'{args.name}: main build ID {m.nso.build_id[:16].upper()} is not {args.game}')
+        print(f'{args.name}: game {game_addresses.GAMES[args.game][0]} (no LA patches)', file=sys.stderr)
+    elif args.name == 'main':
         global HOOKS, PATCHES
-        import game_addresses
         try:
             version = game_addresses.select_build_id(m.nso.build_id)
         except game_addresses.UnknownGameVersion as e:
@@ -657,7 +667,9 @@ def main():
         f.write(f'const uint64_t {args.name}_fn_count = {len(order)};\n')
         write_if_changed(os.path.join(args.outdir, f'{args.name}_table.c'), f.getvalue())
     if args.name == 'main':  # (what this code was generated from: the Makefile's game code library id, GAMELIB_BUILD_ID)
-        write_if_changed(os.path.join(args.outdir, 'main_build_id.txt'), game_addresses.VERSIONS[version][1] + '\n')
+        write_if_changed(os.path.join(args.outdir, 'main_build_id.txt'),
+                         (game_addresses.GAMES[args.game][1] if args.game != 'la' else
+                          game_addresses.VERSIONS[version][1]) + '\n')
     print(f'{args.name}: wrote {nchunks} chunks, {time.time() - t0:.0f}s total', file=sys.stderr)
 
 

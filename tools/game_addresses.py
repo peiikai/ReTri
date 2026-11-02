@@ -52,6 +52,24 @@ TABLE_DIR = _root / 'runtime/game_addresses'
 VERSIONS = load_versions(TABLE_DIR / 'versions.h')
 
 
+def load_games(path):
+    """{key: (label, main build ID, sdk base)} from games.h: other games on the same engine (no address tables)."""
+    games = {}
+    if not path.exists():
+        return games
+    for line in path.read_text(encoding='utf-8').splitlines():
+        if not line.startswith('GA_GAME'):
+            continue
+        match = re.fullmatch(r'GA_GAME\(([a-z][a-z0-9_]*),\s+"([^"]+)",\s+"([0-9A-F]{40})",\s+(0x[0-9a-f]+)\)', line)
+        if not match or match[1] in games:
+            raise ValueError(f'Invalid or duplicate game: {line}')
+        games[match[1]] = (match[2], match[3], int(match[4], 16))
+    return games
+
+
+GAMES = load_games(TABLE_DIR / 'games.h')
+
+
 def table_path(key, kind='patches'):
     return TABLE_DIR / f'{kind}_{key}.h'
 
@@ -66,6 +84,15 @@ def version_for_build_id(build_id):
     supported = ', '.join(f'{label} ({bid[:16]})' for label, bid in VERSIONS.values())
     raise UnknownGameVersion(f'These game files are an unsupported version of the game (main build ID '
                              f'{want[:16] or "missing"}). Supported: {supported}.')
+
+
+def game_for_build_id(build_id):
+    """The games.h key for a main build ID, or None (LA, or unknown)."""
+    padded = build_id.upper().ljust(64, '0')
+    for key, (label, bid, sdk_base) in GAMES.items():
+        if padded[:40] == bid and not padded[40:].strip('0'):
+            return key
+    return None
 
 
 ADDRESS = SimpleNamespace()
