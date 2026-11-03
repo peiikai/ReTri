@@ -416,6 +416,10 @@ static uint32_t svc_wait_process_wide_key(uint64_t mutex, uint64_t key, uint32_t
     pthread_mutex_lock(&g_klock);
     KThread *t = t_cur;
     uint32_t mbefore = rdw(mutex), kbefore = rdw(key);
+    // The key's has-waiters flag before the mutex goes (as Horizon's kernel does): newer SDKs' Signal / Broadcast skip
+    // the svc while the key reads 0, so a thread that takes the mutex in between must already see it set, or its
+    // notify is lost (a future's ready state set, its waiter never woken).
+    __atomic_store_n(u32p(key), 1, __ATOMIC_SEQ_CST);
     mutex_release(mutex);
     bool traced = !kt_timed_key(key, timeout >= 0);
     if (traced) kt(KT_WAIT, key, mutex, kbefore, mbefore, rdw(mutex), 0xffffffffu);
@@ -936,6 +940,12 @@ void kernel_dump_threads(const char *prefix) {
             uint64_t m = t->wait_kind == WAIT_CONDVAR ? t->wait_mutex : t->wait_addr;
             LOG("%s   mutex word %x%s\n", prefix, *(volatile uint32_t *)(uintptr_t)m,
                 t->wait_kind == WAIT_CONDVAR ? "" : " (waiting to be handed it)");
+            if (t->wait_kind == WAIT_CONDVAR && getenv("LARECOMP_HANG_CV_BYTES")) {  // (the words around a condvar wait:
+                LOG("%s   around:", prefix);  // its owner's state, e.g. a future's ready flag)
+                for (uint64_t a = (t->wait_mutex & ~7ull) - 0x20; a < (t->wait_addr & ~7ull) + 0x30; a += 8)
+                    LOG(" %llx=%llx", (unsigned long long)(a & 0xfff), (unsigned long long)*(volatile uint64_t *)(uintptr_t)a);
+                LOG("\n");
+            }
         }
         for (int i = 0; t->in_sync_wait && i < t->sync_count && i < 8; i++) {
             uint32_t h = ((const uint32_t *)(uintptr_t)t->sync_handles)[i];
