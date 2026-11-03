@@ -709,7 +709,11 @@ NVN(nvnTexturePoolRegisterTexture) { register_texture(c); }
 NVN(nvnTexturePoolRegisterImage) {
     register_texture(c);
     NvnTexture *t = HOST(NvnTexture, A(2));
-    if (t && game_other() && getenv("LARECOMP_SUST")) t->image_use = true;  // (off by default, as SUST.B in translate.c)  // (metal.m: allocated writable - compute image stores, other games)
+    if (t && game_other() && !(getenv("LARECOMP_SUST") && !atoi(getenv("LARECOMP_SUST")))) t->image_use = true;  // (as SUST.B)
+    static int nlog;
+    if (game_other() && nlog++ < 12)
+        LOG("[images] RegisterImage id %d tex %p (%ux%u fmt %#x) view %s level %u\n", (int)A(1), (void *)t, t ? t->width : 0,
+            t ? t->height : 0, t ? t->format : 0, A(3) ? "yes" : "no", A(3) ? ((const NvnTextureView *)AP(3))->base_level : 0);  // (metal.m: allocated writable - compute image stores, other games)
 }
 
 NVN(nvnSamplerPoolInitialize) {

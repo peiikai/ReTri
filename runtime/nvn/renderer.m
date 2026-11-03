@@ -2929,21 +2929,32 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
             id<MTLTexture> view = nil;
             if (h && st.tpool && tic < (uint32_t)st.tpool->count) {
                 NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
+                if (e->tex && !e->tex->image_use) e->tex->image_use = true;  // (bound as an image: allocated writable from now on)
                 id<MTLTexture> base = e->tex ? renderer_texture(e->tex, nil, true) : nil;
                 if (base && (base.usage & MTLTextureUsageShaderWrite)) {
+                    // (the registration's view: its first level, and its layers - EoW binds each cube face as an image)
                     NSUInteger lv = e->has_view && (e->view.setmask & 1) ? e->view.base_level : 0;
-                    NSUInteger ly = base.textureType == MTLTextureTypeCube ? 6 : base.arrayLength;
+                    NSUInteger all = base.textureType == MTLTextureTypeCube ? 6 : base.arrayLength;
+                    NSUInteger ly0 = e->has_view && (e->view.setmask & 2) ? e->view.min_layer : 0;
+                    NSUInteger nly = e->has_view && (e->view.setmask & 2) && e->view.num_layers ? e->view.num_layers : all - ly0;
+                    if (ly0 >= all) ly0 = 0, nly = all;
+                    if (ly0 + nly > all) nly = all - ly0;
                     if (lv < base.mipmapLevelCount && (base.textureType == MTLTextureType2D ||
                         base.textureType == MTLTextureType2DArray || base.textureType == MTLTextureTypeCube))
-                        view = view_cached(base, 0x7000000000000000ull | lv, ^{
+                        view = view_cached(base, 0x7000000000000000ull | lv | (uint64_t)ly0 << 8 | (uint64_t)nly << 20, ^{
                             return [base newTextureViewWithPixelFormat:base.pixelFormat textureType:MTLTextureType2DArray
-                                                                levels:NSMakeRange(lv, 1) slices:NSMakeRange(0, ly)];
+                                                                levels:NSMakeRange(lv, 1) slices:NSMakeRange(ly0, nly)];
                         });
                 }
                 if (!view) {
                     static int nlog;
-                    if (nlog++ < 8) LOG("[images] slot %d handle %#llx: no writable texture (%s)\n", k, (unsigned long long)h,
-                                        !e->tex ? "none" : !base ? "no backend" : "not writable / type");
+                    if (nlog++ < 8) LOG("[images] slot %d handle %#llx: no writable texture (%s; usage %#lx type %lu levels %lu, "
+                                        "view level %u, fmt %#x mtl %lu, image_use %d)\n", k, (unsigned long long)h,
+                                        !e->tex ? "none" : !base ? "no backend" : "not writable / type",
+                                        base ? (unsigned long)base.usage : 0ul, base ? (unsigned long)base.textureType : 0ul,
+                                        base ? (unsigned long)base.mipmapLevelCount : 0ul,
+                                        e->has_view && (e->view.setmask & 1) ? (unsigned)e->view.base_level : 0u,
+                                        e->tex ? e->tex->format : 0u, base ? (unsigned long)base.pixelFormat : 0ul, e->tex ? e->tex->image_use : -1);
                 }
             }
             hs[k] = view ? (uint32_t)h : 0xFFFFFFFFu;
