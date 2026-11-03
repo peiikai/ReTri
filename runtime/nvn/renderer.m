@@ -576,8 +576,11 @@ void renderer_submit(void) {
     }
 }
 
+// (indirect draws: a compute dispatch since the last flush may have written their arguments)
+static bool g_cs_since_flush;
 // Finish all recorded GPU work (the CPU is about to read GPU results, or reuse the ring).
 void renderer_flush(void) {
+    g_cs_since_flush = false;
     renderer_submit();
     pthread_mutex_lock(&cb_lock);
     id<MTLCommandBuffer> c = last_cb;
@@ -2534,8 +2537,14 @@ static void snap_note_vertex_bind(uint64_t addr, uint64_t size) {  // (LARECOMP_
             n++; LOG("[snap] vertex bind %llx+%llu overlaps copied %llx+%llu (%s, frame %llu)\n", (unsigned long long)addr, (unsigned long long)size, (unsigned long long)rs_tab[i].addr, (unsigned long long)rs_tab[i].size, addr < rs_tab[i].addr ? "from outside" : "inside", (unsigned long long)renderer_exec_frame());
         }
 }
+// An indirect draw being translated (CMD_DRAW_*_INDIRECT): its arguments' guest address, and the index buffer's
+// (before the first index) - drawn with Metal's indirect draw from the guest heap, see the executor
+static uint64_t g_indirect_args, g_indirect_ibase;
 // The address a binder of [addr, addr+size) uses: the original or its copy (cs_slot: bound by a compute dispatch)
 static uint64_t snap_storage(uint64_t addr, uint64_t size, bool cs_slot) {
+    static int isnap = -1;  // (debug) LARECOMP_INDIRECT_SNAP=1: an indirect draw's storage as any other draw's
+    if (isnap < 0) isnap = ENV("LARECOMP_INDIRECT_SNAP") ? 1 : 0;
+    if (g_indirect_args && !isnap) return addr;  // (an indirect draw's storage - GPU-culled instances - is written on the GPU just before: in place)
     if (!snap_on() || !addr || !size || size > SNAP_RING / 8 || addr < HEAP_BASE || addr + size > snap_ring_base) return addr;
     extern int nvn_pool_flags_at(uint64_t addr);
     int pf = nvn_pool_flags_at(addr);
@@ -2690,6 +2699,13 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
         if ((si->cbuf_dynamic & (1u << k)) && game_other()) need = 0x10000;  // (indexed: any index stays in zeros we own)
         if (size > r.size && r.size) size = r.size;
         if (size < 16) size = 16;
+        static int iubo = -1;
+        if (iubo < 0) iubo = ENV("LARECOMP_INDIRECT_UBO") ? 1 : 0;
+        if (iubo && g_indirect_args && r.addr >= HEAP_BASE && r.addr + need <= HEAP_BASE + HEAP_MAX && !(r.addr & 255)) {
+            if (stage == 0) [enc setVertexBuffer:g_guest_buffer offset:r.addr - HEAP_BASE atIndex:k];
+            else [enc setFragmentBuffer:g_guest_buffer offset:r.addr - HEAP_BASE atIndex:k];
+            continue;
+        }
         uint64_t off = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);  // snapshot: later CPU writes must not leak in
         if (stage == 0) [enc setVertexBuffer:ring offset:off atIndex:k];
         else [enc setFragmentBuffer:ring offset:off atIndex:k];
@@ -2815,10 +2831,27 @@ static CsProg *compute_program(NvnProgram *p) {
 }
 
 static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
-    static int skip_all = -1;  // (test) LARECOMP_SKIP_COMPUTE=1: no compute work at all; =<cs addr>: not that program
-    static uint64_t skip_cs;
-    if (skip_all < 0) { const char *e = getenv("LARECOMP_SKIP_COMPUTE"); skip_cs = e ? strtoull(e, NULL, 16) : 0; skip_all = e && skip_cs == 1; }
-    if (skip_all || (skip_cs > 1 && st.program && st.program->stages[5].code_addr == skip_cs)) return;
+    static int skip_all = -1;  // (test) LARECOMP_SKIP_COMPUTE=1: no compute work at all; =<cs addr>,<cs addr>...: not those programs
+    static uint64_t skip_cs[64];
+    static int nskip;
+    if (skip_all < 0) {
+        const char *e = getenv("LARECOMP_SKIP_COMPUTE");
+        for (const char *q = e; q && *q && nskip < 64; q += *q == ',') skip_cs[nskip++] = strtoull(q, (char **)&q, 16);
+        skip_all = nskip == 1 && skip_cs[0] == 1;
+    }
+    if (skip_all) return;
+    uint64_t cs_addr = st.program ? st.program->stages[5].code_addr : 0;
+    for (int i = 0; i < nskip; i++) if (cs_addr == skip_cs[i]) return;
+    {   // (debug) LARECOMP_LOG_CS: each compute program the first time it runs (frame, groups)
+        static int on = -1; static uint64_t seen[256]; static int nseen;
+        if (on < 0) on = getenv("LARECOMP_LOG_CS") != NULL;
+        int i = 0;
+        for (; on && i < nseen && seen[i] != cs_addr; i++) {}
+        if (on && i == nseen && nseen < 256) {
+            seen[nseen++] = cs_addr;
+            LOG("[cs] %llx first run at frame %llu, groups %ux%ux%u\n", (unsigned long long)cs_addr, (unsigned long long)renderer_exec_frame(), gx, gy, gz);
+        }
+    }
     if (game_other() && ((uint64_t)gx * gy * gz > (1u << 22) || !gx || !gy || !gz)) {  // (garbage group counts: skipped)
         static int nlog;
         if (nlog++ < 20) LOG("[dispatch-guard] skipped: cs %llx groups %ux%ux%u\n",
@@ -2826,6 +2859,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
         return;
     }
     snap_reason = "compute"; snapshots_invalidate(NULL);
+    g_cs_since_flush = true;
     {   // (debug) LARECOMP_WATCH_ADDR: the data watchpoint (dispatch.c) armed once the game draws
         static bool armed;
         if (!armed) { armed = true; if (ENV("LARECOMP_WATCH_ADDR")) { extern void watch_arm(void); watch_arm(); } }
@@ -4562,7 +4596,7 @@ static void draw_one(CmdRec *r, bool indexed) {
     uint32_t run_at[MAX_RUNS], run_n[MAX_RUNS];
     bool run_gold[MAX_RUNS];
     int nruns = 0;
-    if (pr->fi->uses_tint && (pr->vi->ssbo_read & 1) && st.sbuf[0][0].addr) {
+    if (!g_indirect_args && pr->fi->uses_tint && (pr->vi->ssbo_read & 1) && st.sbuf[0][0].addr) {
         extern bool pot_glow_active(void);
         extern bool pot_instance_gold(const float *m);
         uint64_t recs = st.sbuf[0][0].size / 64;
@@ -4619,6 +4653,7 @@ static void draw_one(CmdRec *r, bool indexed) {
             if (!(used_streams & (1u << i))) continue;  // (only the streams this draw's attributes read)
             uint32_t stride = st.stream[i][0], div = st.stream[i][1];
             uint64_t last = div ? (binst + ninst - 1) / div : maxv;
+            if (div && g_indirect_args) { bad = i, why = "indirect draw with per-instance vertex data (instances unknown)"; continue; }
             if (i >= 12) bad = i, why = "stream 12+ not bound";
             else if (!st.vbuf[i].addr && stride && last > 0) bad = i, why = "no buffer, 16 zero bytes";
             else if (st.vbuf[i].addr && stride && (last + 1) * stride > (st.vbuf[i].size ? st.vbuf[i].size : 16))
@@ -4644,7 +4679,9 @@ static void draw_one(CmdRec *r, bool indexed) {
     MTLPrimitiveType pt = prim_type(mode, &native);
     if (!indexed) {
         uint32_t first = (uint32_t)r->x[1], count = (uint32_t)r->x[2], base_inst = base_all + run_at[ri], inst = run_n[ri];
-        if (native) {
+        if (native && g_indirect_args) {
+            [enc drawPrimitives:pt indirectBuffer:g_guest_buffer indirectBufferOffset:g_indirect_args - HEAP_BASE];
+        } else if (native) {
             [enc drawPrimitives:pt vertexStart:first vertexCount:count instanceCount:inst baseInstance:base_inst];
         } else if (mode == 6 || mode == 7 || mode == 9) {
             uint32_t n;
@@ -4657,7 +4694,10 @@ static void draw_one(CmdRec *r, bool indexed) {
         uint64_t iaddr = r->x[3];
         int32_t base_vertex = (int32_t)r->x[4];
         uint32_t base_inst = base_all + run_at[ri], inst = run_n[ri];
-        if (native && itype != 0) {
+        if (native && itype != 0 && g_indirect_args) {  // (the indices in place: a mesh's, the GPU picks the range)
+            [enc drawIndexedPrimitives:pt indexType:itype == 1 ? MTLIndexTypeUInt16 : MTLIndexTypeUInt32 indexBuffer:g_guest_buffer
+                     indexBufferOffset:g_indirect_ibase - HEAP_BASE indirectBuffer:g_guest_buffer indirectBufferOffset:g_indirect_args - HEAP_BASE];
+        } else if (native && itype != 0) {
             MTLIndexType it = itype == 1 ? MTLIndexTypeUInt16 : MTLIndexTypeUInt32;
             uint32_t isz = itype == 1 ? 2 : 4;
             id<MTLBuffer> ib;
@@ -5831,6 +5871,54 @@ static void exec_list(uint64_t handle, int depth) {
             break;
         case CMD_DRAW_ARRAYS: draw(r, false); break;
         case CMD_DRAW_ELEMENTS: draw(r, true); break;
+        case CMD_DRAW_ARRAYS_INDIRECT: case CMD_DRAW_ELEMENTS_INDIRECT: case CMD_DISPATCH_INDIRECT: {
+            // The arguments are in GPU memory, often written by a compute dispatch just before (EoW: ~24 GPU-culled
+            // instanced draws a frame, the instance counts added up by its culling dispatches - dropped before, the
+            // town's lighting flickered). Read on the CPU once that work is done (one flush per batch after a
+            // dispatch), then drawn as a plain draw. Layouts: elements {count, instances, first index, base vertex,
+            // base instance}, arrays {count, instances, first, base instance}, dispatch {x, y, z}.
+            uint64_t args = r->op == CMD_DRAW_ELEMENTS_INDIRECT ? r->x[3] : r->op == CMD_DRAW_ARRAYS_INDIRECT ? r->x[1] : r->x[0];
+            if (!args) break;
+            // Read once the GPU work before is done (a flush, once per batch after a dispatch) and drawn as a plain
+            // draw. That flush also matters for the plain draws after it: EoW's dispatches write its shadow cascades'
+            // matrices, which later draws read as uniforms - snapshotted at translation, they're only right once the
+            // dispatch has run (the town's lighting flickered without it). Holds 60 fps at 1280x720 on an M3 Max.
+            // LARECOMP_INDIRECT_GPU=1 (experimental): Metal's indirect draw from the guest heap with the GPU's own
+            // counts, no flush - the cascades' uniforms are then a frame stale (the flicker is back): it needs the
+            // dispatches' outputs bound in place first. The LARECOMP_INDIRECT_FLUSH / _SNAP / _UBO switches test that path.
+            static int cpu = -1;
+            if (cpu < 0) cpu = ENV("LARECOMP_INDIRECT_GPU") ? 0 : 1;
+            uint64_t ib = r->op == CMD_DRAW_ELEMENTS_INDIRECT ? r->x[2] : 0;
+            bool on_gpu = !cpu && r->op != CMD_DISPATCH_INDIRECT && args >= HEAP_BASE && args + 20 <= HEAP_BASE + HEAP_MAX && !(args & 3) &&
+                          (r->op == CMD_DRAW_ARRAYS_INDIRECT || (r->x[1] != 0 && ib >= HEAP_BASE && ib < HEAP_BASE + HEAP_MAX && !(ib & 3)));
+            static int fl = -1;  // (debug) LARECOMP_INDIRECT_FLUSH=1: the flush on the GPU path too
+            if (fl < 0) fl = ENV("LARECOMP_INDIRECT_FLUSH") ? 1 : 0;
+            if (g_cs_since_flush && (!on_gpu || fl)) renderer_flush();
+            const uint32_t *a = (const uint32_t *)(uintptr_t)args;
+            static int nlog;
+            if (ENV("LARECOMP_LOG_INDIRECT") && nlog++ < 200)
+                LOG("[indirect] op %u args %x %x %x %x %x (frame %llu)\n", r->op, a[0], a[1], a[2], a[3], a[4], (unsigned long long)renderer_exec_frame());
+            if (r->op == CMD_DISPATCH_INDIRECT) { if (a[0] && a[1] && a[2]) dispatch_compute(a[0], a[1], a[2]); break; }
+            CmdRec d = *r;
+            if (r->op == CMD_DRAW_ELEMENTS_INDIRECT) {
+                uint32_t isz = r->x[1] == 0 ? 1 : r->x[1] == 1 ? 2 : 4;
+                d.op = CMD_DRAW_ELEMENTS;
+                d.x[0] = r->x[0], d.x[1] = r->x[1], d.x[2] = a[0], d.x[3] = r->x[2] + (uint64_t)a[2] * isz;
+                d.x[4] = (uint64_t)(int64_t)(int32_t)a[3], d.x[5] = a[4], d.x[6] = a[1];
+            } else {
+                d.op = CMD_DRAW_ARRAYS;
+                d.x[0] = r->x[0], d.x[1] = a[2], d.x[2] = a[0], d.x[3] = a[3], d.x[4] = a[1];
+            }
+            if (on_gpu) {
+                if (!d.x[2]) d.x[2] = 7;  // (the checks: a count - not a 6-vertex quad, the full-screen heuristics' shape)
+                if (!d.x[6] && r->op == CMD_DRAW_ELEMENTS_INDIRECT) d.x[6] = 1;  // (and at least one instance)
+                if (!d.x[4] && r->op == CMD_DRAW_ARRAYS_INDIRECT) d.x[4] = 1;
+                g_indirect_args = args, g_indirect_ibase = ib;
+                draw(&d, r->op == CMD_DRAW_ELEMENTS_INDIRECT);
+                g_indirect_args = g_indirect_ibase = 0;
+            } else if (a[0] && a[1]) draw(&d, r->op == CMD_DRAW_ELEMENTS_INDIRECT);
+            break;
+        }
         case CMD_UPDATE_UNIFORM_BUFFER:
             // (buffer, size, offset, dataSize, data): apply the update in command order
             memcpy((void *)(uintptr_t)(r->x[0] + r->x[2]), x, r->x[3]);
@@ -5893,6 +5981,15 @@ static void exec_list(uint64_t handle, int depth) {
             renderer_flush();
             memmove((void *)(uintptr_t)r->x[1], (void *)(uintptr_t)r->x[0], r->x[2]);
             break;
+        case CMD_CLEAR_BUFFER: {  // (address, size, 32-bit value): as the copy above, in order with the GPU work before it
+            static uint64_t n;
+            if (n++ % 2000 == 0 && ENV("LARECOMP_LOG_INDIRECT")) LOG("[clearbuf] #%llu %llx %llu bytes = %x\n", (unsigned long long)n, r->x[0], r->x[1], (uint32_t)r->x[2]);
+            if (!r->x[0] || r->x[1] > (1ull << 30)) break;
+            renderer_flush();
+            uint32_t *d = (uint32_t *)(uintptr_t)r->x[0];
+            for (uint64_t i = 0; i < r->x[1] / 4; i++) d[i] = (uint32_t)r->x[2];
+            break;
+        }
         default: break;
         }
         p += r->size;

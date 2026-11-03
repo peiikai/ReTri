@@ -1321,12 +1321,23 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         else if (vop == 6) sprintf(t, "uint(max(%s, %s(%s)))", r1, ty, cv);
         else sprintf(t, "uint(%s)", r1);
         set_reg(c, d, t);
-    } else if (OPM(0x50d8000000000000ull, 0xfff8000000000000ull)) {  // VOTE (Ryujinx InstVote): per lane for now -
-        // ALL / ANY give the source predicate, EQ true, the ballot this lane's bit (right when the lanes agree)
+    } else if (OPM(0x50d8000000000000ull, 0xfff8000000000000ull)) {  // VOTE (Ryujinx InstVote): ALL / ANY / EQ, Rd the ballot
+        // (vertex functions have no SIMD-group functions: per lane, ALL / ANY the source predicate, EQ true, the ballot bit 0)
         int mode = (int)bits(w, 48, 2), vp = (int)bits(w, 45, 3);
+        bool simd = c->stage != STAGE_VERTEX;
         sp(&c->body, "    { bool vs_ = %s;\n", P((int)bits(w, 39, 3), bits(w, 42, 1)));
-        if (vp != PT) { c->pred_used[vp] = 1; sp(&c->body, "      p%d = %s;\n", vp, mode == 2 ? "true" : "vs_"); }
-        if (d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      r%d = vs_ ? 1u : 0u;\n", d); }
+        if (vp != PT) {
+            c->pred_used[vp] = 1;
+            const char *e = !simd ? (mode == 2 ? "true" : "vs_")
+                            : c->glsl ? (mode == 0 ? "subgroupAll(vs_)" : mode == 1 ? "subgroupAny(vs_)" : "subgroupAllEqual(vs_)")
+                            : (mode == 0 ? "simd_all(vs_)" : mode == 1 ? "simd_any(vs_)" : "(simd_all(vs_) || !simd_any(vs_))");
+            sp(&c->body, "      p%d = %s;\n", vp, e);
+        }
+        if (d != RZ) {
+            c->reg_used[d] = 1;
+            sp(&c->body, "      r%d = %s;\n", d, !simd ? "(vs_ ? 1u : 0u)" : c->glsl ? "subgroupBallot(vs_).x"
+                                                                     : "uint(static_cast<simd_vote::vote_t>(simd_ballot(vs_)))");
+        }
         sp(&c->body, "    }\n");
     } else if (OPM(0x1400000000000000ull, 0xfc00000000000000ull)) {  // ISCADD32I
         sprintf(t, "((%s << %du) + 0x%08xu)", R(a), (int)bits(w, 53, 5), (uint32_t)bits(w, 20, 32));
@@ -1504,7 +1515,16 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         case 0x25: set_reg(c, d, "ctaid.x"); break;
         case 0x26: set_reg(c, d, "ctaid.y"); break;
         case 0x27: set_reg(c, d, "ctaid.z"); break;
-        case 0x00: set_reg(c, d, "0u"); break;
+        case 0x00:  // LANEID; and the lane masks EQ / LT / LE / GT / GE (vertex functions have no SIMD lane: lane 0)
+        case 0x38: case 0x39: case 0x3a: case 0x3b: case 0x3c: {
+            // (it was always 0: every lane of a reduction took the "lane 0 adds the result" path, and EoW's exposure
+            // came out 32 times too bright - the town dull, flashing lit only while a stale copy was read)
+            static const char *const lm[] = {"(1u << lane)", "((1u << lane) - 1u)", "(((1u << lane) << 1u) - 1u)",
+                                             "(~(((1u << lane) << 1u) - 1u))", "(~((1u << lane) - 1u))"};
+            if (c->stage == STAGE_VERTEX) set_reg(c, d, sr == 0x00 ? "0u" : sr == 0x38 || sr == 0x3a || sr == 0x3c ? "1u" : sr == 0x39 ? "0u" : "0xFFFFFFFEu");
+            else { c->uses_lane = true; set_reg(c, d, sr == 0x00 ? "lane" : lm[sr - 0x38]); }
+            break;
+        }
         default: sprintf(t, "0u /* sr %#x */", sr); set_reg(c, d, t);
         }
     } else if (OPM(0x5c30000000000000ull, 0xfff8000000000000ull) || OPM(0x4c30000000000000ull, 0xfff8000000000000ull) ||
@@ -1785,6 +1805,20 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
             static const char *const fn[] = {"subgroupShuffle", "subgroupShuffleUp", "subgroupShuffleDown", "subgroupShuffleXor"};
             sprintf(t, "%s(%s, uint(%s))", fn[mode], R(a), bv);
             set_reg(c, d, t);
+        } else if (c->stage == STAGE_COMPUTE) {
+            // (Ryujinx InstShfl / PTX shfl: C holds the clamp (bits 0-4) and segment mask (bits 8-12); a source lane out
+            // of range reads the lane's own value and clears Pd - reductions test Pd before adding)
+            char cb2[32];
+            const char *cv = bits(w, 29, 1) ? (sprintf(cb2, "%uu", (unsigned)bits(w, 34, 13)), cb2) : R((int)bits(w, 39, 8));
+            c->uses_lane = true;
+            sp(&c->body, "    { uint sb_ = %s & 31u, sc_ = %s, sg_ = (sc_ >> 8u) & 31u, mn_ = lane & sg_, mx_ = mn_ | (sc_ & 31u & ~sg_);\n", bv, cv);
+            static const char *const jx[] = {"mn_ | (sb_ & ~sg_)", "lane - sb_", "lane + sb_", "lane ^ sb_"};
+            sp(&c->body, "      uint j_ = %s; bool ok_ = %s;\n", jx[mode], mode == 1 ? "int(j_) >= int(mx_)" : "j_ <= mx_");
+            sp(&c->body, "      uint v_ = simd_shuffle(%s, ushort(ok_ ? j_ : lane));\n", R(a));
+            set_reg(c, d, "v_");
+            if (pd != PT) { c->pred_used[pd] = 1; sp(&c->body, "    p%d = ok_;\n", pd); }
+            sp(&c->body, "    }\n");
+            pd = PT;
         } else if (mode == 3) {
             bool quad = bits(w, 28, 1) && bits(w, 20, 5) < 4;
             sprintf(t, quad ? "quad_shuffle_xor(%s, ushort(%s))" : "simd_shuffle_xor(%s, ushort(%s))", R(a), bv);
@@ -2610,8 +2644,8 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
         sp(&s, "fragment FOut main0(FIn in [[stage_in]], bool front_facing [[front_facing]]%s%s) {\n",
            c->uses_lane ? ", uint lane [[thread_index_in_simdgroup]]" : "", args.buf ? args.buf : "");
     } else {
-        sp(&s, "kernel void main0(uint3 tid [[thread_position_in_threadgroup]], uint3 ctaid [[threadgroup_position_in_grid]]%s) {\n",
-           args.buf ? args.buf : "");
+        sp(&s, "kernel void main0(uint3 tid [[thread_position_in_threadgroup]], uint3 ctaid [[threadgroup_position_in_grid]]%s%s) {\n",
+           c->uses_lane ? ", uint lane [[thread_index_in_simdgroup]]" : "", args.buf ? args.buf : "");
     }
     free(args.buf);
     if (smap)
