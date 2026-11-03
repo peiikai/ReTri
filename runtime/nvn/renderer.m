@@ -2466,7 +2466,8 @@ static void bind_textures(int stage, ShaderInfo *si) {
         static uint64_t dump_fs = 1;  // LARECOMP_DUMP_FS_TEX=<fs code addr>: save that shader's textures, its first 3 draws
         static int dump_left = 3;
         if (dump_fs == 1) { const char *e = getenv("LARECOMP_DUMP_FS_TEX"); dump_fs = e ? strtoull(e, NULL, 16) : 0; }
-        if (dump_fs && dump_left > 0 && stage == 1 && st.program && st.program->stages[1].code_addr == dump_fs &&
+        static long dump_from = -1; if (dump_from < 0) dump_from = getenv("LARECOMP_DUMP_FROM") ? atol(getenv("LARECOMP_DUMP_FROM")) : 0;
+        if (dump_fs && dump_left > 0 && stage == 1 && st.program && st.program->stages[1].code_addr == dump_fs && (long)renderer_exec_frame() >= dump_from &&
             tex.textureType == MTLTextureType2D) {
             char path[128], apath[128];
             snprintf(path, sizeof path, "build/fstex_%d_%d.png", 3 - dump_left, i);
@@ -4358,6 +4359,16 @@ static void draw_one(CmdRec *r, bool indexed) {
     }
     ShaderKey vkey = {0}, fkey = {0};
     vkey.flip_y = fkey.flip_y = nvn_window_origin() == 0;
+    {   // EoW's rift map (a top-down 1024x1024 picture of the rift meshes, read back by world position to cut the rift's
+        // dark void out of the scene) is read with its rows the other way up from how the flip stores it: drawn
+        // unflipped, the void lands on the rift (without it the map lookups miss and only the rift's edges show).
+        // (debug) LARECOMP_NOFLIP_VS=<vs code addr>: that vertex shader's draws without the y flip too
+        static uint64_t nf = 1, last_fs, last_h;
+        if (nf == 1) nf = getenv("LARECOMP_NOFLIP_VS") ? strtoull(getenv("LARECOMP_NOFLIP_VS"), NULL, 16) : 0;
+        uint64_t fs = st.program->stages[1].code_addr;
+        if (fs != last_fs) { last_fs = fs; last_h = fs ? hmix(1469598103934665603ull, (const void *)(uintptr_t)(fs + 0x30), 0x200) : 0; }
+        if (last_h == 0xd6c58a42e55a9f9eull || (nf && st.program->stages[0].code_addr == nf)) vkey.flip_y = fkey.flip_y = false;
+    }
     vkey.depth_minus_one = nvn_depth_mode() == 0;
     for (int i = 0; i < st.nattrib; i++) vkey.attr_kind[i] = (uint8_t)attr_kind(st.attrib[i] & 0xFF);
     for (int i = 0; i < st.rt.ncolor; i++) if (st.rt.color[i]) fkey.rt_kind[i] = (uint8_t)rt_kind(st.rt.color[i]->format);
@@ -4465,6 +4476,10 @@ static void draw_one(CmdRec *r, bool indexed) {
             {   // (debug) LARECOMP_DRAW_INFO=<fs hash>: that shader's draws - targets, depth / stencil / blend state, textures
                 static uint64_t want = 1; static int nlog;
                 if (want == 1) want = getenv("LARECOMP_DRAW_INFO") ? strtoull(getenv("LARECOMP_DRAW_INFO"), NULL, 16) : 0;
+                if (want && last_hash == want && nlog < 6) {
+                    LOG("[drawinfo] viewport %g %g %g %g scissor %d %d %d %d poly %d %d origin %d\n", st.viewport[0][0], st.viewport[0][1], st.viewport[0][2], st.viewport[0][3],
+                        st.scissor[0][0], st.scissor[0][1], st.scissor[0][2], st.scissor[0][3], st.poly[0], st.poly[1], nvn_window_origin());
+                }
                 if (want && last_hash == want && nlog++ < 6) {
                     LOG("[drawinfo] frame %llu mode %llu count %llu inst %llu | rt %d x %ux%u fmt %#x depth %s fmt %#x | ds %02x %02x %02x %02x %02x %02x %02x %02x"
                         " | blend0 %02x%02x%02x%02x%02x%02x%02x%02x colormask %08x | vs %llx fs %llx\n",
@@ -5175,6 +5190,22 @@ static void draw_one(CmdRec *r, bool indexed) {
     }
     }  // runs
     stat_draws++;
+    {   // (debug) LARECOMP_DUMP_RT_AFTER=<fs hash>: that shader's colour targets right after its first 3 draws
+        static uint64_t want = 1; static int left = 3;
+        if (want == 1) want = getenv("LARECOMP_DUMP_RT_AFTER") ? strtoull(getenv("LARECOMP_DUMP_RT_AFTER"), NULL, 16) : 0;
+        static long from = -1; if (from < 0) from = getenv("LARECOMP_DUMP_FROM") ? atol(getenv("LARECOMP_DUMP_FROM")) : 0;  // (from that frame on)
+        if (want && g_cur_fs_hash == want && left > 0 && (long)renderer_exec_frame() >= from) {
+            int n = 3 - left--;
+            end_pass();
+            for (int i = 0; i < st.rt.ncolor && i < 2; i++) if (st.rt.color[i]) {
+                char path[96], apath[96];
+                snprintf(path, sizeof path, "build/rtafter_%d_%d.png", n, i); snprintf(apath, sizeof apath, "build/rtafter_%d_%d_a.png", n, i);
+                LOG("[rtafter] draw %d rt%d %llx %ux%u fmt %#x\n", n, i, (unsigned long long)st.rt.color[i]->addr, st.rt.color[i]->width, st.rt.color[i]->height, st.rt.color[i]->format);
+                renderer_save_game_texture(st.rt.color[i], sampled_texture(st.rt.color[i], NULL, false, TEXTYPE_2D), path, apath);
+            }
+            st.rt_dirty = true;
+        }
+    }
     if (dbg_this) {
         static int nlog;
         if (nlog++ < 4) {

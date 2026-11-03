@@ -2556,7 +2556,7 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
             int rr = maxwell_dbg_reg % 1000, half = maxwell_dbg_reg / 1000;  // +1000: low f16, +2000: high f16
             c->reg_used[rr] = 1;
             if (half) sp(&c->body, c->glsl ? "    dbgv = unpackHalf2x16(r%d)[%d];\n" : "    dbgv = float(as_type<half2>(r%d)[%d]);\n", rr, half - 1);
-            else sp(&c->body, "    dbgv = as_type<float>(r%d);\n", rr);
+            else sp(&c->body, "    dbgv = as_type<float>(r%d) * %gf;\n", rr, getenv("LARECOMP_DBG_MUL") ? atof(getenv("LARECOMP_DBG_MUL")) : 1.0);  // (LARECOMP_DBG_MUL: scaled into 0..1)
         }
         info->num_insts++;
     }

@@ -1,3 +1,4 @@
+#include <stdio.h>
 // NVN command buffers: commands are recorded into the guest-provided command memory as CmdRec
 // records, so the game's own memory management and out-of-memory callbacks work as designed.
 // A command handle is the guest address of a list's first record.
@@ -280,7 +281,14 @@ NVN(nvnCommandBufferSetRasterizerDiscard) { (void)c; }
 NVN(nvnCommandBufferSetConservativeRasterEnable) { (void)c; }
 NVN(nvnCommandBufferSetConservativeRasterDilate) { (void)c; }
 NVN(nvnCommandBufferSetSubpixelPrecisionBias) { (void)c; }
-NVN(nvnCommandBufferSetViewportSwizzles) { (void)c; }
+NVN(nvnCommandBufferSetViewportSwizzles) {  // (not applied yet: logged)
+    static int n;
+    if (n < 20) {
+        n++;
+        const uint32_t *sw = (const uint32_t *)(uintptr_t)A(3);
+        fprintf(stderr, "[swizzle] first %u count %u: %u %u %u %u\n", (unsigned)A(1), (unsigned)A(2), sw ? sw[0] : 99, sw ? sw[1] : 99, sw ? sw[2] : 99, sw ? sw[3] : 99);
+    }
+}
 NVN(nvnCommandBufferSetStencilCullCriteria) { (void)c; }
 NVN(nvnCommandBufferSetColorReductionEnable) { (void)c; }
 NVN(nvnCommandBufferSetColorReductionThresholds) { (void)c; }
