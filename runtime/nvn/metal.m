@@ -1267,6 +1267,131 @@ void backend_represent(void) {
 // The GPU side of a present (the render thread when it's on, rqueue.c): the present pass, the overlay, shots.
 // frame: the number of this present (the game thread's frame when it was queued).
 static int g_presents_inflight;  // present command buffers committed and not yet completed (each holds a drawable)
+// (debug) LARECOMP_BLIP_WATCH=1: a catcher for flashes. Each present also draws a small copy (384x216) of the window
+// image into a ring of the last 128 frames, and measures it once the GPU is done: the whole image's brightness and 12 row
+// bands'. A frame (or a band) much darker than the frames before it that comes back within a few frames is a blip: the
+// ring around it - 90 frames before, 30 after - is saved as PNGs in build/blips/<frame>/ and "[blip]" logged with the time.
+// F10 saves the last 120 frames the same way (blip_request). The drawable is readable then (framebufferOnly off).
+#define BLIP_N 128
+#define BLIP_W 384
+#define BLIP_H 216
+#define BLIP_BANDS 12
+static id<MTLTexture> blip_ring[BLIP_N];
+static uint64_t blip_frame[BLIP_N];
+static float blip_mean[BLIP_N], blip_band[BLIP_N][BLIP_BANDS];
+static atomic_int blip_req;
+static bool blip_on(void) {
+    static int on = -1;
+    if (on < 0) on = getenv("LARECOMP_BLIP_WATCH") != NULL;
+    return on;
+}
+void blip_request(void) { if (blip_on()) atomic_store(&blip_req, 1); }
+static void blip_save(uint64_t at, uint64_t first, uint64_t last, const char *why) {  // (the analysis queue)
+    char dir[128];
+    snprintf(dir, sizeof dir, "build/blips/%05llu", (unsigned long long)at);
+    mkdir("build", 0755); mkdir("build/blips", 0755); mkdir(dir, 0755);
+    time_t now = time(NULL);
+    char hm[16];
+    strftime(hm, sizeof hm, "%H:%M:%S", localtime(&now));
+    int saved = 0;
+    for (uint64_t f = first; f <= last; f++) {
+        int i = (int)(f % BLIP_N);
+        if (blip_frame[i] != f || !blip_ring[i]) continue;
+        size_t bytes = BLIP_W * BLIP_H * 4;
+        uint8_t *px = malloc(bytes);
+        [blip_ring[i] getBytes:px bytesPerRow:BLIP_W * 4 fromRegion:MTLRegionMake2D(0, 0, BLIP_W, BLIP_H) mipmapLevel:0];
+        CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+        CGContextRef ctx = CGBitmapContextCreate(px, BLIP_W, BLIP_H, 8, BLIP_W * 4, cs, kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst);
+        CGImageRef img = CGBitmapContextCreateImage(ctx);
+        char path[256];
+        snprintf(path, sizeof path, "%s/frame_%05llu.png", dir, (unsigned long long)f);
+        CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, strlen(path), false);
+        CGImageDestinationRef dest = CGImageDestinationCreateWithURL(url, (__bridge CFStringRef)UTTypePNG.identifier, 1, NULL);
+        if (dest) { CGImageDestinationAddImage(dest, img, NULL); CGImageDestinationFinalize(dest); CFRelease(dest); saved++; }
+        CFRelease(url); CGImageRelease(img); CGContextRelease(ctx); CGColorSpaceRelease(cs); free(px);
+    }
+    extern const char *game_level_name(void);
+    LOG("[blip] %s at frame %llu (%s, level %s): %d frames %llu..%llu saved in %s\n", why, (unsigned long long)at, hm,
+        game_level_name() ? game_level_name() : "?", saved, (unsigned long long)first, (unsigned long long)last, dir);
+}
+static void blip_measure(int i, uint64_t f) {  // (the analysis queue, after the GPU drew slot i for frame f)
+    static uint8_t px[BLIP_W * BLIP_H * 4];
+    [blip_ring[i] getBytes:px bytesPerRow:BLIP_W * 4 fromRegion:MTLRegionMake2D(0, 0, BLIP_W, BLIP_H) mipmapLevel:0];
+    double tot = 0, band[BLIP_BANDS] = {0};
+    for (int y = 0; y < BLIP_H; y += 2)
+        for (int x = 0; x < BLIP_W; x += 2) {
+            const uint8_t *p = px + (y * BLIP_W + x) * 4;  // (BGRA)
+            double l = 0.114 * p[0] + 0.587 * p[1] + 0.299 * p[2];
+            tot += l;
+            band[y * BLIP_BANDS / BLIP_H] += l;
+        }
+    int per = (BLIP_W / 2) * (BLIP_H / 2);
+    blip_mean[i] = (float)(tot / per);
+    for (int b = 0; b < BLIP_BANDS; b++) blip_band[i][b] = (float)(band[b] / (per / BLIP_BANDS));
+    blip_frame[i] = f;
+    static uint64_t cand, cand_until, save_at, save_from;  // (a dark frame waiting to come back; a save waiting for the after frames)
+    static float cand_ref;
+    static char why[64];
+    if (atomic_exchange(&blip_req, 0)) { blip_save(f, f > 119 ? f - 119 : 0, f, "F10"); return; }
+    if (save_at && f >= save_at) { blip_save(save_at - 30, save_from, f, why); save_at = 0; }
+    int p1 = (int)((f - 1) % BLIP_N), p2 = (int)((f - 2) % BLIP_N);
+    if (f < 2 || blip_frame[p1] != f - 1 || blip_frame[p2] != f - 2) return;
+    if (cand) {  // back to the earlier brightness: a blip
+        if (blip_mean[i] >= cand_ref * 0.8f) {
+            if (!save_at) { save_at = cand + 30; save_from = cand > 90 ? cand - 90 : 0; }
+            cand = 0;
+        } else if (f > cand_until) cand = 0;  // (stayed dark: a fade or a load, not a blip)
+        return;
+    }
+    float ref = fminf(blip_mean[p1], blip_mean[p2]);
+    if (ref > 20 && blip_mean[i] < ref * 0.6f) {
+        cand = f, cand_until = f + 6, cand_ref = ref;
+        snprintf(why, sizeof why, "dark frame (%.0f after %.0f)", blip_mean[i], ref);
+        return;
+    }
+    for (int b = 0; b < BLIP_BANDS; b++) {
+        float bref = fminf(blip_band[p1][b], blip_band[p2][b]);
+        if (bref > 25 && blip_band[i][b] < bref * 0.35f) {
+            cand = f, cand_until = f + 6, cand_ref = blip_mean[p1];
+            snprintf(why, sizeof why, "dark band %d (%.0f after %.0f)", b, blip_band[i][b], bref);
+            // (a band: the whole image may hardly change - come back means that band, checked as the mean here; close enough)
+            cand_ref = blip_mean[i] / 0.8f;
+            return;
+        }
+    }
+}
+static void blip_capture(id<MTLCommandBuffer> cb, id<MTLTexture> win, uint64_t frame) {
+    if (!blip_on() || !win) return;
+    int i = (int)(frame % BLIP_N);
+    if (!blip_ring[i]) {
+        MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:win.pixelFormat width:BLIP_W height:BLIP_H mipmapped:NO];
+        td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+        td.storageMode = MTLStorageModeShared;
+        blip_ring[i] = [dev newTextureWithDescriptor:td];
+    }
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture = blip_ring[i];
+    rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
+    [enc setViewport:(MTLViewport){0, 0, BLIP_W, BLIP_H, 0, 1}];
+    [enc setRenderPipelineState:present_pipe];
+    float pv[8] = {0, 0, 0, 0, 0, 0, 1, 1};
+    [enc setVertexBytes:pv length:sizeof pv atIndex:0];
+    float pf[4] = {0, 0, 0, 0};
+    [enc setFragmentBytes:pf length:sizeof pf atIndex:0];
+    [enc setFragmentTexture:win atIndex:0];
+    [enc setFragmentSamplerState:present_sampler atIndex:0];
+    [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+    [enc endEncoding];
+    static dispatch_queue_t q;
+    if (!q) q = dispatch_queue_create("larecomp.blips", DISPATCH_QUEUE_SERIAL);
+    [cb addCompletedHandler:^(id<MTLCommandBuffer> done) {
+        (void)done;
+        dispatch_async(q, ^{ blip_measure(i, frame); });
+    }];
+}
+
 void backend_present_now(NvnTexture *t, uint64_t frame) {
     if (rq_stopping()) return;  // quitting: no drawable after the window closed (#40, as Vulkan)
     extern void renderer_submit(void);
@@ -1334,12 +1459,31 @@ void backend_present_now(NvnTexture *t, uint64_t frame) {
         renderer_set_scale((float)sx, (float)sy);
         id<MTLTexture> scene = nil;  // (the game image as drawn, for the menu: menu_set_scene)
         float scene_uv[4] = {0, 0, 1, 1};
+        // A frame missing much of its scene (draws whose shaders were still being built, renderer.m
+        // renderer_frame_incomplete): the last complete image is shown again - held - instead of the gaps (black).
+        // Each complete frame's image is copied for that (hold_tex, after the present pass below).
+        extern bool renderer_frame_incomplete(void);
+        static id<MTLTexture> hold_tex;
+        static float hold_fx = 1, hold_fy = 1;
+        bool hold = renderer_frame_incomplete() && hold_tex;
+        if (hold) { static int n; if (n++ < 50) LOG("[hold] frame %llu: the previous image shown again (scene still building)\n", (unsigned long long)frame); }
         if (b && b->tex) {
-            id<MTLTexture> src = raw_view(b->tex);
+            id<MTLTexture> src = raw_view(b->tex), game_src = src;
             // Dynamic: the image occupies the top-left part of the texture (its contents' scale over the allocation's)
             extern void renderer_texture_fraction(NvnTexture *t, float *fx, float *fy);
             float fx, fy;
             renderer_texture_fraction(t, &fx, &fy);
+            if (hold) src = hold_tex, fx = hold_fx, fy = hold_fy;
+            else {
+                if (!hold_tex || hold_tex.width != game_src.width || hold_tex.height != game_src.height || hold_tex.pixelFormat != game_src.pixelFormat) {
+                    MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:game_src.pixelFormat
+                                                 width:game_src.width height:game_src.height mipmapped:NO];
+                    td.usage = MTLTextureUsageShaderRead;
+                    td.storageMode = MTLStorageModePrivate;
+                    hold_tex = [dev newTextureWithDescriptor:td];
+                }
+                hold_fx = fx, hold_fy = fy;
+            }
             g_shot_frac[0] = fx; g_shot_frac[1] = fy;
             // SMAA (Video tab "Anti-aliasing"): first, at the game image's size (MetalFX then upscales its result)
             if (g_settings.antialias == AA_SMAA) {
@@ -1381,6 +1525,13 @@ void backend_present_now(NvnTexture *t, uint64_t frame) {
             [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
             scene = src;
             memcpy(scene_uv, crop, sizeof scene_uv);
+            if (!hold && hold_tex) {  // (after the pass that read it)
+                [enc endEncoding];
+                id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
+                [bl copyFromTexture:game_src toTexture:hold_tex];
+                [bl endEncoding];
+                enc = nil;
+            }
         }
         [enc endEncoding];
         menu_set_scene(scene, scene_uv);
@@ -1468,6 +1619,7 @@ void backend_present_now(NvnTexture *t, uint64_t frame) {
                 }];
             }
         }
+        blip_capture(cb, drawable.texture, frame);
         if (!(b && b->tex)) {  // (nothing drawn into the cleared drawable: a black frame would show)
             static int n;
             if (n++ < 20) LOG("[metal] present of frame %llu without an image (texture %p backend %p)\n", (unsigned long long)frame, t, b);
@@ -1624,7 +1776,7 @@ void ui_window_init(void) {
     // display), for ~2-3 fps near the limit at most (the game paces itself to vi.c's emulated 60 Hz vsync, and the two
     // clocks drift). LARECOMP_DISPLAY_SYNC=0: off (tests).
     layer.displaySyncEnabled = !getenv("LARECOMP_DISPLAY_SYNC") || atoi(getenv("LARECOMP_DISPLAY_SYNC")) != 0;
-    layer.framebufferOnly = getenv("LARECOMP_WINDOW_SHOT") ? NO : YES;
+    layer.framebufferOnly = getenv("LARECOMP_WINDOW_SHOT") || getenv("LARECOMP_BLIP_WATCH") ? NO : YES;
 }
 
 SDL_Window *ui_window(void) { return window; }

@@ -3190,7 +3190,10 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     if (!st.program || !gx || !gy || !gz) return;
     CsProg *cp = compute_program(st.program);
     if (!cp) return;
-    if (!cp->ready) { stat_skipped++; return; }
+    if (!cp->ready) {
+        if (getenv("LARECOMP_LOG_SKIPS")) { static int n; if (n++ < 200) LOG("[skips] compute not ready: cs %llx (frame %llu)\n", (unsigned long long)cp->code_addr, (unsigned long long)renderer_exec_frame()); }
+        stat_skipped++; return;
+    }
     static int trace = -1;
     if (trace < 0) trace = getenv("LARECOMP_TRACE_CS") != NULL;
 #define CST(x) do { if (trace) { fprintf(stderr, "[cs] %s\n", x); fflush(stderr); } } while (0)
@@ -4426,8 +4429,31 @@ static void snow_cover_check_timed(CmdRec *r, bool indexed, Prog *pr) {
     }
 }
 
+// A frame's draws (vertices, times instances) and those dropped because their program or pipeline was still being
+// built: when the camera brings in a new pipeline the ground and buildings share, every chunk of them was dropped and
+// the frame showed black under the HUD for a frame or two. Past a tenth of the frame, the present shows the previous
+// image instead (renderer_frame_incomplete, metal.m): a held frame rather than a flash; single objects still just
+// appear a few frames late. LARECOMP_NO_HOLD=1: off.
+static uint64_t g_frame_vtx, g_frame_notready_vtx;
+static uint64_t draw_vtx(CmdRec *r, bool indexed) {
+    uint64_t inst = indexed ? r->x[6] : r->x[4];
+    return r->x[2] * (inst ? inst : 1);
+}
+static void note_not_ready(CmdRec *r, bool indexed) { g_frame_notready_vtx += draw_vtx(r, indexed); }
+bool renderer_frame_incomplete(void) {
+    static int off = -1;
+    if (off < 0) off = getenv("LARECOMP_NO_HOLD") != NULL;
+    bool inc = !off && g_frame_vtx && g_frame_notready_vtx * 10 >= g_frame_vtx;
+    if (inc && getenv("LARECOMP_LOG_SKIPS"))
+        LOG("[hold] frame %llu: %llu of %llu vertices not ready\n", (unsigned long long)renderer_exec_frame(),
+            (unsigned long long)g_frame_notready_vtx, (unsigned long long)g_frame_vtx);
+    g_frame_vtx = g_frame_notready_vtx = 0;
+    return inc;
+}
+
 static void draw_one(CmdRec *r, bool indexed) {
     if (!st.program) { (stat_skipped++, skip_why(4013)); return; }
+    g_frame_vtx += draw_vtx(r, indexed);
     static bool logged_modes;
     if (!logged_modes) {
         logged_modes = true;
@@ -4450,16 +4476,16 @@ static void draw_one(CmdRec *r, bool indexed) {
             static uint64_t seen[256]; static int ns;
             uint64_t k = st.program->stages[0].code_addr * 31 + st.program->stages[1].code_addr;
             int i = 0; for (; i < ns && seen[i] != k; i++) {}
-            if (i == ns && ns < 256) { seen[ns++] = k; LOG("[skips] not ready: vs %llx fs %llx (%s)\n", (unsigned long long)st.program->stages[0].code_addr,
+            if (i == ns && ns < 256) { seen[ns++] = k; LOG("[skips] not ready (frame %llu): vs %llx fs %llx (%s)\n", (unsigned long long)renderer_exec_frame(), (unsigned long long)st.program->stages[0].code_addr,
                                                           (unsigned long long)st.program->stages[1].code_addr, !pr ? "no program" : pr->failed ? "failed" : "compiling"); }
         }
-        (stat_skipped++, skip_why(4027)); return;
+        note_not_ready(r, indexed); (stat_skipped++, skip_why(4027)); return;
     }
     g_stencil_slots = 0;
     if (pr->fi && (fkey.stencil_slots = stencil_slots_of(pr->fi))) {  // (a texture read as its stencil: another program)
         g_stencil_slots = fkey.stencil_slots;
         pr = get_program(st.program, &vkey, &fkey);
-        if (!pr || !pr->ready) { (stat_skipped++, skip_why(4029)); return; }
+        if (!pr || !pr->ready) { note_not_ready(r, indexed); (stat_skipped++, skip_why(4029)); return; }
     }
     {   // mirror mode (runtime/hle/mirror.c): the scene's composite into the window image is drawn mirrored - the
         // unblended full-screen draw sampling the scene image (the window images also serve as scratch
@@ -4752,7 +4778,7 @@ static void draw_one(CmdRec *r, bool indexed) {
             id done = ready_pipes[pk];
             if (done) { [ready_pipes removeObjectForKey:pk]; cache[pk] = done; pobj = done; }
         }
-        if (pobj == pending) { (stat_skipped++, skip_why(4185)); return; }
+        if (pobj == pending) { { if (getenv("LARECOMP_LOG_SKIPS")) { static int n; if (n++ < 300) LOG("[skips] pipeline not ready (frame %llu): fs %016llx count %llu rt %ux%u\n", (unsigned long long)renderer_exec_frame(), (unsigned long long)g_cur_fs_hash, (unsigned long long)r->x[2], st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->width : 0, st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->height : 0); } note_not_ready(r, indexed); (stat_skipped++, skip_why(4185)); } return; }
     }
     if (!pobj) {
         if (shader_rec_recording()) shader_rec_note(&rec);
@@ -4785,7 +4811,7 @@ static void draw_one(CmdRec *r, bool indexed) {
                 slow_note_build("pipeline", (uint64_t)((now_ms() - t0) * 1e6));
                 __atomic_fetch_add(&stat_compiles, 1, __ATOMIC_RELAXED);
             });
-            (stat_skipped++, skip_why(4218));
+            { if (getenv("LARECOMP_LOG_SKIPS")) { static int n; if (n++ < 300) LOG("[skips] pipeline not ready (frame %llu): fs %016llx count %llu rt %ux%u\n", (unsigned long long)renderer_exec_frame(), (unsigned long long)g_cur_fs_hash, (unsigned long long)r->x[2], st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->width : 0, st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->height : 0); } note_not_ready(r, indexed); (stat_skipped++, skip_why(4218)); }
             return;
         }
     }
