@@ -222,6 +222,8 @@ static int td_pending;  // textures with a recorded clear
 static bool opening_pass;  // begin_pass is ending the previous pass (end_pass must not open one)
 static void begin_pass(void);
 static void end_pass(void);
+static dispatch_queue_t compile_queue(const char *name);  // (background builds: further down)
+static void compile_async(dispatch_queue_t q, void (^job)(void));
 static NvnTexture *shader_texture_object(int stage, ShaderTexture *st_);
 
 static int td_defer_on(void) { static int v = -1; if (v < 0) { const char *e = ENV("LARECOMP_MTL_DEFER_CLEAR"); v = !e || atoi(e); } return v; }
@@ -1812,9 +1814,31 @@ static Prog *get_program(NvnProgram *p, ShaderKey *vkey, ShaderKey *fkey) {
     // First-time compiles take ~40 ms each on Metal: build off the render thread; draws using this program are
     // skipped until it's ready (the object appears a few frames later instead of the game stalling).
     static dispatch_queue_t q;
-    if (!q) q = dispatch_queue_create("larecomp.shaders", DISPATCH_QUEUE_CONCURRENT);
-    dispatch_async(q, ^{ compile_program(pr); });
+    if (!q) q = compile_queue("larecomp.shaders");
+    compile_async(q, ^{ compile_program(pr); });
     return pr;
+}
+
+// Background shader / pipeline builds. Another game: at utility priority and a few at a time - EoW meets dozens of new
+// shaders at once (a rift opening), and a burst on every core starved its audio thread (distortion while compiling).
+static dispatch_queue_t compile_queue(const char *name) {
+    dispatch_queue_attr_t attr = game_other() ? dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_CONCURRENT,
+                                                                                        QOS_CLASS_UTILITY, 0)
+                                              : DISPATCH_QUEUE_CONCURRENT;
+    return dispatch_queue_create(name, attr);
+}
+static void compile_async(dispatch_queue_t q, void (^job)(void)) {
+    static dispatch_semaphore_t slots;
+    if (!game_other()) { dispatch_async(q, job); return; }
+    if (!slots) {
+        long n = (long)[[NSProcessInfo processInfo] activeProcessorCount] / 4;
+        slots = dispatch_semaphore_create(n < 2 ? 2 : n);
+    }
+    dispatch_async(q, ^{
+        dispatch_semaphore_wait(slots, DISPATCH_TIME_FOREVER);
+        job();
+        dispatch_semaphore_signal(slots);
+    });
 }
 
 static id<MTLSamplerState> sampler_for(NvnSamplerDesc *d) {
@@ -2774,8 +2798,8 @@ static CsProg *compute_program(NvnProgram *p) {
     }
     // compiled off the render thread, as graphics programs are (get_program): the first dispatches are skipped
     static dispatch_queue_t q;
-    if (!q) q = dispatch_queue_create("larecomp.compute", DISPATCH_QUEUE_CONCURRENT);
-    dispatch_async(q, ^{ compile_compute(cp); });
+    if (!q) q = compile_queue("larecomp.compute");
+    compile_async(q, ^{ compile_compute(cp); });
     return cp;
 }
 
@@ -4180,8 +4204,8 @@ static void draw_one(CmdRec *r, bool indexed) {
             NSString *k = [pk copy];
             double t0 = now_ms();
             static dispatch_queue_t pq;  // (off the render thread; through the binary archive)
-            if (!pq) pq = dispatch_queue_create("larecomp.pipelines", DISPATCH_QUEUE_CONCURRENT);
-            dispatch_async(pq, ^{
+            if (!pq) pq = compile_queue("larecomp.pipelines");
+            compile_async(pq, ^{
                 NSError *e = nil;
                 id<MTLRenderPipelineState> ps = archive_render_pipeline(pd, &e);
                 if (!ps) { static int n; if (n++ < 10) LOG("[metal] pipeline failed: %s\n", e.localizedDescription.UTF8String); }
