@@ -1822,6 +1822,32 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         if (!c->glsl) sp(&c->body, "    threadgroup_barrier(mem_flags::mem_threadgroup);\n");
         else if (c->stage == STAGE_COMPUTE) sp(&c->body, "    barrier();\n");
         else sp(&c->body, "    /* bar */\n");  // GLSL barrier() is compute / tessellation only
+    } else if (!c->glsl && OPM(0xebf8000000000000ull, 0xfff8000000000000ull) && bits(w, 20, 3) < 2) {
+        // RED (Metal; Ryujinx InstRed): atomic op of R[b] into global memory at R[a](:R[a+1] with .E) + imm20, 32-bit
+        int op = (int)bits(w, 23, 3), sz = (int)bits(w, 20, 3), rb = (int)(w & 0xff);
+        int64_t off = sbits(w, 28, 20);
+        bool e64 = bits(w, 48, 1);
+        c->info->uses_gmem = true;
+        c->uses_gmem_store = true;
+        c->info->uses_gmem_store = true;
+        char addr[256];
+        if (a == RZ) sprintf(addr, "ulong(%lld)", (long long)off);
+        else if (e64) sprintf(addr, "((ulong(%s) << 32 | ulong(%s)) + ulong(%lld))", R(a + 1), R(a), (long long)off);
+        else sprintf(addr, "(ulong(%s) + ulong(%lld))", R(a), (long long)off);
+        sp(&c->body, "    { ulong ga = %s - 0x%llxul;\n", addr, (unsigned long long)maxwell_gmem_base);
+        sp(&c->body, "      if (ga < 0x%llxul && !(ga & 3ul)) {\n", (unsigned long long)maxwell_gmem_size);
+        const char *ty = sz == 1 ? "int" : "uint";
+        sp(&c->body, "        device atomic_%s *p_ = (device atomic_%s *)(gmem + ga); %s v_ = %s(%s);\n", ty, ty, ty, ty, R(rb));
+        static const char *const fn[8] = {"add", "min", "max", NULL, NULL, "and", "or", "xor"};
+        if (fn[op]) {
+            sp(&c->body, "        atomic_fetch_%s_explicit(p_, v_, memory_order_relaxed);\n", fn[op]);
+        } else {  // INC / DEC (wrapping at v_, as CUDA's atomicInc / atomicDec)
+            sp(&c->body, "        %s o_ = atomic_load_explicit(p_, memory_order_relaxed), n_;\n", ty);
+            sp(&c->body, "        do { n_ = %s; } while (!atomic_compare_exchange_weak_explicit(p_, &o_, n_, "
+                         "memory_order_relaxed, memory_order_relaxed));\n",
+               op == 3 ? "o_ >= v_ ? 0 : o_ + 1" : "(o_ == 0 || o_ > v_) ? v_ : o_ - 1");
+        }
+        sp(&c->body, "      }\n    }\n");
     } else if (maxwell_skip_unsupported_stores && (OPM(0xebf8000000000000ull, 0xfff8000000000000ull) ||  // RED
                                                    OPM(0xeb20000000000000ull, 0xfff8000000000000ull))) {  // SUST.B
         // (experimental, other games: global reductions and surface stores aren't translated yet - skipped, so the rest
