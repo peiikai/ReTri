@@ -222,6 +222,25 @@ static int td_pending;  // textures with a recorded clear
 static bool opening_pass;  // begin_pass is ending the previous pass (end_pass must not open one)
 static void begin_pass(void);
 static void end_pass(void);
+// (debug) LARECOMP_LOG_SKIPS=1: which skip in the draw path drops draws (by source line), every ~2 s
+static void skip_why(int line) {
+    static int on = -1;
+    if (on < 0) on = getenv("LARECOMP_LOG_SKIPS") != NULL;
+    if (!on) return;
+    static int lines[32], counts[32], n;
+    static uint64_t last;
+    int k = 0;
+    for (; k < n; k++) if (lines[k] == line) break;
+    if (k == n && n < 32) lines[n++] = line;
+    if (k < 32) counts[k]++;
+    uint64_t now = plat_now_ns();
+    if (now - last > 2000000000ull) {
+        last = now;
+        LOG("[skips]");
+        for (int i = 0; i < n; i++) if (counts[i]) LOG(" line %d: %d", lines[i], counts[i]), counts[i] = 0;
+        LOG("\n");
+    }
+}
 static dispatch_queue_t compile_queue(const char *name);  // (background builds: further down)
 static void compile_async(dispatch_queue_t q, void (^job)(void));
 static NvnTexture *shader_texture_object(int stage, ShaderTexture *st_);
@@ -1819,8 +1838,8 @@ static Prog *get_program(NvnProgram *p, ShaderKey *vkey, ShaderKey *fkey) {
     return pr;
 }
 
-// Background shader / pipeline builds. Another game: at utility priority and a few at a time - EoW meets dozens of new
-// shaders at once (a rift opening), and a burst on every core starved its audio thread (distortion while compiling).
+// Background shader / pipeline builds. Another game: at utility priority - EoW meets dozens of new shaders at once (a rift
+// opening), and a burst at the game's own priority starved its audio thread (distortion while compiling).
 static dispatch_queue_t compile_queue(const char *name) {
     dispatch_queue_attr_t attr = game_other() ? dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_CONCURRENT,
                                                                                         QOS_CLASS_UTILITY, 0)
@@ -1828,17 +1847,9 @@ static dispatch_queue_t compile_queue(const char *name) {
     return dispatch_queue_create(name, attr);
 }
 static void compile_async(dispatch_queue_t q, void (^job)(void)) {
-    static dispatch_semaphore_t slots;
-    if (!game_other()) { dispatch_async(q, job); return; }
-    if (!slots) {
-        long n = (long)[[NSProcessInfo processInfo] activeProcessorCount] / 4;
-        slots = dispatch_semaphore_create(n < 2 ? 2 : n);
-    }
-    dispatch_async(q, ^{
-        dispatch_semaphore_wait(slots, DISPATCH_TIME_FOREVER);
-        job();
-        dispatch_semaphore_signal(slots);
-    });
+    // (no cap on how many at once: a pipeline build waits for other builds, and capped, EoW's town stayed black - every
+    // slot held by a build waiting for one that couldn't start. The queues' utility priority keeps the game first.)
+    dispatch_async(q, job);
 }
 
 static id<MTLSamplerState> sampler_for(NvnSamplerDesc *d) {
@@ -4010,7 +4021,7 @@ static void snow_cover_check_timed(CmdRec *r, bool indexed, Prog *pr) {
 }
 
 static void draw_one(CmdRec *r, bool indexed) {
-    if (!st.program) { stat_skipped++; return; }
+    if (!st.program) { (stat_skipped++, skip_why(4013)); return; }
     static bool logged_modes;
     if (!logged_modes) {
         logged_modes = true;
@@ -4024,7 +4035,7 @@ static void draw_one(CmdRec *r, bool indexed) {
     for (int i = 0; i < st.nattrib; i++) vkey.attr_kind[i] = (uint8_t)attr_kind(st.attrib[i] & 0xFF);
     for (int i = 0; i < st.rt.ncolor; i++) if (st.rt.color[i]) fkey.rt_kind[i] = (uint8_t)rt_kind(st.rt.color[i]->format);
     Prog *pr = get_program(st.program, &vkey, &fkey);
-    if (!pr || !pr->ready) { stat_skipped++; return; }
+    if (!pr || !pr->ready) { (stat_skipped++, skip_why(4027)); return; }
     {   // mirror mode (runtime/hle/mirror.c): the scene's composite into the window image is drawn mirrored - the
         // unblended full-screen draw sampling the scene image (the window images also serve as scratch
         // targets earlier in the frame: those draws sample much smaller images; the HUD after it blends)
@@ -4045,7 +4056,7 @@ static void draw_one(CmdRec *r, bool indexed) {
             vkey.flip_x = fkey.flip_x = true;  // composite reading pixel positions; get_program keys on vkey)
             wx_mirror = true;
             pr = get_program(st.program, &vkey, &fkey);
-            if (!pr || !pr->ready) { stat_skipped++; return; }
+            if (!pr || !pr->ready) { (stat_skipped++, skip_why(4048)); return; }
         }
     }
     {   // Interiors/dungeons draw a 16:9 backdrop quad over the still-rendered overworld: frames that
@@ -4069,7 +4080,7 @@ static void draw_one(CmdRec *r, bool indexed) {
                     while (*p == ',') p++;
                 }
             }
-            for (int i = 0; i < nskip; i++) if (last_hash == skip[i]) { stat_skipped++; return; }
+            for (int i = 0; i < nskip; i++) if (last_hash == skip[i]) { (stat_skipped++, skip_why(4072)); return; }
             static uint64_t skip_at[16];  // LARECOMP_SKIP_FS=a1,a2,...: the same by the fragment shader's code address
             static int nat = -1;
             if (nat < 0) {
@@ -4094,11 +4105,11 @@ static void draw_one(CmdRec *r, bool indexed) {
                                 (unsigned long long)st.vbuf[k].size, st.stream[k][0], st.stream[k][1]);
                     LOG("\n");
                 }
-                stat_skipped++;
+                (stat_skipped++, skip_why(4097));
                 return;
             }
             extern bool pot_level_active(void);
-            if (last_hash == 0xa2177dbb72197bd9ull && pot_level_active()) { stat_skipped++; return; }  // item twinkle
+            if (last_hash == 0xa2177dbb72197bd9ull && pot_level_active()) { (stat_skipped++, skip_why(4101)); return; }  // item twinkle
         }
         g_cur_fs_hash = last_hash;
         extern void widescreen_backdrop_seen(uint64_t hash);
@@ -4182,7 +4193,7 @@ static void draw_one(CmdRec *r, bool indexed) {
             id done = ready_pipes[pk];
             if (done) { [ready_pipes removeObjectForKey:pk]; cache[pk] = done; pobj = done; }
         }
-        if (pobj == pending) { stat_skipped++; return; }
+        if (pobj == pending) { (stat_skipped++, skip_why(4185)); return; }
     }
     if (!pobj) {
         if (shader_rec_recording()) shader_rec_note(&rec);
@@ -4215,11 +4226,11 @@ static void draw_one(CmdRec *r, bool indexed) {
                 slow_note_build("pipeline", (uint64_t)((now_ms() - t0) * 1e6));
                 __atomic_fetch_add(&stat_compiles, 1, __ATOMIC_RELAXED);
             });
-            stat_skipped++;
+            (stat_skipped++, skip_why(4218));
             return;
         }
     }
-    if (pobj == [NSNull null]) { stat_skipped++; return; }
+    if (pobj == [NSNull null]) { (stat_skipped++, skip_why(4222)); return; }
     pipe = pobj;
     pipe_tab[pslot].key = phash;
     pipe_tab[pslot].pipe = (__bridge void *)pipe;  // retained by the cache dictionary
@@ -4370,7 +4381,7 @@ static void draw_one(CmdRec *r, bool indexed) {
     bind_textures(0, pr->vi);
     bind_textures(1, pr->fi);
     extern bool pets_hide_item_cursor(void);  // (the cursor is on the companion card: runtime/hle/pets.c)
-    if (draw_item_cursor && pets_hide_item_cursor()) { stat_skipped++; return; }
+    if (draw_item_cursor && pets_hide_item_cursor()) { (stat_skipped++, skip_why(4373)); return; }
     vp_sx = pass_sx; vp_sy = pass_sy; vp_ox = 0; vp_oy = 0;
     if (fabsf(pass_sx - pass_sy) > 0.01f * pass_sy && st.rt.ncolor && renderer_texture_presented(st.rt.color[0])) {
         // Draws into the swapchain image: draws that sample the full-size reshaped scene (the final
@@ -4640,7 +4651,7 @@ static void draw_one(CmdRec *r, bool indexed) {
             id<MTLBuffer> ib = expand_indices(mode, count, NULL, 0, first, &n);
             [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:n indexType:MTLIndexTypeUInt32 indexBuffer:ib
                      indexBufferOffset:0 instanceCount:inst baseVertex:0 baseInstance:base_inst];
-        } else { stat_skipped++; return; }
+        } else { (stat_skipped++, skip_why(4643)); return; }
     } else {
         uint32_t itype = (uint32_t)r->x[1], count = (uint32_t)r->x[2];
         uint64_t iaddr = r->x[3];
