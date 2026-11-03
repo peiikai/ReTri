@@ -91,17 +91,12 @@ extern "C" void menu_test_open(void) {
 void menu_tabs_focus(bool first_tab);
 static void set_open(bool open) {
     if (open == g_open.load()) return;
-    if (open && game_other()) {  // (another game: the menu's tabs read LA's game state - no menu until it has a safe one)
-        static int nlog;
-        if (!nlog++) LOG("[menu] not available for this game yet\n");
-        return;
-    }
     g_open.store(open);
     menu_sfx_play(open ? MENU_SFX_OPEN : MENU_SFX_CLOSE);
     input_reset();  // nothing held while the menu had focus leaks into the game
     bind_capture_cancel();
     if (open) {
-        save_editor_on_open();
+        if (!game_other()) save_editor_on_open();  // (LA's save; another game has only the general tabs)
         static bool opened;  // the controller's cursor: the first tab (Controls) the first time this session, later the
         menu_tabs_focus(!opened);  // selected one
         opened = true;
@@ -490,10 +485,12 @@ static void tab_display(void) {
     float scale = ImGui::GetFontSize() / 34;
     opt_begin("##video", scale);
     opt_section("Display");
+    bool la = !game_other();  // (another game on the engine: only the settings that aren't LA's own features)
     const char *aspects[] = {LN("Unlocked"), LN("Original 16:9")};
-    opt_choice("Aspect ratio", &g_settings.aspect, aspects, 2, ASPECT_UNLOCKED,
-               "Unlocked fills the window and shows more of the island on wide screens, up to ultrawide. Original keeps "
-               "the game's 16:9 view with bars.");
+    if (la)
+        opt_choice("Aspect ratio", &g_settings.aspect, aspects, 2, ASPECT_UNLOCKED,
+                   "Unlocked fills the window and shows more of the island on wide screens, up to ultrawide. Original keeps "
+                   "the game's 16:9 view with bars.");
     bool fs = g_settings.fullscreen;
     if (opt_toggle("Fullscreen", &fs, false, "Fills the screen. You can also press F11, Alt+Enter or Cmd+Ctrl+F.")) {
         g_settings.fullscreen = fs;
@@ -562,11 +559,13 @@ static void tab_display(void) {
     opt_choice("Anti-aliasing", &g_settings.antialias, aa, 2, AA_OFF,
                "Smooths jagged edges. SMAA keeps textures sharp and helps most at a lower internal resolution.");
 
-    opt_section("Game");
-    opt_toggle("Remove blur", &g_settings.blur_removal, false,
-               "Turns off the tilt-shift blur at the top and bottom of the screen.");
-    opt_toggle("Hide Hero Mode icon", &g_settings.hide_hero_icon, false,
-               "Hides the Hero Mode emblem in the corner of the screen while playing a Hero Mode file.");
+    if (la) {
+        opt_section("Game");
+        opt_toggle("Remove blur", &g_settings.blur_removal, false,
+                   "Turns off the tilt-shift blur at the top and bottom of the screen.");
+        opt_toggle("Hide Hero Mode icon", &g_settings.hide_hero_icon, false,
+                   "Hides the Hero Mode emblem in the corner of the screen while playing a Hero Mode file.");
+    }
     opt_end();
 }
 
@@ -677,7 +676,7 @@ static void tab_quit(float scale, bool in_game) {
     opt_section("Quit");
     if (!ask) {
         if (!in_game) opt_disable_next();  // (already on it)
-        if (opt_action("Quit to start screen", "", in_game ? d1 : "You're on the start screen.")) ask = 1;
+        if (!game_other() && opt_action("Quit to start screen", "", in_game ? d1 : "You're on the start screen.")) ask = 1;
         if (opt_action("Quit to desktop", "", d2)) ask = 2;
     } else {
         if (opt_action(ask == 1 ? "Yes, quit to start screen" : "Yes, quit to desktop", "", ask == 1 ? d1 : d2)) {
@@ -919,7 +918,8 @@ static void tabs_body(float scale, bool in_game, void (*prelaunch)(float)) {
     static const int order[] = {8, 0, 1, 6, 7, 3, 5, 4, 2, 9};  // Controls, Video, Audio, Gameplay, Cosmetics, Randomizer,
                                                                 // Cheats, Warp, Save Editor, Quit (ids stay: test hooks)
     for (int i : order)  // (Quit: in game only - the start screen has its own QUIT, and an eleventh tab cut names short)
-        if (i != 9 || !prelaunch) tabs[ntabs++] = {names[i], i, in_game || (i != 2 && i != 4 && i != 5)};
+        if ((i != 9 || !prelaunch) && (!game_other() || i == 8 || i == 0 || i == 1 || i == 9))  // (another game: Controls,
+            tabs[ntabs++] = {names[i], i, in_game || (i != 2 && i != 4 && i != 5)};          // Video, Audio, Quit)
     int cur = 0;  // g_tab / g_tab_request hold ids
     for (int i = 0; i < ntabs; i++) if (tabs[i].id == g_tab) cur = i;
     if (!tabs[cur].on) cur = 0;

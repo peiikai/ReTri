@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../game_addresses.h"
 #include "imgui.h"
 #include "imgui_internal.h"  // (SetFocusID, NavCursorVisible)
 #include "i18n.h"
@@ -270,13 +271,14 @@ extern "C" void controls_tab_draw(float scale) {
                    "permission."))
         input_apply_background();
 
-    opt_section("Movement");
-    {
+    bool la = !game_other();  // (another game on the engine: LA's own features stay out)
+    if (la) {
+        opt_section("Movement");
         static const char *const modes[] = {LN("Nothing"), LN("Items"), LN("Movement")};
         opt_choice("D-pad", &g_settings.dpad_mode, modes, 3, DPAD_NOTHING, "What the D-pad does in play.");
+        opt_toggle("360-degree movement", &g_settings.move_360, false,
+                   "Link walks in the exact direction of the stick instead of snapping to 8 directions.");
     }
-    opt_toggle("360-degree movement", &g_settings.move_360, false,
-               "Link walks in the exact direction of the stick instead of snapping to 8 directions.");
 
     opt_section("Controller");
     opt_toggle("Rumble", &g_settings.rumble, true, "Controller vibration.");
@@ -289,8 +291,8 @@ extern "C" void controls_tab_draw(float scale) {
             g_settings.rumble_strength = (i + 1) * 25;
         opt_indent(-1);
     }
-    opt_toggle("Controller light", &g_settings.controller_light, true, "The light bar shows Link's health.");
-    {
+    if (la) opt_toggle("Controller light", &g_settings.controller_light, true, "The light bar shows Link's health.");
+    if (la) {
         static const char *const fam[] = {LN("Nintendo"), LN("Xbox"), LN("PlayStation")};
         char autol[64];  // (in the menus' language already: the row leaves it as it is)
         snprintf(autol, sizeof autol, L("Auto (%s)"), L(fam[input_pad_family() % 3]));
