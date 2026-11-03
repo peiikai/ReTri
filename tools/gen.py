@@ -603,6 +603,7 @@ def main():
                     start_set.add(t)
     scanned = {}
     rounds = 0
+    orphans_done = args.game == 'la'
     while True:
         rounds += 1
         order = sorted(start_set)
@@ -613,6 +614,25 @@ def main():
             if key not in scanned:
                 scanned[key] = m.scan(a, end)
             new |= scanned[key][1] - start_set
+        if not new and not orphans_done:
+            # (another game) a 16-byte-aligned address right after an unconditional branch / return that nothing in its
+            # function reaches (no branch, no jump-table case) is a function of its own: EoW calls some only through
+            # pointers built at run time - no relocation, ADR or eh_frame entry names them (a crash at main+0x181c250)
+            orphans_done = True
+            labels = set()
+            for i, a in enumerate(order):
+                end = order[i + 1] if i + 1 < len(order) else m.hi
+                lab, ext, tables = scanned[(a, end)]
+                labels |= lab
+                if any(v == 'all' for v in tables.values()):
+                    labels |= set(range(a, end, 4))  # (an unresolved table may reach anything in it)
+            for i, w in enumerate(m.words):
+                if (w & 0xFC000000) == 0x14000000 or (w & 0xFFFFFC1F) in (0xD61F0000, 0xD65F0000):
+                    t = m.lo + (i + 1) * 4
+                    if (t % 16 == 0 and i + 1 < len(m.words) and m.words[i + 1] not in (0, 0xD503201F)
+                            and t not in labels and t not in start_set):
+                        new.add(t)
+            print(f'{args.name}: {len(new)} unreferenced functions added', file=sys.stderr)
         if not new:
             break
         start_set |= new

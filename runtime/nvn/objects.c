@@ -709,7 +709,7 @@ NVN(nvnTexturePoolRegisterTexture) { register_texture(c); }
 NVN(nvnTexturePoolRegisterImage) {
     register_texture(c);
     NvnTexture *t = HOST(NvnTexture, A(2));
-    if (t && game_other() && !(getenv("LARECOMP_SUST") && !atoi(getenv("LARECOMP_SUST")))) t->image_use = true;  // (as SUST.B)
+    if (t && game_other() && getenv("LARECOMP_SUST") && atoi(getenv("LARECOMP_SUST"))) t->image_use = true;  // (as SUST.B)
     static int nlog;
     if (game_other() && nlog++ < 12)
         LOG("[images] RegisterImage id %d tex %p (%ux%u fmt %#x) view %s level %u\n", (int)A(1), (void *)t, t ? t->width : 0,

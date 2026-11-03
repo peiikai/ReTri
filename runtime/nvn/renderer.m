@@ -2953,7 +2953,8 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
             id<MTLTexture> view = nil;
             if (h && st.tpool && tic < (uint32_t)st.tpool->count) {
                 NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
-                if (e->tex && !e->tex->image_use) e->tex->image_use = true;  // (bound as an image: allocated writable from now on)
+                if (e->tex && !e->tex->image_use && getenv("LARECOMP_SUST") && atoi(getenv("LARECOMP_SUST")))
+                    e->tex->image_use = true;  // (bound as an image: allocated writable from now on)
                 id<MTLTexture> base = e->tex ? renderer_texture(e->tex, nil, true) : nil;
                 if (base && (base.usage & MTLTextureUsageShaderWrite)) {
                     // (the registration's view: its first level, and its layers - EoW binds each cube face as an image)
