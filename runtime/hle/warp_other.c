@@ -152,6 +152,8 @@ static void sptr_release(Cpu *c, uint64_t ctrl) {
     guest_call(c, 0x70027deed0ull);
 }
 
+static bool g_kept_flow;
+static bool kept_flow_any(void) { return g_kept_flow; }
 static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
     static uint64_t m;  // scratch: 0x000 path text, 0x100 path view, 0x110 entry view, 0x120 level view, 0x130 locator
     // view, 0x140 resource out, 0x150 flow out, 0x160 event out, 0x170 params, 0x180 start out, 0x200 level text,
@@ -185,10 +187,20 @@ static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
         LOG("[warp] event file %s: %llx (manager %llx, its +0x110 %llx / %llx)\n", path, (unsigned long long)res, (unsigned long long)mgr,
             mgr ? (unsigned long long)*(uint64_t *)(uintptr_t)(mgr + 0x110) : 0ull, mgr ? (unsigned long long)*(uint64_t *)(uintptr_t)(mgr + 0x118) : 0ull);
     }
-    if (!res) alt = !alt;  // (the other flow next time)
-    if (res) {
-        call(c, 0x700038eba0ull, res, 0, 0, 0);
-        call(c, 0x70006692e0ull, m + 0x150, m + 0x140, 0, 0);       // the flow
+    if (!res && !kept_flow_any()) alt = !alt;  // (the other flow next time)
+    // (the map's warp flow from the first load is kept - our reference holds it - and reused: after the first warp the
+    // resource manager no longer hands the file out)
+    static uint64_t kept_flow[2];
+    if (!res && kept_flow[0] && !alt) {
+        q[0x150 / 8] = kept_flow[0], q[0x158 / 8] = kept_flow[1];
+        LOG("[warp] reusing the map-warp flow %llx\n", (unsigned long long)kept_flow[0]);
+    }
+    if (res || (q[0x150 / 8] && !alt)) {
+        if (res) {
+            call(c, 0x700038eba0ull, res, 0, 0, 0);
+            call(c, 0x70006692e0ull, m + 0x150, m + 0x140, 0, 0);       // the flow
+            if (!alt && !kept_flow[0]) kept_flow[0] = q[0x150 / 8], kept_flow[1] = q[0x158 / 8], g_kept_flow = true;
+        }
         call(c, 0x700159f940ull, m + 0x160, m + 0x150, m + 0x110, 0);  // its entry: the event
         uint64_t ev = q[0x160 / 8];
         LOG("[warp] flow %llx event %llx\n", (unsigned long long)q[0x150 / 8], (unsigned long long)ev);
