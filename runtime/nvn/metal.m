@@ -258,6 +258,9 @@ static bool tex_scalable(const NvnTexture *t) {
     if (t->target != 1 || t->samples > 1 || !(t->flags & 8) || t->width < 32 || t->height < 16) return false;
     float a = (float)t->width / (float)t->height;
     if (!(a > 1.74f && a < 1.81f)) return false;  // 16:9 (1920x1080 and its fractions, 704x396, 60x33...)
+    // (another game: not the small ones - EoW rasterises its lights into a 64x36 grid whose cells the fragment shaders
+    // address by pixel; at half scale only every other cell got its bits: a checkerboard of lit cells indoors)
+    if (game_other() && t->width < 128) return false;
     return !tex_guest_sized_ao(t);
 }
 

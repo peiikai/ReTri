@@ -216,6 +216,14 @@ static const char *operand_c_for_ffma(Ctx *c, uint64_t w, char *buf, const char 
     return reg(c, (int)bits(w, 39, 8), buf);
 }
 
+// Vertex functions have no SIMD-group functions: lane id, VOTE and SHFL act as if each lane were alone. (debug)
+// LARECOMP_FS_NO_SIMD=1: fragment shaders the same (does a SIMD-group operation change what a pixel gets?)
+static bool lane_local(const Ctx *c) {
+    static int fs = -1;
+    if (fs < 0) fs = getenv("LARECOMP_FS_NO_SIMD") ? 1 : 0;
+    return c->stage == STAGE_VERTEX || (fs && c->stage == STAGE_FRAGMENT);
+}
+
 static void set_reg(Ctx *c, int r, const char *expr) {
     if (r == RZ) return;
     c->reg_used[r] = 1;
@@ -1324,7 +1332,7 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
     } else if (OPM(0x50d8000000000000ull, 0xfff8000000000000ull)) {  // VOTE (Ryujinx InstVote): ALL / ANY / EQ, Rd the ballot
         // (vertex functions have no SIMD-group functions: per lane, ALL / ANY the source predicate, EQ true, the ballot bit 0)
         int mode = (int)bits(w, 48, 2), vp = (int)bits(w, 45, 3);
-        bool simd = c->stage != STAGE_VERTEX;
+        bool simd = !lane_local(c);
         sp(&c->body, "    { bool vs_ = %s;\n", P((int)bits(w, 39, 3), bits(w, 42, 1)));
         if (vp != PT) {
             c->pred_used[vp] = 1;
@@ -1484,9 +1492,12 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         case 4: sp(&c->body, "      uint cc_ = %s + (xbu << 16);\n", cv); break;                              // cbcc
         default: sp(&c->body, "      uint cc_ = %s;\n", cv);                                                  // cfull
         }
-        if (ext) sp(&c->body, "      uint res = prod + (cc & 1u);\n");
-        else sp(&c->body, "      uint res = prod + cc_;\n");
-        if (wcc) sp(&c->body, "      cc = (res < prod) ? 1u : 0u;\n");
+        // (.X adds the carry in as well as C - it used to replace C: Ryujinx EmitXmad)
+        // (32-bit only: 64-bit sums in this common op made Metal's compiler take ~30 s per shader)
+        sp(&c->body, "      uint res = prod + cc_;\n");
+        if (wcc) sp(&c->body, "      uint co_ = res < prod ? 1u : 0u;\n");
+        if (ext) sp(&c->body, "      { uint t_ = res; res += cc & 1u;%s }\n", wcc ? " co_ |= res < t_ ? 1u : 0u;" : "");
+        if (wcc) sp(&c->body, "      cc = co_;\n");
         if (mrg) sp(&c->body, "      res = (res & 0xFFFFu) | (xbu << 16);\n");
         if (d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      r%d = res;\n", d); }
         sp(&c->body, "    }\n");
@@ -1521,7 +1532,7 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
             // came out 32 times too bright - the town dull, flashing lit only while a stale copy was read)
             static const char *const lm[] = {"(1u << lane)", "((1u << lane) - 1u)", "(((1u << lane) << 1u) - 1u)",
                                              "(~(((1u << lane) << 1u) - 1u))", "(~((1u << lane) - 1u))"};
-            if (c->stage == STAGE_VERTEX) set_reg(c, d, sr == 0x00 ? "0u" : sr == 0x38 || sr == 0x3a || sr == 0x3c ? "1u" : sr == 0x39 ? "0u" : "0xFFFFFFFEu");
+            if (lane_local(c)) set_reg(c, d, sr == 0x00 ? "0u" : sr == 0x38 || sr == 0x3a || sr == 0x3c ? "1u" : sr == 0x39 ? "0u" : "0xFFFFFFFEu");
             else { c->uses_lane = true; set_reg(c, d, sr == 0x00 ? "lane" : lm[sr - 0x38]); }
             break;
         }
@@ -1799,7 +1810,7 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         char bb[32];
         const char *bv = bits(w, 28, 1) ? (sprintf(bb, "%uu", (unsigned)bits(w, 20, 5)), bb) : R((int)bits(w, 20, 8));
         int pd = (int)bits(w, 48, 3);
-        if (c->stage == STAGE_VERTEX) {
+        if (lane_local(c)) {
             set_reg(c, d, R(a));  // no SIMD-group functions in vertex functions: lane-local value
         } else if (c->glsl) {  // a quad xor (lane mask < 4) is the subgroup xor within the quad
             static const char *const fn[] = {"subgroupShuffle", "subgroupShuffleUp", "subgroupShuffleDown", "subgroupShuffleXor"};

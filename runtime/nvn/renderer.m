@@ -2591,17 +2591,23 @@ static void snap_note_vertex_bind(uint64_t addr, uint64_t size) {  // (LARECOMP_
 // or dispatch that reads one later - as storage or as a uniform buffer - reads it in place, not from a copy taken at
 // translation, when the GPU hasn't run the dispatch yet (EoW: its culling dispatches write the shadow cascades'
 // matrices and the instance lists, which later draws read as uniforms / storage). Most recent first; 64 kept.
-static struct { uint64_t addr, size; } g_gw[64];
+static struct { uint64_t addr, size; bool always; } g_gw[64];
 static uint64_t g_gw_min = 0x480;  // (debug: LARECOMP_GW_MIN=<hex>)
 static int g_ngw;
-static void gw_note(uint64_t addr, uint64_t size) {
+static void gw_note_kind(uint64_t addr, uint64_t size, bool always);
+static void gw_note(uint64_t addr, uint64_t size) { gw_note_kind(addr, size, false); }
+// (another game) a range a draw's shader stores into (EoW: two fragment shaders rasterise the lights into a 64x36
+// grid of bit masks with atomic ORs, which the lit draws then read): always in place, the writer's binding and the
+// readers' - a copy each made the writes land in a copy nobody read, and the lit draws read another (zeros): no point
+// lights at all, interiors dark
+static void gw_note_kind(uint64_t addr, uint64_t size, bool always) {
     { static int once; if (!once++ && ENV("LARECOMP_GW_MIN")) g_gw_min = strtoull(ENV("LARECOMP_GW_MIN"), NULL, 16); }
     for (int i = 0; i < g_ngw; i++)
-        if (g_gw[i].addr == addr && g_gw[i].size == size) return;
+        if (g_gw[i].addr == addr && g_gw[i].size == size) { g_gw[i].always |= always; return; }
     if (ENV("LARECOMP_LOG_GW")) { static int n; if (n++ < 60) LOG("[gw] compute writes %llx+%llu\n", (unsigned long long)addr, (unsigned long long)size); }
     if (g_ngw < 64) g_ngw++;
     memmove(&g_gw[1], &g_gw[0], sizeof g_gw[0] * (size_t)(g_ngw - 1));
-    g_gw[0].addr = addr, g_gw[0].size = size;
+    g_gw[0].addr = addr, g_gw[0].size = size, g_gw[0].always = always;
 }
 // LARECOMP_INDIRECT_GPU=1 (experimental, other games): indirect draws on the GPU with its own counts, no flush, and
 // GPU-written ranges read in place (g_gw). 60 fps where the flushes cost half the frame rate, but the shadows are
@@ -2612,10 +2618,15 @@ static bool indirect_gpu(void) {
     if (on < 0) on = ENV("LARECOMP_INDIRECT_GPU") && atoi(ENV("LARECOMP_INDIRECT_GPU")) ? 1 : 0;
     return on;
 }
+static bool gw_on(void) {  // (the in-place reads: with the GPU path, or LARECOMP_GW=1)
+    static int on = -1;
+    if (on < 0) on = indirect_gpu() || (ENV("LARECOMP_GW") && atoi(ENV("LARECOMP_GW")));
+    return on;
+}
 static bool gw_hit(uint64_t addr, uint64_t size) {
-    if (!indirect_gpu()) return false;
+    bool on = gw_on();
     for (int i = 0; i < g_ngw; i++)
-        if (addr < g_gw[i].addr + g_gw[i].size && g_gw[i].addr < addr + size) return true;
+        if ((on || g_gw[i].always) && addr < g_gw[i].addr + g_gw[i].size && g_gw[i].addr < addr + size) return true;
     return false;
 }
 // An indirect draw being translated (CMD_DRAW_*_INDIRECT): its arguments' guest address, and the index buffer's
@@ -2739,6 +2750,29 @@ static uint64_t snap_storage(uint64_t addr, uint64_t size, bool cs_slot) {
 }
 
 static void bind_cbufs(int stage, ShaderInfo *si) {
+    {   // (debug) LARECOMP_DUMP_DRAW=<fs code addr>,<frame>: that draw's storage buffers and uniform buffer 4 (fragment)
+        static uint64_t want_fs = 1; static long want_f; static int done;
+        if (want_fs == 1) { const char *e = ENV("LARECOMP_DUMP_DRAW"); want_fs = 0; if (e) sscanf(e, "%llx,%ld", (unsigned long long *)&want_fs, &want_f); }
+        bool match = want_fs == 2 ? st.sbuf[1][0].addr && st.sbuf[1][1].addr && st.ubuf[1][4 - cbuf_base].size == 1136  // (2: the first draw with the lit-grid shape)
+                                  : st.program && st.program->stages[1].code_addr == want_fs;
+        if (want_fs && !done && stage == 1 && match && (long)renderer_exec_frame() >= want_f) {
+            LOG("[dumpdraw] fs %llx frame %llu\n", st.program ? (unsigned long long)st.program->stages[1].code_addr : 0ull, (unsigned long long)renderer_exec_frame());
+            done = 1;
+            for (int i = 0; i < 4; i++) {
+                uint64_t a = st.sbuf[1][i].addr, n = st.sbuf[1][i].size;
+                if (!a) continue;
+                LOG("[dumpdraw] fs storage %d %llx+%llu:", i, (unsigned long long)a, (unsigned long long)n);
+                for (uint64_t k = 0; k < n / 4 && k < 256; k++) LOG("%s%08x", k % 16 ? " " : "\n  ", ((const uint32_t *)(uintptr_t)a)[k]);
+                LOG("\n");
+            }
+            Range u = st.ubuf[1][4 - cbuf_base];
+            if (u.addr) {
+                LOG("[dumpdraw] fs uniform 4 %llx+%llu, words 1088..1135 (c[68..70]):", (unsigned long long)u.addr, (unsigned long long)u.size);
+                for (int k = 68 * 4; k < 71 * 4; k++) LOG(" %08x", ((const uint32_t *)(uintptr_t)u.addr)[k]);
+                LOG("\n");
+            }
+        }
+    }
     for (int k = 0; k < 18; k++) {
         if (!(si->cbuf_mask & (1u << k))) continue;
         if (k == 0) {
@@ -2749,7 +2783,8 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
             for (int i = 0; i < 16; i++) {
                 uint32_t *e = &drv[(base + 16 * i) / 4];
                 uint64_t sa = st.sbuf[stage][i].addr;
-                if (sa && (si->ssbo_read & (1u << i))) { bind_note(2, sa, st.sbuf[stage][i].size); sa = snap_storage(sa, st.sbuf[stage][i].size, false); }
+                if (sa && game_other() && si->uses_gmem_store) gw_note_kind(sa, st.sbuf[stage][i].size, true);  // (stays in place)
+                else if (sa && (si->ssbo_read & (1u << i))) { bind_note(2, sa, st.sbuf[stage][i].size); sa = snap_storage(sa, st.sbuf[stage][i].size, false); }
                 e[0] = (uint32_t)sa;
                 e[1] = (uint32_t)(sa >> 32);
                 e[2] = (uint32_t)st.sbuf[stage][i].size;
@@ -2999,8 +3034,10 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
                     // (in place: see g_gw; at least 0x480 bytes - EoW's cascade dispatches store up to 0x478 past
                     // slots bound with 60-128 bytes, into what later draws read as uniforms; 4 KB took in data the
                     // CPU rewrites each frame: black frames)
-                    if (game_other() && si->uses_gmem_store && indirect_gpu()) gw_note(sa, st.sbuf[5][i].size < g_gw_min ? g_gw_min : st.sbuf[5][i].size);
-                    else sa = snap_storage(sa, st.sbuf[5][i].size, true);
+                    if (game_other() && si->uses_gmem_store) {  // (the slot itself always; the window with the GPU path)
+                        gw_note_kind(sa, st.sbuf[5][i].size, true);
+                        if (gw_on() && st.sbuf[5][i].size < g_gw_min) gw_note(sa, g_gw_min);
+                    } else sa = snap_storage(sa, st.sbuf[5][i].size, true);
                 }
                 e[0] = (uint32_t)sa; e[1] = (uint32_t)(sa >> 32); e[2] = (uint32_t)st.sbuf[5][i].size;
             }
