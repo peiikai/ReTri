@@ -828,6 +828,7 @@ NVN(nvnWindowSetCrop) { int *cr = WIN->crop; cr[0] = (int)A(1); cr[1] = (int)A(2
 NVN(nvnWindowGetCrop) { memcpy(AP(1), WIN->crop, 16); }
 NVN(nvnWindowAcquireTexture) {
     NvnWindow *w = WIN;
+    if (game_other()) { extern void pace_other_cadence(void); pace_other_cadence(); }  // (pace.c)
     if (A(1)) sync_of(A(1))->signaled = 1;
     *(int32_t *)AP(2) = w->next;
     w->next = (w->next + 1) % (w->active ? w->active : 1);
@@ -835,6 +836,7 @@ NVN(nvnWindowAcquireTexture) {
 }
 NVN(nvnQueueAcquireTexture) {
     NvnWindow *w = HOST(NvnWindow, A(1));
+    if (game_other()) { extern void pace_other_cadence(void); pace_other_cadence(); }  // (pace.c)
     *(int32_t *)AP(2) = w->next;
     w->next = (w->next + 1) % (w->active ? w->active : 1);
     RET(0);

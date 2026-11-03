@@ -191,8 +191,10 @@ static uint64_t pace_scene(void) {
 }
 
 // Another game on the engine (experimental): the Switch's display waits out the present interval (1: every vsync, 2:
-// every other), and nothing here did - it ran as fast as the Mac could. Each present waits for its interval's vsync.
-static void other_game_cadence(void) {
+// every other), and nothing here did - it ran as fast as the Mac could. The wait is where the Switch's is: acquiring the
+// next window texture (objects.c), not in the present - EoW times its frame across the present and, waiting there, it
+// counted the wait as its own work and stayed in its 30 fps mode.
+void pace_other_cadence(void) {
     extern int g_nvn_present_interval;
     static uint64_t v_exit;
     int interval = g_nvn_present_interval < 1 ? 1 : g_nvn_present_interval > 4 ? 4 : g_nvn_present_interval;
@@ -211,7 +213,6 @@ static void other_game_cadence(void) {
 
 void pace_frame(void) {
     spike_test();
-    if (game_other()) other_game_cadence();
     static int on = -1;
     if (on < 0) { const char *e = getenv("LARECOMP_PACE"); on = !e || atoi(e) != 0; }
     static uint64_t last, last_wait;
