@@ -18,6 +18,7 @@
 #include "../hle.h"
 
 static volatile uint64_t g_loads;   // level files read (warp_other_file_read)
+static volatile uint64_t g_proc_runs;  // the request processor's runs (one per level change)
 static char g_loaded[64];           // the last level read
 static volatile uint64_t g_req;     // the current level's request object
 static volatile uint64_t g_holder;  // the request processor's object (the request at +0x10)
@@ -34,6 +35,7 @@ void rt_other_request_obj(uint64_t r) {
 // Generated code (tools/gen.py): the request processor is running with its object P; the request is at P+0x10.
 void rt_other_request_holder(uint64_t p) {
     uint64_t r = *(const uint64_t *)(uintptr_t)(p + 0x10);
+    g_proc_runs++;
     static uint64_t calls;
     if (getenv("LARECOMP_LOG_WARP") && !(++calls & (calls - 1)))
         LOG("[warp] processor run #%llu (holder %llx, request %llx, destination length %llu)\n", (unsigned long long)calls,
@@ -137,6 +139,19 @@ static void call(Cpu *c, uint64_t fn, uint64_t a0, uint64_t a1, uint64_t a2, uin
     c->x[0] = a0, c->x[1] = a1, c->x[2] = a2, c->x[3] = a3;
     guest_call(c, fn);
 }
+// Drop one strong reference through a shared-pointer control block, as the game's code does: the use count at +8;
+// at zero its vtable's +0x10 (dispose) and then main+0x27deed0 (the weak release).
+static void sptr_release(Cpu *c, uint64_t ctrl) {
+    if (!ctrl) return;
+    uint64_t old = __atomic_fetch_sub((uint64_t *)(uintptr_t)(ctrl + 8), 1, __ATOMIC_ACQ_REL);
+    if (old != 1) return;
+    uint64_t vt = *(uint64_t *)(uintptr_t)ctrl;
+    c->x[0] = ctrl;
+    guest_call(c, *(uint64_t *)(uintptr_t)(vt + 0x10));
+    c->x[0] = ctrl;
+    guest_call(c, 0x70027deed0ull);
+}
+
 static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
     static uint64_t m;  // scratch: 0x000 path text, 0x100 path view, 0x110 entry view, 0x120 level view, 0x130 locator
     // view, 0x140 resource out, 0x150 flow out, 0x160 event out, 0x170 params, 0x180 start out, 0x200 level text,
@@ -144,8 +159,12 @@ static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
     if (!m) m = (uint64_t)(uintptr_t)hle_alloc(0x400);
     memset((void *)(uintptr_t)m, 0, 0x400);
     char *mm = (char *)(uintptr_t)m;
-    // (another level: LevelWarpStartMenu; a place in this one: LocationWarpStartMenu)
-    const char *path = "event/MapWarp.bfevfl", *entry = strcmp(level, g_loaded) ? "LevelWarpStartMenu" : "LocationWarpStartMenu";
+    // (another level: LevelWarpStartMenu; a place in this one: LocationWarpStartMenu. Where the map's warp flow isn't
+    // loaded - the overworld has it, a house doesn't: its file comes back 0 - an exit's: AreaExitCommon's WalkOut, with
+    // the same two parameters, which every level with a door has)
+    static int alt;
+    const char *path = alt ? "event/AreaExitCommon.bfevfl" : "event/MapWarp.bfevfl";
+    const char *entry = alt ? "WalkOut" : strcmp(level, g_loaded) ? "LevelWarpStartMenu" : "LocationWarpStartMenu";
     strcpy(mm, path);
     strcpy(mm + 0x200, level);
     strcpy(mm + 0x280, locator);
@@ -160,7 +179,13 @@ static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
     bool ok = false;
     call(c, 0x70026e7560ull, m + 0x140, *(uint64_t *)(uintptr_t)0x70040311d0ull, m + 0x100, 0);  // the flow file
     uint64_t res = q[0x140 / 8];
-    LOG("[warp] event file %llx\n", (unsigned long long)res);
+    static int nlog;
+    if (res || nlog++ % 60 == 0) {
+        uint64_t mgr = *(uint64_t *)(uintptr_t)0x70040311d0ull;
+        LOG("[warp] event file %s: %llx (manager %llx, its +0x110 %llx / %llx)\n", path, (unsigned long long)res, (unsigned long long)mgr,
+            mgr ? (unsigned long long)*(uint64_t *)(uintptr_t)(mgr + 0x110) : 0ull, mgr ? (unsigned long long)*(uint64_t *)(uintptr_t)(mgr + 0x118) : 0ull);
+    }
+    if (!res) alt = !alt;  // (the other flow next time)
     if (res) {
         call(c, 0x700038eba0ull, res, 0, 0, 0);
         call(c, 0x70006692e0ull, m + 0x150, m + 0x140, 0, 0);       // the flow
@@ -180,6 +205,10 @@ static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
             LOG("[warp] map-warp event started (%llx)\n", (unsigned long long)q[0x180 / 8]);
             ok = true;
         }
+        // (our references, as the map screen drops its own: the start's result, the event, the flow - shared
+        // pointers {object, control}; the file's handle at +0x140 is a plain pointer)
+        sptr_release(c, q[0x188 / 8]);
+        if (getenv("LARECOMP_WARP_RELEASE_ALL")) { sptr_release(c, q[0x168 / 8]); sptr_release(c, q[0x158 / 8]); }
     }
     memcpy(c->x, saved, sizeof saved);
     c->sp = sp, c->pc = pc;
@@ -194,8 +223,15 @@ void warp_other_game_tick(Cpu *c) {
         snprintf(lc, sizeof lc, "%s", g_locator);
         g_pending = 0;
         pthread_mutex_unlock(&g_lock);
-        LOG("[warp] map-warp event to %s / %s\n", lv, lc);
-        start_map_warp(c, lv, lc);
+        static int tries;
+        if (!tries) LOG("[warp] map-warp event to %s / %s\n", lv, lc);
+        if (!start_map_warp(c, lv, lc)) {  // (the flow file not loaded yet - the first ask starts its load: again next frame)
+            if (++tries < 600) { pthread_mutex_lock(&g_lock); if (!g_pending) g_pending = 1; pthread_mutex_unlock(&g_lock); }
+            else { LOG("[warp] gave up: the event never started\n"); tries = 0; }
+            return;
+        }
+        if (tries) LOG("[warp] started after %d tries\n", tries);
+        tries = 0;
         return;
     }
     {   // (debug) LARECOMP_WATCH_LIVE=<frame>: from then, who touches the request reached through LARECOMP_WARP_GLOBAL
@@ -332,8 +368,8 @@ static void scan_level(const char *dir, const char *level) {
         bool ok = false;
         if (!strncmp(s, level, ll) && digits_after(s, ll)) ok = !field;
         else if (field && !strncmp(s, "Field_", 6)) {  // Field_<region>_<digits>: the first of each region
-            const char *u = strrchr(s, '_');
-            if (u > s + 6 && isdigit((unsigned char)u[1])) {
+            const char *u = strrchr(s, '_');  // (one region word: Field_HyrulePlains_009, not ..._03_Effect_00)
+            if (u > s + 6 && isdigit((unsigned char)u[1]) && strchr(s + 6, '_') == u && !strstr(s, "Effect")) {
                 int k = 0;
                 size_t rl = (size_t)(u - s);
                 for (; k < nregions && !(strlen(regions[k]) == rl && !strncmp(regions[k], s, rl)); k++) {}
@@ -375,6 +411,8 @@ int warp_other_places(const void **outv) {
         if (d) closedir(d);
         if (g_nplaces) qsort(g_places, (size_t)g_nplaces, sizeof *g_places, cmp_place);
         LOG("[warp] %d places from %s\n", g_nplaces, dir);
+        if (getenv("LARECOMP_LOG_PLACES"))
+            for (int i = 0; i < g_nplaces; i++) LOG("[place] %d %s %s\n", i, g_places[i].level, g_places[i].locator);
     }
     if (out) *out = g_places;
     return g_nplaces;
@@ -407,7 +445,8 @@ static double now_s(void) {
 static void tour_frame(uint64_t frame) {
     static int on = -1, cur, to, state;  // state: 0 idle, 1 warped (waiting for the load), 2 settling
     static long start_frame;
-    static uint64_t loads_at;
+    static uint64_t loads_at, runs_at;
+    static bool same_level;
     static double t0, t_load, last, worst, sum;
     static int nframes, slow;
     if (on < 0) {
@@ -442,10 +481,11 @@ static void tour_frame(uint64_t frame) {
         }
         LOG("[tour] start %d %s %s\n", cur, g_places[cur].level, g_places[cur].locator);
         fflush(stderr);
+        same_level = !strcmp(g_places[cur].level, g_loaded);
         warp_other_request(g_places[cur].level, g_places[cur].locator);
-        loads_at = g_loads, t0 = t, state = 1;
+        loads_at = g_loads, runs_at = g_proc_runs, t0 = t, state = 1;
     } else if (state == 1) {
-        if (g_loads != loads_at && !strcmp(g_loaded, g_places[cur].level)) {
+        if ((g_loads != loads_at && !strcmp(g_loaded, g_places[cur].level)) || (same_level && g_proc_runs != runs_at)) {
             t_load = t - t0, state = 2, worst = sum = 0, nframes = slow = 0;
         } else if (t - t0 > 30) {
             LOG("[tour] result %d %s %s: no load in 30 s (last level read: %s)\n", cur, g_places[cur].level,
