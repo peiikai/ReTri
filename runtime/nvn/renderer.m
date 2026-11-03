@@ -389,6 +389,14 @@ static void counters_resolve(void) {
             } else {
                 out[1] = pace_end_counter(ctr_pend[i].start, out, ticks);
             }
+            static int logc = -1;  // LARECOMP_LOG_COUNTERS=<n> (debug): the first n timestamp pairs' spans as finalized
+            if (logc < 0) logc = getenv("LARECOMP_LOG_COUNTERS") ? atoi(getenv("LARECOMP_LOG_COUNTERS")) : 0;
+            if (logc > 0 && ctr_pend[i].start && out - ctr_pend[i].start == 2) {
+                logc--;
+                LOG("[ctr] pair %llx: span %.2f ms (start %llu end %llu)\n", (unsigned long long)(uintptr_t)out,
+                    (double)(int64_t)(out[1] - ctr_pend[i].start[1]) * 625 / 384 / 1e6,
+                    (unsigned long long)ctr_pend[i].start[1], (unsigned long long)out[1]);
+            }
             stat_counters_gpu++;
         }
     }

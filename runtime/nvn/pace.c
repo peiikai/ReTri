@@ -228,6 +228,20 @@ void pace_frame(void) {
     uint64_t p = now - last, wt = w - last_wait, tc = tcpu - last_tcpu, rc = rcpu - last_rcpu;
     bool first = !last;
     last = now, last_wait = w, last_tcpu = tcpu, last_rcpu = rcpu;
+    if (game_other() && !first && getenv("LARECOMP_LOG_BUSY")) {  // (experimental) the game thread's busy / CPU time
+        static double sb, mb, sc, mc;  // per frame, and the render thread's CPU time, over each 60 frames
+        static double sr;
+        static int nb;
+        double b = (p - wt) / 1e6, cpu = tc / 1e6;
+        sb += b, sc += cpu, sr += rc / 1e6, nb++;
+        if (b > mb) mb = b;
+        if (cpu > mc) mc = cpu;
+        if (nb == 60) {
+            LOG("[busy] game thread busy avg %.1f max %.1f ms, cpu avg %.1f max %.1f ms, render cpu avg %.1f ms\n", sb / 60,
+                mb, sc / 60, mc, sr / 60);
+            sb = mb = sc = mc = sr = 0, nb = 0;
+        }
+    }
     // GPU time per frame (pace_gpu_ns: the backend's GPU timer, cumulative; -1 without one), moving average (~20 frames).
     // (A frame's GPU time is read a few frames late and in bursts: the average smooths that.)
     extern int64_t pace_gpu_ns(void);

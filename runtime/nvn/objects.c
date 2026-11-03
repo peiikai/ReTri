@@ -813,7 +813,14 @@ int g_nvn_present_interval = 1;  // the game's latest present interval (pace.c: 
 NVN(nvnWindowSetPresentInterval) {  // (the game's 60 / 30 fps mode: 1 / 2; LARECOMP_LOG_INTERVAL=1 logs each change)
     static int log = -1;
     if (log < 0) log = getenv("LARECOMP_LOG_INTERVAL") != NULL;
-    if (log && WIN->interval != (int)A(1)) LOG("[nvn] present interval %d -> %d\n", WIN->interval, (int)A(1));
+    if (log && WIN->interval != (int)A(1))
+    {
+        LOG("[nvn] present interval %d -> %d (lr %llx; callers", WIN->interval, (int)A(1), (unsigned long long)c->x[30]);
+        uint64_t fp = c->x[29];
+        for (int i = 0; i < 8 && fp >= GUEST_LO && fp < GUEST_HI; i++, fp = *(uint64_t *)(uintptr_t)fp)
+            LOG(" %llx", (unsigned long long)*(uint64_t *)(uintptr_t)(fp + 8));
+        LOG(")\n");
+    }
     WIN->interval = (int)A(1);
     g_nvn_present_interval = WIN->interval;
 }
