@@ -1,4 +1,5 @@
 // Shader variant records, the recorder and first-visit counts (see shader_prep.h).
+#include "../game_addresses.h"
 #include <dirent.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -544,8 +545,8 @@ static bool prep_run_locked(const char *romfs, void (*progress)(int done, int to
             if (n > 0 && fread(list, 1, (size_t)n, f) != (size_t)n) list[0] = 0;
             fclose(f);
         }
-    } else list = strdup(shipped_list);
-    if (!list || !*list) { free(list); LOG("[shader] preparation: no variant list\n"); return false; }
+    } else list = strdup(game_other() ? "" : shipped_list);  // (another game: only its own seen list - the shipped one is LA's)
+    if (!list || (!*list && !game_other())) { free(list); LOG("[shader] preparation: no variant list\n"); return false; }
     if (!renderer_prepare_begin()) { free(list); LOG("[shader] preparation: no GPU device yet\n"); return false; }
     uint64_t seen_game;
     char *seen = shader_seen_read(&seen_game);  // (the player's own list: after the shipped one)
@@ -621,6 +622,6 @@ static bool prep_run_locked(const char *romfs, void (*progress)(int done, int to
 
 void shader_prep_boot(const char *romfs) {
     const char *e = getenv("LARECOMP_SHADER_PREP");
-    if (!e || !atoi(e)) return;
+    if (e ? !atoi(e) : !game_other()) return;  // (another game: always - it has no start screen to prepare them)
     shader_prep_run(romfs, NULL, NULL);
 }
