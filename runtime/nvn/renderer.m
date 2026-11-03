@@ -2161,10 +2161,19 @@ static void snapshots_invalidate(NvnTexture *t) {  // NULL = all
     for (int i = 0; i < 8; i++) if ((!t || snap_tex[i] == t) && snap_ok[i]) { snap_ok[i] = false; snap_why[i] = snap_reason; }
 }
 
+// A shader's texture handle by its slot ((cbuf offset - 0x20) / 8): 0-31 the bound textures; 32-39 (offsets 0x120-0x15f)
+// the bound images - a texture fetch through an image binding (EoW's environment-map dispatch reads one this way; it
+// used to get no texture), both handles index the texture pool.
+static uint64_t handle_at(int stage, int slot) {
+    if (slot >= 0 && slot < 32) return st.tex[stage][slot];
+    if (slot >= 32 && slot < 40) return st.img[stage][slot - 32];
+    return 0;
+}
+
 static NvnTexture *shader_texture_object(int stage, ShaderTexture *st_) {
     int slot = ((int)st_->handle_offset - 0x20) / 8;
-    uint64_t h = (slot >= 0 && slot < 32) ? st.tex[stage][slot] : 0;
-    if ((slot < 0 || slot >= 32) && ENV("LARECOMP_LOG_TEXSLOT")) {  // (debug) a handle outside the bound slots
+    uint64_t h = handle_at(stage, slot);
+    if ((slot < 0 || slot >= 40) && ENV("LARECOMP_LOG_TEXSLOT")) {  // (debug) a handle outside the bound slots
         static int n;
         if (n++ < 20) LOG("[texslot] stage %d handle offset %#x (bindless %d cbuf %u off %#x) program vs %llx fs %llx cs %llx frame %llu\n", stage, (unsigned)st_->handle_offset, (int)st_->bindless, st_->bindless_cbuf, st_->bindless_offset,
                           st.program ? (unsigned long long)st.program->stages[0].code_addr : 0ull,
@@ -2283,7 +2292,7 @@ static void bind_textures(int stage, ShaderInfo *si) {
     for (int i = 0; i < si->ntex; i++) {
         ShaderTexture *st_ = &si->tex[i];
         int slot = ((int)st_->handle_offset - 0x20) / 8;  // 64-bit handles from offset 0x20
-        uint64_t h = (slot >= 0 && slot < 32) ? st.tex[stage][slot] : 0;
+        uint64_t h = handle_at(stage, slot);
         id<MTLTexture> tex = nil;
         id<MTLSamplerState> smp = nil;
         uint32_t tic = h & 0xFFFFF, tsc = (uint32_t)(h >> 20) & 0xFFF;
@@ -3147,7 +3156,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     for (int i = 0; i < si->ntex; i++) {
         ShaderTexture *st_ = &si->tex[i];
         int slot = ((int)st_->handle_offset - 0x20) / 8;
-        uint64_t h = (slot >= 0 && slot < 32) ? st.tex[5][slot] : 0;
+        uint64_t h = handle_at(5, slot);
         id<MTLTexture> tex = nil;
         id<MTLSamplerState> smp = nil;
         uint32_t tic = h & 0xFFFFF, tsc = (uint32_t)(h >> 20) & 0xFFF;
