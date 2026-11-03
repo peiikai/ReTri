@@ -190,8 +190,28 @@ static uint64_t pace_scene(void) {
     return h ? h : 1;
 }
 
+// Another game on the engine (experimental): the Switch's display waits out the present interval (1: every vsync, 2:
+// every other), and nothing here did - it ran as fast as the Mac could. Each present waits for its interval's vsync.
+static void other_game_cadence(void) {
+    extern int g_nvn_present_interval;
+    static uint64_t v_exit;
+    int interval = g_nvn_present_interval < 1 ? 1 : g_nvn_present_interval > 4 ? 4 : g_nvn_present_interval;
+    if (v_exit) {
+        uint64_t target = v_exit + (uint64_t)interval, t0 = plat_now_ns();
+        for (;;) {  // (bounded, as hold_cadence: a stalled vsync timer must not stall the game)
+            uint64_t vt = __atomic_load_n(&g_vsync_ns, __ATOMIC_ACQUIRE), n = __atomic_load_n(&g_vsync_count, __ATOMIC_ACQUIRE);
+            if (n >= target || plat_now_ns() - t0 > (uint64_t)interval * 20000000ull) break;
+            uint64_t at = vt + (target - n) * 16666667ull + 250000ull, now = plat_now_ns();
+            plat_sleep_until_ns(at > now + 100000ull ? at : now + 100000ull);
+        }
+        g_blocked_ns += plat_now_ns() - t0;
+    }
+    v_exit = __atomic_load_n(&g_vsync_count, __ATOMIC_ACQUIRE);
+}
+
 void pace_frame(void) {
     spike_test();
+    if (game_other()) other_game_cadence();
     static int on = -1;
     if (on < 0) { const char *e = getenv("LARECOMP_PACE"); on = !e || atoi(e) != 0; }
     static uint64_t last, last_wait;
