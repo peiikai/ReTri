@@ -2587,6 +2587,37 @@ static void snap_note_vertex_bind(uint64_t addr, uint64_t size) {  // (LARECOMP_
             n++; LOG("[snap] vertex bind %llx+%llu overlaps copied %llx+%llu (%s, frame %llu)\n", (unsigned long long)addr, (unsigned long long)size, (unsigned long long)rs_tab[i].addr, (unsigned long long)rs_tab[i].size, addr < rs_tab[i].addr ? "from outside" : "inside", (unsigned long long)renderer_exec_frame());
         }
 }
+// (another game) Ranges compute programs that store were bound to (their storage slots): what the GPU writes. A draw
+// or dispatch that reads one later - as storage or as a uniform buffer - reads it in place, not from a copy taken at
+// translation, when the GPU hasn't run the dispatch yet (EoW: its culling dispatches write the shadow cascades'
+// matrices and the instance lists, which later draws read as uniforms / storage). Most recent first; 64 kept.
+static struct { uint64_t addr, size; } g_gw[64];
+static uint64_t g_gw_min = 0x480;  // (debug: LARECOMP_GW_MIN=<hex>)
+static int g_ngw;
+static void gw_note(uint64_t addr, uint64_t size) {
+    { static int once; if (!once++ && ENV("LARECOMP_GW_MIN")) g_gw_min = strtoull(ENV("LARECOMP_GW_MIN"), NULL, 16); }
+    for (int i = 0; i < g_ngw; i++)
+        if (g_gw[i].addr == addr && g_gw[i].size == size) return;
+    if (ENV("LARECOMP_LOG_GW")) { static int n; if (n++ < 60) LOG("[gw] compute writes %llx+%llu\n", (unsigned long long)addr, (unsigned long long)size); }
+    if (g_ngw < 64) g_ngw++;
+    memmove(&g_gw[1], &g_gw[0], sizeof g_gw[0] * (size_t)(g_ngw - 1));
+    g_gw[0].addr = addr, g_gw[0].size = size;
+}
+// LARECOMP_INDIRECT_GPU=1 (experimental, other games): indirect draws on the GPU with its own counts, no flush, and
+// GPU-written ranges read in place (g_gw). 60 fps where the flushes cost half the frame rate, but the shadows are
+// missing: the cascade matrices lie further from the dispatch's slot than g_gw_min, and a wider window (4 KB) took in
+// data the CPU rewrites each frame (black frames). Off: the flush path (correct, a CPU wait per batch).
+static bool indirect_gpu(void) {
+    static int on = -1;
+    if (on < 0) on = ENV("LARECOMP_INDIRECT_GPU") && atoi(ENV("LARECOMP_INDIRECT_GPU")) ? 1 : 0;
+    return on;
+}
+static bool gw_hit(uint64_t addr, uint64_t size) {
+    if (!indirect_gpu()) return false;
+    for (int i = 0; i < g_ngw; i++)
+        if (addr < g_gw[i].addr + g_gw[i].size && g_gw[i].addr < addr + size) return true;
+    return false;
+}
 // An indirect draw being translated (CMD_DRAW_*_INDIRECT): its arguments' guest address, and the index buffer's
 // (before the first index) - drawn with Metal's indirect draw from the guest heap, see the executor
 static uint64_t g_indirect_args, g_indirect_ibase;
@@ -2594,6 +2625,10 @@ static uint64_t g_indirect_args, g_indirect_ibase;
 static uint64_t snap_storage(uint64_t addr, uint64_t size, bool cs_slot) {
     static int isnap = -1;  // (debug) LARECOMP_INDIRECT_SNAP=1: an indirect draw's storage as any other draw's
     if (isnap < 0) isnap = ENV("LARECOMP_INDIRECT_SNAP") ? 1 : 0;
+    if (game_other() && !isnap && gw_hit(addr, size)) {  // (GPU-written: in place, see g_gw)
+        if (ENV("LARECOMP_LOG_GW")) { static int n; if (n++ < 40) LOG("[gw] storage %llx+%llu read in place (%s, frame %llu)\n", (unsigned long long)addr, (unsigned long long)size, cs_slot ? "compute" : "draw", (unsigned long long)renderer_exec_frame()); }
+        return addr;
+    }
     if (g_indirect_args && !isnap) return addr;  // (an indirect draw's storage - GPU-culled instances - is written on the GPU just before: in place)
     if (!snap_on() || !addr || !size || size > SNAP_RING / 8 || addr < HEAP_BASE || addr + size > snap_ring_base) return addr;
     extern int nvn_pool_flags_at(uint64_t addr);
@@ -2751,7 +2786,15 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
         if (size < 16) size = 16;
         static int iubo = -1;
         if (iubo < 0) iubo = ENV("LARECOMP_INDIRECT_UBO") ? 1 : 0;
-        if (iubo && g_indirect_args && r.addr >= HEAP_BASE && r.addr + need <= HEAP_BASE + HEAP_MAX && !(r.addr & 255)) {
+        static int allubo = -1;  // (debug) LARECOMP_UBO_IN_PLACE=1: every uniform buffer in place (another game)
+        if (allubo < 0) allubo = ENV("LARECOMP_UBO_IN_PLACE") ? 1 : 0;
+        bool gpu_written = iubo ? g_indirect_args != 0 : game_other() && (allubo || gw_hit(r.addr, size));
+        if (gpu_written && ENV("LARECOMP_LOG_GW")) {
+            static int n;
+            if (n++ < 400) LOG("[gw] uniform buffer %llx+%llu read in place (stage %d slot %d, frame %llu)\n", (unsigned long long)r.addr,
+                              (unsigned long long)size, stage, k, (unsigned long long)renderer_exec_frame());
+        }
+        if (gpu_written && r.addr >= HEAP_BASE && r.addr + need <= HEAP_BASE + HEAP_MAX && !(r.addr & 15)) {  // (GPU-written: in place, see g_gw)
             if (stage == 0) [enc setVertexBuffer:g_guest_buffer offset:r.addr - HEAP_BASE atIndex:k];
             else [enc setFragmentBuffer:g_guest_buffer offset:r.addr - HEAP_BASE atIndex:k];
             continue;
@@ -2953,7 +2996,11 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
                         if (j == nseen) { seen[nseen].cs = cs; seen[nseen].slot = i; seen[nseen++].size = st.sbuf[5][i].size; n++;
                             LOG("[snap] compute %llx slot %d %llx+%llu gmem %d store %d (frame %llu)\n", (unsigned long long)cs, i, (unsigned long long)sa, (unsigned long long)st.sbuf[5][i].size, si->uses_gmem, si->uses_gmem_store, (unsigned long long)renderer_exec_frame()); }
                     }
-                    sa = snap_storage(sa, st.sbuf[5][i].size, true);
+                    // (in place: see g_gw; at least 0x480 bytes - EoW's cascade dispatches store up to 0x478 past
+                    // slots bound with 60-128 bytes, into what later draws read as uniforms; 4 KB took in data the
+                    // CPU rewrites each frame: black frames)
+                    if (game_other() && si->uses_gmem_store && indirect_gpu()) gw_note(sa, st.sbuf[5][i].size < g_gw_min ? g_gw_min : st.sbuf[5][i].size);
+                    else sa = snap_storage(sa, st.sbuf[5][i].size, true);
                 }
                 e[0] = (uint32_t)sa; e[1] = (uint32_t)(sa >> 32); e[2] = (uint32_t)st.sbuf[5][i].size;
             }
@@ -5932,12 +5979,11 @@ static void exec_list(uint64_t handle, int depth) {
             // Read once the GPU work before is done (a flush, once per batch after a dispatch) and drawn as a plain
             // draw. That flush also matters for the plain draws after it: EoW's dispatches write its shadow cascades'
             // matrices, which later draws read as uniforms - snapshotted at translation, they're only right once the
-            // dispatch has run (the town's lighting flickered without it). Holds 60 fps at 1280x720 on an M3 Max.
-            // LARECOMP_INDIRECT_GPU=1 (experimental): Metal's indirect draw from the guest heap with the GPU's own
-            // counts, no flush - the cascades' uniforms are then a frame stale (the flicker is back): it needs the
-            // dispatches' outputs bound in place first. The LARECOMP_INDIRECT_FLUSH / _SNAP / _UBO switches test that path.
+            // dispatch has run (the town's lighting flickered without it). 60 fps at 1280x720 on an M3 Max in most of
+            // the town; where the game dispatches between batches (a few flushes a frame), 30. LARECOMP_INDIRECT_GPU=1:
+            // on the GPU instead (indirect_gpu; the LARECOMP_INDIRECT_FLUSH / _SNAP / _UBO switches test that path).
             static int cpu = -1;
-            if (cpu < 0) cpu = ENV("LARECOMP_INDIRECT_GPU") ? 0 : 1;
+            if (cpu < 0) cpu = indirect_gpu() ? 0 : 1;
             uint64_t ib = r->op == CMD_DRAW_ELEMENTS_INDIRECT ? r->x[2] : 0;
             bool on_gpu = !cpu && r->op != CMD_DISPATCH_INDIRECT && args >= HEAP_BASE && args + 20 <= HEAP_BASE + HEAP_MAX && !(args & 3) &&
                           (r->op == CMD_DRAW_ARRAYS_INDIRECT || (r->x[1] != 0 && ib >= HEAP_BASE && ib < HEAP_BASE + HEAP_MAX && !(ib & 3)));
