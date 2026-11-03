@@ -1848,6 +1848,26 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
                op == 3 ? "o_ >= v_ ? 0 : o_ + 1" : "(o_ == 0 || o_ > v_) ? v_ : o_ - 1");
         }
         sp(&c->body, "      }\n    }\n");
+    } else if (!c->glsl && c->stage == STAGE_COMPUTE && OPM(0xeb20000000000000ull, 0xfff8000000000000ull) &&
+               !getenv("LARECOMP_NO_SUST")) {
+        // SUST.B (Metal compute; Ryujinx InstSustB): formatted store of R[d..] (the Rgba mask's components, in order) at
+        // R[a] (x), R[a+1] (y), R[a+2] (layer: 2D array / cube faces) into the image whose handle is R[c]
+        int rgba = (int)bits(w, 20, 4), dim = (int)bits(w, 33, 3), hc = (int)bits(w, 39, 8);
+        c->info->uses_images = true;
+        sp(&c->body, "    { uint h_ = %s; uint2 xy_ = uint2(%s, %s); uint l_ = %s;\n", R(hc), R(a),
+           dim >= 2 ? R(a + 1) : "0u", dim == 2 ? R(a + 1) : dim >= 4 ? R(a + 2) : "0u");
+        if (dim == 2) sp(&c->body, "      xy_.y = 0u;\n");  // (1D array: x, layer)
+        int k = 0;
+        char comp[4][64];
+        for (int ch = 0; ch < 4; ch++) {
+            if (rgba & (1 << ch)) sprintf(comp[ch], "as_type<float>(%s)", R(d == RZ ? RZ : d + k++));
+            else strcpy(comp[ch], ch == 3 ? "1.0f" : "0.0f");
+        }
+        sp(&c->body, "      float4 v_ = float4(%s, %s, %s, %s);\n     ", comp[0], comp[1], comp[2], comp[3]);
+        for (int i = 0; i < IMG_SLOTS; i++)  // (bounds-checked: Maxwell drops stores outside the image, Metal may fault)
+            sp(&c->body, " if (h_ == imgh[%d]) { if (xy_.x < img%d.get_width() && xy_.y < img%d.get_height() && "
+                         "l_ < img%d.get_array_size()) img%d.write(v_, xy_, l_); } else", i, i, i, i, i);
+        sp(&c->body, " {}\n    }\n");
     } else if (maxwell_skip_unsupported_stores && (OPM(0xebf8000000000000ull, 0xfff8000000000000ull) ||  // RED
                                                    OPM(0xeb20000000000000ull, 0xfff8000000000000ull))) {  // SUST.B
         // (experimental, other games: global reductions and surface stores aren't translated yet - skipped, so the rest
@@ -2509,6 +2529,11 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
         const char *tn = tex_type_name(t->type);
         sp(&args, ", %s%s<float> t%d [[texture(%d)]]", t->shadow ? "depth" : "texture", tn, i, i);
         if (!smap) sp(&args, ", sampler s%d [[sampler(%d)]]", i, i);
+    }
+    if (info->uses_images) {
+        for (int i = 0; i < IMG_SLOTS; i++)
+            sp(&args, ", texture2d_array<float, access::write> img%d [[texture(%d)]]", i, IMG_TEX_BASE + i);
+        sp(&args, ", constant uint *imgh [[buffer(%d)]]", IMG_HANDLE_BUFFER);
     }
     if (stage == STAGE_VERTEX) {
         sp(&s, "vertex VOut main0(VIn in [[stage_in]], uint vid [[vertex_id]], uint iid [[instance_id]]%s%s) {\n",

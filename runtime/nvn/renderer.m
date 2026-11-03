@@ -163,7 +163,15 @@ void renderer_init(id<MTLDevice> d) {
 
 static int g_passes_in_cb;  // render passes encoded into the open command buffer (chunked commits)
 static id<MTLCommandBuffer> cb(void) {
-    if (!cmdbuf) cmdbuf = [renderer_queue() commandBuffer];
+    if (!cmdbuf) {
+        if (game_other()) {  // (another game: a failed command buffer says which encoder - see renderer_submit)
+            MTLCommandBufferDescriptor *d = [MTLCommandBufferDescriptor new];
+            d.errorOptions = MTLCommandBufferErrorOptionEncoderExecutionStatus;
+            cmdbuf = [renderer_queue() commandBufferWithDescriptor:d];
+        } else {
+            cmdbuf = [renderer_queue() commandBuffer];
+        }
+    }
     return cmdbuf;
 }
 
@@ -482,16 +490,43 @@ uint64_t renderer_gpu_busy(id<MTLCommandBuffer> done, bool win) {
     return ns;
 }
 
+static int g_gpu_failed;  // (another game: a GPU error was seen - nothing more is committed, see below)
+
 // Commit recorded work without waiting.
 void renderer_submit(void) {
     end_pass();
     drain_gone();
+    if (cmdbuf && __atomic_load_n(&g_gpu_failed, __ATOMIC_ACQUIRE)) cmdbuf = nil;  // (dropped: the process is ending)
     if (cmdbuf) {
         id<MTLCommandBuffer> c = cmdbuf;
         cmdbuf = nil;
         [c addCompletedHandler:^(id<MTLCommandBuffer> done) {
             stat_gpu_s += renderer_gpu_busy(done, false) / 1e9;
             if (done.error) LOG("[metal] command buffer error: %s\n", done.error.localizedDescription.UTF8String);
+            if (done.error && game_other()) {
+                // (another game, experimental) Stop at the first GPU error: a hang repeated frame after frame makes macOS
+                // reset the GPU again and again, which took the whole window server down once. Name the encoders first.
+                NSArray *infos = done.error.userInfo[MTLCommandBufferEncoderInfoErrorKey];
+                static const char *const st[] = {"unknown", "completed", "affected", "pending", "faulted"};
+                for (id<MTLCommandBufferEncoderInfo> e in infos)
+                    if (e.errorState != MTLCommandEncoderErrorStateCompleted)
+                    {
+                        LOG("[metal]   encoder '%s': %s, last signposts:", e.label.UTF8String ? e.label.UTF8String : "?",
+                            (unsigned)e.errorState < 5 ? st[e.errorState] : "?");
+                        NSArray<NSString *> *sp = e.debugSignposts;
+                        for (NSUInteger k = sp.count > 6 ? sp.count - 6 : 0; k < sp.count; k++) LOG(" [%s]", sp[k].UTF8String);
+                        LOG("\n");
+                    }
+                // stop submitting now; exit once the hung buffer itself reported (code 3), or 3 s after the first error
+                if (!__atomic_exchange_n(&g_gpu_failed, 1, __ATOMIC_ACQ_REL)) {
+                    LOG("[metal] GPU error with another game: no more GPU work; exiting in 3 s (no repeated GPU resets)\n");
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_global_queue(0, 0), ^{
+                        fflush(stderr);
+                        _exit(70);
+                    });
+                }
+                if (done.error.code == 3) { LOG("[metal] (that was the hung command buffer)\n"); fflush(stderr); _exit(70); }
+            }
         }];
         [c commit];
         g_passes_in_cb = 0;
@@ -1105,6 +1140,23 @@ static uint64_t ring_alloc(const void *data, uint64_t size) {
     }
     memcpy((uint8_t *)ring.contents + aligned, data, size);
     ring_off = aligned + size;
+    return aligned;
+}
+
+// As ring_alloc, with room for `total` bytes: `copy` from data, the rest zeros. A shader can read further into a
+// constant buffer than the game bound (Maxwell returns 0 there): a copy of only the bound size then let it read past the
+// ring's end when the copy landed there - a GPU page fault (EoW, Suthorn Ruins, 2026-11-02).
+static uint64_t ring_alloc_padded(const void *data, uint64_t copy, uint64_t total) {
+    if (total <= copy) return ring_alloc(data, copy);
+    if (!ring) ring = [dev newBufferWithLength:RING_SIZE options:MTLResourceStorageModeShared];
+    uint64_t aligned = (ring_off + 255) & ~255ull;
+    if (aligned + total > RING_SIZE) {
+        ring = [dev newBufferWithLength:(total > RING_SIZE ? total : RING_SIZE) options:MTLResourceStorageModeShared];
+        aligned = 0;
+    }
+    memcpy((uint8_t *)ring.contents + aligned, data, copy);
+    memset((uint8_t *)ring.contents + aligned + copy, 0, total - copy);
+    ring_off = aligned + total;
     return aligned;
 }
 
@@ -2548,9 +2600,10 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
             continue;
         }
         if ((si->cbuf_dynamic & (1u << k)) && r.size) size = r.size > 0x10000 ? 0x10000 : r.size;  // indexed: whole buffer
+        uint64_t need = size < 16 ? 16 : size;  // (what the shader reads: past the bound size, zeros - ring_alloc_padded)
         if (size > r.size && r.size) size = r.size;
         if (size < 16) size = 16;
-        uint64_t off = ring_alloc((void *)(uintptr_t)r.addr, size);  // snapshot, as later CPU writes must not leak in
+        uint64_t off = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);  // snapshot: later CPU writes must not leak in
         if (stage == 0) [enc setVertexBuffer:ring offset:off atIndex:k];
         else [enc setFragmentBuffer:ring offset:off atIndex:k];
     }
@@ -2692,6 +2745,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     td_flush_shader_textures(5, cp->si);
     CST("encoder");
     id<MTLComputeCommandEncoder> ce = [cb() computeCommandEncoder];
+    if (game_other()) ce.label = [NSString stringWithFormat:@"cs %llx", (unsigned long long)st.program->stages[5].code_addr];
     CST("pipeline");
     [ce setComputePipelineState:cp->pipe];
     ShaderInfo *si = cp->si;
@@ -2734,9 +2788,10 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
             uint64_t size = si->cbuf_size[k] ? si->cbuf_size[k] : 256;
             if (r.addr) {
                 if ((si->cbuf_dynamic & (1u << k)) && r.size) size = r.size > 0x10000 ? 0x10000 : r.size;
+                uint64_t need = size < 16 ? 16 : size;  // (as the draws': past the bound size, zeros)
                 if (size > r.size && r.size) size = r.size;
                 if (size < 16) size = 16;
-                off = ring_alloc((void *)(uintptr_t)r.addr, size);
+                off = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);
             } else {
                 static const uint8_t zeros[0x10000];
                 off = ring_alloc(zeros, size);
@@ -2793,6 +2848,45 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
             rs[1 + i][0] = tex_sc[0][i][0]; rs[1 + i][1] = tex_sc[0][i][1]; rs[1 + i][2] = tex_fr[0][i][0]; rs[1 + i][3] = tex_fr[0][i][1];
         }
         [ce setBytes:rs length:(NSUInteger)(1 + si->ntex) * 16 atIndex:RSCALE_BUFFER_INDEX];
+    }
+    if (si->uses_images) {  // (SUST.B, other games: maxwell/shader.h IMG_TEX_BASE) the bound images as 2D-array write views
+        static id<MTLTexture> dummy_img;
+        if (!dummy_img) {
+            MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float width:1
+                                                                                         height:1 mipmapped:NO];
+            d.textureType = MTLTextureType2DArray;
+            d.usage = MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
+            d.storageMode = MTLStorageModePrivate;
+            dummy_img = [dev newTextureWithDescriptor:d];
+        }
+        uint32_t hs[IMG_SLOTS];
+        for (int k = 0; k < IMG_SLOTS; k++) {
+            uint64_t h = st.img[5][k];
+            uint32_t tic = h & 0xFFFFF;
+            id<MTLTexture> view = nil;
+            if (h && st.tpool && tic < (uint32_t)st.tpool->count) {
+                NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
+                id<MTLTexture> base = e->tex ? renderer_texture(e->tex, nil, true) : nil;
+                if (base && (base.usage & MTLTextureUsageShaderWrite)) {
+                    NSUInteger lv = e->has_view && (e->view.setmask & 1) ? e->view.base_level : 0;
+                    NSUInteger ly = base.textureType == MTLTextureTypeCube ? 6 : base.arrayLength;
+                    if (lv < base.mipmapLevelCount && (base.textureType == MTLTextureType2D ||
+                        base.textureType == MTLTextureType2DArray || base.textureType == MTLTextureTypeCube))
+                        view = view_cached(base, 0x7000000000000000ull | lv, ^{
+                            return [base newTextureViewWithPixelFormat:base.pixelFormat textureType:MTLTextureType2DArray
+                                                                levels:NSMakeRange(lv, 1) slices:NSMakeRange(0, ly)];
+                        });
+                }
+                if (!view) {
+                    static int nlog;
+                    if (nlog++ < 8) LOG("[images] slot %d handle %#llx: no writable texture (%s)\n", k, (unsigned long long)h,
+                                        !e->tex ? "none" : !base ? "no backend" : "not writable / type");
+                }
+            }
+            hs[k] = view ? (uint32_t)h : 0xFFFFFFFFu;
+            [ce setTexture:view ? view : dummy_img atIndex:IMG_TEX_BASE + k];
+        }
+        [ce setBytes:hs length:sizeof hs atIndex:IMG_HANDLE_BUFFER];
     }
     CST("dispatch");
     extern bool g_debug_frame;
@@ -4359,6 +4453,57 @@ static void draw_one(CmdRec *r, bool indexed) {
         if (run_gold[ri]) pot_gold_tint(tint);
         else recolour_tint_draw(draw_recolour, tint);
         [enc setFragmentBytes:tint length:sizeof tint atIndex:19];
+    }
+    if (game_other() && st.program) {  // (another game: a GPU error names the shaders of its pass - renderer_submit)
+        static __weak id<MTLRenderCommandEncoder> marked;
+        static uint64_t last_vs, last_fs;
+        uint64_t vs = st.program->stages[0].code_addr, fs = st.program->stages[1].code_addr;
+        if (marked != enc || vs != last_vs || fs != last_fs) {
+            marked = enc, last_vs = vs, last_fs = fs;
+            [enc insertDebugSignpost:[NSString stringWithFormat:@"vs %llx fs %llx", (unsigned long long)vs, (unsigned long long)fs]];
+        }
+    }
+    if (game_other()) {  // (another game, experimental) a draw that would fetch past a bound vertex buffer is skipped and
+        // logged: the GPU reading the guest heap's unbacked pages is a page fault (macOS resets the GPU)
+        uint32_t cnt = (uint32_t)r->x[2], ity = indexed ? (uint32_t)r->x[1] : 0;
+        uint64_t maxv = 0;
+        bool restart = false;
+        if (!indexed) maxv = (uint64_t)(uint32_t)r->x[1] + (cnt ? cnt - 1 : 0);
+        else if (cnt) {
+            const uint8_t *ix = (const uint8_t *)(uintptr_t)r->x[3];
+            uint32_t mx = 0;
+            for (uint32_t k = 0; k < cnt; k++) {
+                uint32_t v = ity == 0 ? ix[k] : ity == 1 ? ((const uint16_t *)ix)[k] : ((const uint32_t *)ix)[k];
+                uint32_t rv = ity == 0 ? 0xFFu : ity == 1 ? 0xFFFFu : 0xFFFFFFFFu;
+                if (v == rv) { restart = true; continue; }
+                if (v > mx) mx = v;
+            }
+            maxv = (uint64_t)((int64_t)mx + (int32_t)r->x[4]);
+        }
+        uint64_t binst = base_all + run_at[ri], ninst = run_n[ri] ? run_n[ri] : 1;
+        int bad = -1;
+        const char *why = "";
+        for (int i = 0; i < 16 && bad < 0; i++) {
+            if (!(used_streams & (1u << i))) continue;  // (only the streams this draw's attributes read)
+            uint32_t stride = st.stream[i][0], div = st.stream[i][1];
+            uint64_t last = div ? (binst + ninst - 1) / div : maxv;
+            if (i >= 12) bad = i, why = "stream 12+ not bound";
+            else if (!st.vbuf[i].addr && stride && last > 0) bad = i, why = "no buffer, 16 zero bytes";
+            else if (st.vbuf[i].addr && stride && (last + 1) * stride > (st.vbuf[i].size ? st.vbuf[i].size : 16))
+                bad = i, why = "past the buffer";
+        }
+        if (bad >= 0 || (restart && indexed)) {
+            static int nlog;
+            if (nlog++ < 20)
+                LOG("[draw-guard] %s: vs %llx fs %llx mode %u %s count %u max vertex %llu restart %d inst %llu+%llu; "
+                    "vb%d %llx size %llu stride %u div %u\n", why, st.program ? (unsigned long long)st.program->stages[0].code_addr : 0ull,
+                    st.program ? (unsigned long long)st.program->stages[1].code_addr : 0ull, (uint32_t)r->x[0],
+                    indexed ? "indexed" : "arrays", cnt, (unsigned long long)maxv, restart, (unsigned long long)binst,
+                    (unsigned long long)ninst, bad, bad >= 0 ? (unsigned long long)st.vbuf[bad].addr : 0ull,
+                    bad >= 0 ? (unsigned long long)st.vbuf[bad].size : 0ull, bad >= 0 ? st.stream[bad][0] : 0,
+                    bad >= 0 ? st.stream[bad][1] : 0);
+            if (bad >= 0) continue;
+        }
     }
     // draw
     bool native;

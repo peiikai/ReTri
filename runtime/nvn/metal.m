@@ -459,6 +459,10 @@ static void create_backend_texture(NvnTexture *t, TexBackend *b) {
     // format (backend_texture_view_format): either flag keeps Apple GPUs from compressing the texture losslessly, which
     // cost 6-11% of the GPU time at 5120x1440 (2026-10-18).
     d.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget | (t->format_views ? MTLTextureUsagePixelFormatView : 0);
+    // (another game: compute shaders store into textures - SUST.B, renderer.m. Uncompressed formats only; it costs Apple
+    // GPUs' lossless compression, so LA keeps it off)
+    if (game_other() && mf.pf < MTLPixelFormatBC1_RGBA && !renderer_format_is_depth(t->format) && !getenv("LARECOMP_NO_SHADERWRITE"))
+        d.usage |= MTLTextureUsageShaderWrite;
     b->format_views = t->format_views;
     d.storageMode = MTLStorageModePrivate;
     // Depth stays uncompressed: compressed, the ambient occlusion around walls, trees and furniture disappeared (every

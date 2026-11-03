@@ -71,6 +71,7 @@ typedef struct {
                             // dispatch's storage buffers - when found, stores too (copied back after the dispatch).
                             // runtime/nvn/vulkan/exec.c
     bool uses_gmem_store;   // writes global memory (STG)
+    bool uses_images;       // compute (Metal, other games): SUST.B stores into the bound images (IMG_TEX_BASE..)
     bool uses_tint;        // fragment: reads the per-draw tint (buffer 19, float4[4]) applied to color target 0
     uint16_t ssbo_read;     // storage buffer slots whose binding (address) the shader reads from the driver constants
                             // (c0 0x110 + 16 * i vertex, 0x510 + 16 * i fragment): the slots it actually uses
@@ -86,6 +87,11 @@ typedef struct {
 // (MSL) Metal's sampler slots a stage. A shader with more textures takes its samplers as an array of all the slots
 // and the slot of each texture from a table of uints at SMAP_BUFFER_INDEX (fragment, compute; [i] = texture i's slot).
 #define MSL_MAX_SAMPLERS 16
+// Compute image stores (SUST.B, Metal): the 8 image slots as write textures from IMG_TEX_BASE, their handles at
+// IMG_HANDLE_BUFFER (uint[8]); a store goes to the slot whose handle matches its handle register.
+#define IMG_TEX_BASE 23
+#define IMG_SLOTS 8
+#define IMG_HANDLE_BUFFER 23
 #define SMAP_BUFFER_INDEX 22
 // (GLSL compute, Vulkan) the fast copy of a dispatch's storage buffers: its address table and its data
 #define GMAP_BUFFER_INDEX 20
