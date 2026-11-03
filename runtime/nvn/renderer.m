@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <SDL3/SDL_timer.h>
 
+#include "../game_addresses.h"
 #include "maxwell/shader.h"
 #include "nvn.h"
 #include "renderer.h"
@@ -1854,6 +1855,10 @@ static id<MTLTexture> apply_swizzle(id<MTLTexture> tex, NvnTexture *t, const Nvn
     if (!c[0] && !c[1] && !c[2] && !c[3]) return tex;  // never set: identity
     if (renderer_format_alpha_one(t->format))
         for (int i = 0; i < 4; i++) if (c[i] == MTLTextureSwizzleAlpha) c[i] = MTLTextureSwizzleOne;
+    extern bool renderer_format_swap_rb(uint32_t f);
+    if (game_other() && renderer_format_swap_rb(t->format))  // (metal.m: red and blue packed the other way round)
+        for (int i = 0; i < 4; i++) c[i] = c[i] == MTLTextureSwizzleRed ? MTLTextureSwizzleBlue
+                                         : c[i] == MTLTextureSwizzleBlue ? MTLTextureSwizzleRed : c[i];
     if (c[0] == 2 && c[1] == 3 && c[2] == 4 && c[3] == (renderer_format_alpha_one(t->format) ? 1 : 5)) return tex;
     if (tex.sampleCount > 1 || renderer_format_is_depth(t->format)) return tex;
     uint32_t swz = c[0] | c[1] << 8 | c[2] << 16 | (uint32_t)c[3] << 24;
@@ -2125,6 +2130,22 @@ static void bind_textures(int stage, ShaderInfo *si) {
         if (st_->shadow) tex = shadow_slot_texture(tex, st_, i, h);
         if (!tex) tex = dummy_texture(st_->type);
         if (!smp) smp = default_sampler();
+        static uint64_t dump_fs = 1;  // LARECOMP_DUMP_FS_TEX=<fs code addr>: save that shader's textures, its first 3 draws
+        static int dump_left = 3;
+        if (dump_fs == 1) { const char *e = getenv("LARECOMP_DUMP_FS_TEX"); dump_fs = e ? strtoull(e, NULL, 16) : 0; }
+        if (dump_fs && dump_left > 0 && stage == 1 && st.program && st.program->stages[1].code_addr == dump_fs &&
+            tex.textureType == MTLTextureType2D) {
+            char path[128], apath[128];
+            snprintf(path, sizeof path, "build/fstex_%d_%d.png", 3 - dump_left, i);
+            snprintf(apath, sizeof apath, "build/fstex_%d_%d_a.png", 3 - dump_left, i);
+            NvnTexture *gt = h && st.tpool && tic < (uint32_t)st.tpool->count ? ((NvnTexEntry *)st.tpool->entries)[tic].tex : NULL;
+            LOG("[fstex] draw %d t%d: %ux%u mtl fmt %lu, game fmt %#x swizzle %d %d %d %d\n", 3 - dump_left, i,
+                (unsigned)tex.width, (unsigned)tex.height, (unsigned long)tex.pixelFormat, gt ? gt->format : 0,
+                gt ? gt->swizzle[0] : -1, gt ? gt->swizzle[1] : -1, gt ? gt->swizzle[2] : -1, gt ? gt->swizzle[3] : -1);
+            if (gt) renderer_save_game_texture(gt, tex, path, apath);
+            else { renderer_save_texture(tex, path); renderer_save_texture_alpha(tex, apath); }
+            if (i + 1 >= (int)si->ntex) dump_left--;
+        }
         if (g_debug_frame && tex.textureType == MTLTextureType2D && stage == 1) {
             static int dn;
             char path[128], apath[128];
@@ -3856,6 +3877,16 @@ static void draw_one(CmdRec *r, bool indexed) {
                 }
             }
             for (int i = 0; i < nskip; i++) if (last_hash == skip[i]) { stat_skipped++; return; }
+            static uint64_t skip_at[16];  // LARECOMP_SKIP_FS=a1,a2,...: the same by the fragment shader's code address
+            static int nat = -1;
+            if (nat < 0) {
+                nat = 0;
+                for (const char *p = getenv("LARECOMP_SKIP_FS"); p && *p && nat < 16;) {
+                    skip_at[nat++] = strtoull(p, (char **)&p, 16);
+                    while (*p == ',') p++;
+                }
+            }
+            for (int i = 0; i < nat; i++) if (fs == skip_at[i]) { stat_skipped++; return; }
             extern bool pot_level_active(void);
             if (last_hash == 0xa2177dbb72197bd9ull && pot_level_active()) { stat_skipped++; return; }  // item twinkle
         }

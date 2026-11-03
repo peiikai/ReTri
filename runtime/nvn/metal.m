@@ -34,7 +34,7 @@ id<MTLBuffer> g_guest_buffer;  // wraps the guest heap so GPU addresses map to b
 uint64_t g_guest_buffer_base;
 
 // ================================================================== formats
-typedef struct { MTLPixelFormat pf; uint8_t expand_rgb; uint8_t force_alpha_one; } MtlFormat;
+typedef struct { MTLPixelFormat pf; uint8_t expand_rgb; uint8_t force_alpha_one; uint8_t swap_rb; } MtlFormat;
 
 static MtlFormat mtl_format(uint32_t f) {
     switch (f) {
@@ -86,7 +86,8 @@ static MtlFormat mtl_format(uint32_t f) {
     case 0x39: return (MtlFormat){MTLPixelFormatABGR4Unorm};
     case 0x3A: return (MtlFormat){MTLPixelFormatB5G6R5Unorm};
     case 0x3B: return (MtlFormat){MTLPixelFormatA1BGR5Unorm};
-    case 0x3C: return (MtlFormat){MTLPixelFormatB5G6R5Unorm};
+    case 0x3C: return (MtlFormat){MTLPixelFormatB5G6R5Unorm, .swap_rb = 1};  // (NVN packs it the other way round: R / B
+    // swapped against Metal's B5G6R5 - an EoW HUD mask has its fill in the channel read as blue; applied for other games)
     case 0x3D: return (MtlFormat){MTLPixelFormatRGB10A2Unorm};
     case 0x3E: return (MtlFormat){MTLPixelFormatRGB10A2Uint};
     case 0x3F: return (MtlFormat){MTLPixelFormatRG11B10Float};
@@ -157,6 +158,7 @@ bool renderer_format_is_depth(uint32_t f) { return f >= 0x31 && f <= 0x36; }
 bool renderer_format_has_stencil(uint32_t f) { return f == 0x31 || f == 0x35 || f == 0x36; }
 MTLPixelFormat renderer_pixel_format(uint32_t f) { return mtl_format(f).pf; }
 bool renderer_format_alpha_one(uint32_t f) { return mtl_format(f).force_alpha_one; }
+bool renderer_format_swap_rb(uint32_t f) { return mtl_format(f).swap_rb; }  // (renderer.m apply_swizzle, other games)
 
 // ================================================================== textures
 typedef struct {
