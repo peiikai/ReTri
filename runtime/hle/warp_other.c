@@ -164,9 +164,12 @@ static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
     // (another level: LevelWarpStartMenu; a place in this one: LocationWarpStartMenu. Where the map's warp flow isn't
     // loaded - the overworld has it, a house doesn't: its file comes back 0 - an exit's: AreaExitCommon's WalkOut, with
     // the same two parameters, which every level with a door has)
-    static int alt;
+    static int alt = -1;
+    if (alt < 0) alt = getenv("LARECOMP_WARP_EXIT_FLOW") ? 1 : 0;  // (test: the exit's flow first)
     const char *path = alt ? "event/AreaExitCommon.bfevfl" : "event/MapWarp.bfevfl";
-    const char *entry = alt ? "WalkOut" : strcmp(level, g_loaded) ? "LevelWarpStartMenu" : "LocationWarpStartMenu";
+    // (LocationWarpStartMenu, the map's entry within a level, didn't start from here: LevelWarpStartMenu for all;
+    // LARECOMP_WARP_SAME_LOCATION=1 tries it again)
+    const char *entry = alt ? "WalkOut" : strcmp(level, g_loaded) || !getenv("LARECOMP_WARP_SAME_LOCATION") ? "LevelWarpStartMenu" : "LocationWarpStartMenu";
     strcpy(mm, path);
     strcpy(mm + 0x200, level);
     strcpy(mm + 0x280, locator);
@@ -369,8 +372,6 @@ static void scan_level(const char *dir, const char *level) {
     b[n] = 0;
     size_t ll = strlen(level);
     bool field = !strcmp(level, "Field");
-    char regions[64][64];
-    int nregions = 0;
     for (long i = 0; i < n; i++) {
         if (!name_char((unsigned char)b[i]) || (i && b[i - 1])) continue;  // (strings start after a NUL)
         long j = i;
@@ -378,22 +379,19 @@ static void scan_level(const char *dir, const char *level) {
         if (j >= n || b[j] || j - i < 4 || j - i >= 64) { i = j; continue; }
         const char *s = b + i;
         bool ok = false;
+        const char *in = level;
         if (!strncmp(s, level, ll) && digits_after(s, ll)) ok = !field;
-        else if (field && !strncmp(s, "Field_", 6)) {  // Field_<region>_<digits>: the first of each region
-            const char *u = strrchr(s, '_');  // (one region word: Field_HyrulePlains_009, not ..._03_Effect_00)
-            if (u > s + 6 && isdigit((unsigned char)u[1]) && strchr(s + 6, '_') == u && !strstr(s, "Effect")) {
-                int k = 0;
-                size_t rl = (size_t)(u - s);
-                for (; k < nregions && !(strlen(regions[k]) == rl && !strncmp(regions[k], s, rl)); k++) {}
-                if (k == nregions && nregions < 64) { snprintf(regions[nregions++], 64, "%.*s", (int)rl, s); ok = true; }
-            }
+        else if (!field && !strncmp(s, "Field_", 6)) {  // (another level's exit to the overworld names a real spawn point
+            const char *u = strrchr(s, '_');           // there: Field_HyrulePlains_009 - the overworld's own strings hold
+            ok = u > s + 6 && isdigit((unsigned char)u[1]) && strchr(s + 6, '_') == u;  // other things of that shape)
+            in = "Field";
         }
         if (ok) {
             bool dup = false;
-            for (int k = 0; k < g_nplaces && !dup; k++) dup = !strcmp(g_places[k].level, level) && !strcmp(g_places[k].locator, s);
+            for (int k = 0; k < g_nplaces && !dup; k++) dup = !strcmp(g_places[k].level, in) && !strcmp(g_places[k].locator, s);
             if (!dup) {
                 g_places = realloc(g_places, sizeof *g_places * (size_t)(g_nplaces + 1));
-                snprintf(g_places[g_nplaces].level, 64, "%s", level);
+                snprintf(g_places[g_nplaces].level, 64, "%s", in);
                 snprintf(g_places[g_nplaces].locator, 64, "%s", s);
                 g_nplaces++;
             }
