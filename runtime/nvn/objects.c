@@ -129,6 +129,10 @@ NVN(nvnQueueGetTotalComputeMemoryUsed) { RET(0); }
 NVN(nvnQueueResetMemoryUsageCounts) { (void)c; }
 NVN(nvnQueueSubmitCommands) {
     int n = (int)A(1);
+    if (getenv("LARECOMP_LOG_QSYNC")) {  // (debug) queue submits, waits and fences in order, with the game's frame
+        extern uint64_t renderer_present_count(void);
+        static int k; uint64_t pf = renderer_present_count(), from = strtoull(getenv("LARECOMP_LOG_QSYNC"), NULL, 10); if (pf >= from && pf < from + 4 && k++ < 2000) LOG("[qsync] frame %llu submit queue %llx %d lists\n", (unsigned long long)renderer_present_count(), (unsigned long long)A(0), n);
+    }
     const uint64_t *handles = AP(2);
     bool rq = rq_on();
     uint64_t t0 = plat_now_ns();
@@ -158,7 +162,12 @@ static NvnSync *sync_of(uint64_t guest) {
 uint64_t renderer_fence_seq(void);
 void renderer_wait_seq(uint64_t seq);
 // A fence's seq: the render thread's item number when it's on (rqueue.c), else the backend's submission number.
-NVN(nvnQueueFenceSync) { NvnSync *s = sync_of(A(1)); s->signaled = 1; s->seq = rq_on() ? rq_fence_seq() : renderer_fence_seq(); }
+NVN(nvnQueueFenceSync) {
+    if (getenv("LARECOMP_LOG_QSYNC")) {
+        extern uint64_t renderer_present_count(void);
+        static int k; uint64_t pf = renderer_present_count(), from = strtoull(getenv("LARECOMP_LOG_QSYNC"), NULL, 10); if (pf >= from && pf < from + 4 && k++ < 2000) LOG("[qsync] frame %llu fence queue %llx sync %llx\n", (unsigned long long)renderer_present_count(), (unsigned long long)A(0), (unsigned long long)A(1));
+    }
+    NvnSync *s = sync_of(A(1)); s->signaled = 1; s->seq = rq_on() ? rq_fence_seq() : renderer_fence_seq(); }
 void nvn_sync_set_seq(uint64_t guest, uint64_t seq) {
     // (the render thread: the list's number was set when it was queued; the game may have placed this sync again in
     // a later list since, and that number must stay)
@@ -167,7 +176,13 @@ void nvn_sync_set_seq(uint64_t guest, uint64_t seq) {
     s->signaled = 1;
     s->seq = seq;
 }
-NVN(nvnQueueWaitSync) { RET(1); }
+NVN(nvnQueueWaitSync) {
+    if (getenv("LARECOMP_LOG_QSYNC")) {
+        extern uint64_t renderer_present_count(void);
+        static int k; uint64_t pf = renderer_present_count(), from = strtoull(getenv("LARECOMP_LOG_QSYNC"), NULL, 10); if (pf >= from && pf < from + 4 && k++ < 2000) LOG("[qsync] frame %llu wait queue %llx sync %llx\n", (unsigned long long)renderer_present_count(), (unsigned long long)A(0), (unsigned long long)A(1));
+    }
+    RET(1);
+}
 
 // ================================================================== sync / event
 NVN(nvnSyncInitialize) { SET_HOST(A(0), calloc(1, sizeof(NvnSync))); RET(1); }

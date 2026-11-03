@@ -2977,6 +2977,43 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
         static int allubo = -1;  // (debug) LARECOMP_UBO_IN_PLACE=1: every uniform buffer in place (another game)
         if (allubo < 0) allubo = ENV("LARECOMP_UBO_IN_PLACE") ? 1 : 0;
         bool gpu_written = iubo ? g_indirect_args != 0 : game_other() && (allubo || gw_hit(r.addr, size));
+        // EoW's rift (the dark void over a building): a top-down 1024x1024 map of the rift meshes, drawn with the map view's
+        // projection (vertex cb4 rows 0-1), and a mask pass that reads the map back by world position with rows 33-34 of
+        // the scene view's constants - the same projection halved into texture space (row = (projection row + w) / 2).
+        // The game writes both a second time, rotated to its final map view, a few ms after the frame's list is
+        // submitted; the Switch GPU reaches these passes later than that and reads the final rows, but ours runs before
+        // it (the mask's rows are still identity then; read in place, the two raced and each frame could miss). So the
+        // map keeps the projection it was drawn with and the mask's rows are made from it: the map and its lookup agree.
+        bool rift_rows = false;
+        {   static float map_rows[8]; static uint64_t map_frame = ~0ull;
+            static int off = -1; if (off < 0) off = ENV("LARECOMP_RIFT_ROWS_OFF") ? 1 : 0;  // (debug: the game's rows as they are)
+            if (!off && game_other() && stage == 0 && k == 4 && g_cur_fs_hash == 0xd6c58a42e55a9f9eull && r.size >= 32) {
+                memcpy(map_rows, (const void *)(uintptr_t)r.addr, 32);
+                map_frame = renderer_exec_frame();
+            }
+            if (!off && game_other() && stage == 1 && k == 4 && g_cur_fs_hash == 0x44b584f0d922d49dull && size >= 35 * 16 &&
+                map_frame == renderer_exec_frame()) {
+                gpu_written = false;
+                rift_rows = true;
+            }
+            if (rift_rows) {
+                uint64_t o = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);
+                float *row = (float *)((uint8_t *)ring.contents + o) + 33 * 4;
+                for (int i = 0; i < 8; i++) row[i] = map_rows[i] * 0.5f + ((i & 3) == 3 ? 0.5f : 0.0f);
+                [enc setFragmentBuffer:ring offset:o atIndex:k];
+                continue;
+            }
+        }
+        {   static uint64_t inp[64]; static int ninp = -1;  // (debug) LARECOMP_INPLACE_FS=h1,h2,...: those shaders' uniforms in place
+            if (ninp < 0) {
+                ninp = 0;
+                for (const char *p = getenv("LARECOMP_INPLACE_FS"); p && *p && ninp < 64;) {
+                    inp[ninp++] = strtoull(p, (char **)&p, 16);
+                    while (*p == ',') p++;
+                }
+            }
+            for (int i = 0; i < ninp; i++) if (g_cur_fs_hash == inp[i]) gpu_written = game_other();
+        }
         {   static uint64_t snapfs = 1;  // (debug) LARECOMP_UBO_SNAP_FS=<fs hash>: that shader's uniforms always copied at the draw
             if (snapfs == 1) snapfs = getenv("LARECOMP_UBO_SNAP_FS") ? strtoull(getenv("LARECOMP_UBO_SNAP_FS"), NULL, 16) : 0;
             if (snapfs && g_cur_fs_hash == snapfs) gpu_written = false;
@@ -3437,6 +3474,33 @@ static id<MTLBuffer> expand_indices(uint32_t mode, uint32_t count, const void *i
     id<MTLBuffer> b = [dev newBufferWithBytes:out length:n * 4 + 4 options:MTLResourceStorageModeShared];
     free(out);
     return b;
+}
+
+static void *poll_rows_thread(void *arg) {  // (debug, LARECOMP_POLL_ROWS: see the draw translation)
+    (void)arg;
+    extern uint64_t renderer_present_count(void);
+    uint64_t addr[8], off[8]; float last[8][8]; int na = 0;
+    for (const char *p = getenv("LARECOMP_POLL_ROWS"); p && *p && na < 8;) {  // (addr or addr:offset, 0x210 by default)
+        addr[na] = strtoull(p, (char **)&p, 16);
+        off[na] = 0x210;
+        if (*p == ':') off[na] = strtoull(p + 1, (char **)&p, 16);
+        na++;
+        while (*p == ',') p++;
+    }
+    memset(last, 0, sizeof last);
+    for (int logged = 0; logged < 1200;) {
+        for (int i = 0; i < na; i++) {
+            const float *f = (const float *)(uintptr_t)(addr[i] + off[i]);
+            if (memcmp(f, last[i], 32)) {
+                memcpy(last[i], f, 32);
+                LOG("[poll] t %.3f %llx+%llx game frame %llu exec frame %llu: %g %g %g %g | %g %g %g %g\n", plat_now_ns() / 1e6, (unsigned long long)addr[i], (unsigned long long)off[i],
+                    (unsigned long long)renderer_present_count(), (unsigned long long)renderer_exec_frame(), f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
+                logged++;
+            }
+        }
+        usleep(20);
+    }
+    return NULL;
 }
 
 static void debug_draw(Prog *pr, CmdRec *r, bool indexed) {
@@ -4373,16 +4437,9 @@ static void draw_one(CmdRec *r, bool indexed) {
     }
     ShaderKey vkey = {0}, fkey = {0};
     vkey.flip_y = fkey.flip_y = nvn_window_origin() == 0;
-    {   // EoW's rift map (a top-down 1024x1024 picture of the rift meshes, read back by world position to cut the rift's
-        // dark void out of the scene) is read with its rows the other way up from how the flip stores it: drawn
-        // unflipped, the void lands on the rift (without it the map lookups miss and only the rift's edges show).
-        // (debug) LARECOMP_NOFLIP_VS=<vs code addr>: that vertex shader's draws without the y flip too
-        static uint64_t nf = 1, last_fs, last_h;
+    {   static uint64_t nf = 1;  // (debug) LARECOMP_NOFLIP_VS=<vs code addr>: that vertex shader's draws without the y flip
         if (nf == 1) nf = getenv("LARECOMP_NOFLIP_VS") ? strtoull(getenv("LARECOMP_NOFLIP_VS"), NULL, 16) : 0;
-        uint64_t fs = st.program->stages[1].code_addr;
-        if (fs != last_fs) { last_fs = fs; last_h = fs ? hmix(1469598103934665603ull, (const void *)(uintptr_t)(fs + 0x30), 0x200) : 0; }
-        static int keep = -1; if (keep < 0) keep = getenv("LARECOMP_RIFT_FLIP") != NULL;  // (debug: the flip as for every draw)
-        if ((last_h == 0xd6c58a42e55a9f9eull && !keep) || (nf && st.program->stages[0].code_addr == nf)) vkey.flip_y = fkey.flip_y = false;
+        if (nf && st.program->stages[0].code_addr == nf) vkey.flip_y = fkey.flip_y = false;
     }
     vkey.depth_minus_one = nvn_depth_mode() == 0;
     for (int i = 0; i < st.nattrib; i++) vkey.attr_kind[i] = (uint8_t)attr_kind(st.attrib[i] & 0xFF);
@@ -4488,6 +4545,43 @@ static void draw_one(CmdRec *r, bool indexed) {
                     for (int i = 0; i < nh; i++) LOG("[fslist] %016llx %d draws %ux%u\n", (unsigned long long)hs[i], cnt[i], tw[i], th[i]);
                 }
             }
+            {   // (debug) LARECOMP_POLL_ROWS=<addr>,<addr>...: a thread logs each change of the 32 bytes at addr+0x210 (cb rows 33-34)
+                // with the game's frame and the frame being translated
+                static int poll = -1;
+                if (poll < 0 && (poll = getenv("LARECOMP_POLL_ROWS") != NULL)) {
+                    pthread_t t;
+                    pthread_create(&t, NULL, poll_rows_thread, NULL);
+                }
+                if (poll && (last_hash == 0x44b584f0d922d49dull || last_hash == 0xd6c58a42e55a9f9eull)) {
+                    extern uint64_t renderer_present_count(void);
+                    static int n; if (n++ < 40) LOG("[poll] t %.3f %s draw encoded: game frame %llu exec frame %llu cb4 %llx\n", plat_now_ns() / 1e6, last_hash == 0xd6c58a42e55a9f9eull ? "map vs" : "mask", (unsigned long long)renderer_present_count(),
+                                                    (unsigned long long)renderer_exec_frame(), (unsigned long long)st.ubuf[last_hash == 0xd6c58a42e55a9f9eull ? 0 : 1][4 - cbuf_base].addr);
+                    if (n < 40 && last_hash == 0x44b584f0d922d49dull) {  // (and when the GPU runs that command buffer)
+                        unsigned long long fr = renderer_exec_frame();
+                        [cb() addCompletedHandler:^(id<MTLCommandBuffer> c) {
+                            LOG("[poll] exec frame %llu command buffer on the GPU %.3f..%.3f (host t %.3f now)\n", fr, c.GPUStartTime * 1e3, c.GPUEndTime * 1e3, plat_now_ns() / 1e6);
+                        }];
+                    }
+                }
+            }
+            {   // (debug) LARECOMP_LOG_VSROWS=<fs hash>: that shader's draws' vertex cb4 rows 0-3, 9-11 and cb5 rows 0-2 (from LARECOMP_DUMP_FROM)
+                static uint64_t want = 1; static long from = -1; static int n;
+                if (want == 1) want = getenv("LARECOMP_LOG_VSROWS") ? strtoull(getenv("LARECOMP_LOG_VSROWS"), NULL, 16) : 0;
+                if (from < 0) from = getenv("LARECOMP_DUMP_FROM") ? atol(getenv("LARECOMP_DUMP_FROM")) : 0;
+                if (want && last_hash == want && (long)renderer_exec_frame() >= from && n < 12) {
+                    n++;
+                    for (int c = 4; c <= 5; c++) {
+                        Range u = st.ubuf[0][c - cbuf_base];
+                        const float *f = (const float *)(uintptr_t)u.addr;
+                        if (!f) continue;
+                        LOG("[vsrows] frame %llu cb%d %llx+%llu gw %d:", (unsigned long long)renderer_exec_frame(), c, (unsigned long long)u.addr,
+                            (unsigned long long)u.size, (int)gw_hit(u.addr, u.size));
+                        for (int row = 0; row < 12 && (uint64_t)(row + 1) * 16 <= u.size; row++)
+                            if (c == 5 ? row < 3 : (row < 4 || (row >= 9 && row <= 11))) LOG(" r%d %g %g %g %g", row, f[row * 4], f[row * 4 + 1], f[row * 4 + 2], f[row * 4 + 3]);
+                        LOG("\n");
+                    }
+                }
+            }
             {   // (debug) LARECOMP_DRAW_INFO=<fs hash>: that shader's draws - targets, depth / stencil / blend state, textures
                 static uint64_t want = 1; static int nlog;
                 if (want == 1) want = getenv("LARECOMP_DRAW_INFO") ? strtoull(getenv("LARECOMP_DRAW_INFO"), NULL, 16) : 0;
@@ -4506,6 +4600,14 @@ static void draw_one(CmdRec *r, bool indexed) {
                     if (f && u.size >= 35 * 16 && getenv("LARECOMP_SCAN_MAPROWS")) {  // (the other buffer of the pair: 0x500 away)
                         const float *g = (const float *)(uintptr_t)(u.addr ^ 0x500 ? (u.addr & 0x500 ? u.addr - 0x500 : u.addr + 0x500) : u.addr);
                         LOG("[drawinfo] other buffer r33 %g %g %g %g r34 %g %g %g %g\n", g[132], g[133], g[134], g[135], g[136], g[137], g[138], g[139]);
+                    }
+                    if (f && u.size >= 35 * 16 && getenv("LARECOMP_SCAN_MAPROWS")) {  // (and the rows when the GPU has run the draw)
+                        uint64_t a = u.addr; unsigned long long fr = renderer_exec_frame();
+                        [cb() addCompletedHandler:^(id<MTLCommandBuffer> c) {
+                            (void)c; const float *g = (const float *)(uintptr_t)a;
+                            LOG("[drawinfo] frame %llu %llx at completion: r33 %g %g %g %g r34 %g %g %g %g\n", fr, (unsigned long long)a,
+                                g[132], g[133], g[134], g[135], g[136], g[137], g[138], g[139]);
+                        }];
                     }
                     if (f && u.size >= 35 * 16)
                         LOG("[drawinfo] fs cb4 %llx+%llu (shader reads %u): r19 %g %g %g %g r33 %g %g %g %g r34 %g %g %g %g\n", (unsigned long long)u.addr,
@@ -6439,7 +6541,7 @@ static void exec_list(uint64_t handle, int depth) {
             {   static uint64_t watch = 1;  // (debug) LARECOMP_LOG_UBO_UPDATE=<addr>: updates touching addr..addr+0x1000
                 if (watch == 1) watch = getenv("LARECOMP_LOG_UBO_UPDATE") ? strtoull(getenv("LARECOMP_LOG_UBO_UPDATE"), NULL, 16) : 0;
                 uint64_t a = r->x[0] + r->x[2];
-                if (watch && a < watch + 0x1000 && a + r->x[3] > watch) {
+                if (watch && a < watch + 0x4000 && a + r->x[3] > watch) {
                     static int n;
                     if (n++ < 200) LOG("[uboupd] frame %llu %llx+%llu: %g %g %g %g\n", (unsigned long long)renderer_exec_frame(), (unsigned long long)a, (unsigned long long)r->x[3],
                                        ((float *)x)[0], r->x[3] > 4 ? ((float *)x)[1] : 0, r->x[3] > 8 ? ((float *)x)[2] : 0, r->x[3] > 12 ? ((float *)x)[3] : 0);
@@ -6517,6 +6619,12 @@ static void exec_list(uint64_t handle, int depth) {
             break;
         case CMD_COPY_BUFFER_TO_BUFFER:
             { static int nlog; if (nlog++ < 40 && ENV("LARECOMP_LOG_BINDS")) LOG("[copybuf] frame %llu %llx -> %llx %llu bytes\n", (unsigned long long)renderer_exec_frame(), r->x[0], r->x[1], r->x[2]); }
+            {   static uint64_t watch = 1;  // (debug) LARECOMP_LOG_UBO_UPDATE=<addr>: copies into addr..addr+0x4000 too
+                if (watch == 1) watch = getenv("LARECOMP_LOG_UBO_UPDATE") ? strtoull(getenv("LARECOMP_LOG_UBO_UPDATE"), NULL, 16) : 0;
+                static int n;
+                if (watch && r->x[1] < watch + 0x4000 && r->x[1] + r->x[2] > watch && n++ < 200)
+                    LOG("[copybuf] frame %llu %llx -> %llx %llu bytes\n", (unsigned long long)renderer_exec_frame(), r->x[0], r->x[1], r->x[2]);
+            }
             renderer_flush();
             memmove((void *)(uintptr_t)r->x[1], (void *)(uintptr_t)r->x[0], r->x[2]);
             break;
