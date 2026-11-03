@@ -14,6 +14,7 @@
 #include <string.h>
 #include <string>
 
+#include "../game_addresses.h"
 #include "i18n.h"
 #include "imgui_internal.h"
 #include "plastic.h"
@@ -23,7 +24,53 @@ static ImVec4 hex(unsigned rgb, float a = 1) {
 }
 static ImU32 hex32(unsigned rgb, unsigned a = 255) { return IM_COL32(rgb >> 16 & 255, rgb >> 8 & 255, rgb & 255, a); }
 
+// Echoes of Wisdom's pause menu: dark plum-brown, a bronze frame, flat grey-brown cells with thin lighter edges, tan
+// badges with dark glyphs, the selected tab's name gold-orange, the cursor corner brackets (gold above, green below)
+static const PlasticTheme &theme_eow(void) {
+    static PlasticTheme t;
+    static bool init;
+    if (!init) {
+        init = true;
+        t.panel = hex(0x2B2026, 0.90f);
+        t.panel2 = hex(0x3A2A30, 0.90f);
+        t.inset = hex(0x1F181A, 0.70f);
+        t.frame = hex(0x4E3A2C);
+        t.frame_inner = hex(0x6A4E38);
+        t.row = hex(0x2E2826);
+        t.row_sel = hex(0x463A33);
+        t.row_mark = hex(0x3C322D);
+        t.row_hot = hex(0x463A33);   // (ImGui's own buttons under the cursor: as the selection)
+        t.button = hex(0xD8B27C);
+        t.danger = hex(0x7A2E28);
+        t.tab = hex(0x2E2826);
+        t.tab_sel = hex(0x3C302C);
+        t.ring = hex(0x4A403A);
+        t.ring_sel = hex(0x6A5A50);
+        t.text = hex32(0xF0E8DC);
+        t.text_dim = hex32(0x9E9286);
+        t.text_sel = hex32(0xF0E8DC);
+        t.text_button = hex32(0x3A2618);
+        t.text_tab_sel = hex32(0xE8A85A);
+        t.section = hex32(0xE8A85A);
+        t.value = hex32(0xF0E8DC);
+        t.value_changed = hex32(0xF0D890);
+        t.warn = hex32(0xF2A48C);
+        t.title = hex32(0xE8A85A);
+        t.arrow = hex32(0xD8B27C);
+        t.ring_w = 1.5f;
+        t.pill_gloss = 0.0f;  // (not glossy)
+        t.edge = 0.0f;
+        t.mottle = 420.0f;
+        t.dim = 0.40f;
+        t.glare = 0.0f;
+        t.corner = 6.0f;
+        t.brackets = true;
+    }
+    return t;
+}
+
 const PlasticTheme &plastic_theme(void) {
+    if (game_other()) return theme_eow();
     static PlasticTheme t;
     static bool init;
     if (!init) {
@@ -57,6 +104,7 @@ const PlasticTheme &plastic_theme(void) {
         t.warn = hex32(0xF2A48C);
         t.title = hex32(0xECD78E);
         t.arrow = hex32(0xF0DC9A);
+        t.text_tab_sel = t.text_sel;
         t.ring_w = 4.0f;
         t.pill_gloss = 0.18f;  // (a soft sheen: a bright one washed out the cream text)
         t.edge = 0.08f;
@@ -586,7 +634,23 @@ void plastic_pill(ImDrawList *dl, ImVec2 a, ImVec2 b, float radius, ImVec4 col, 
     ImVec4 ring = lit ? t.ring_sel : t.ring;
     ring.w = col.w;  // (a faded piece: its rim too)
     float w = fminf(t.ring_w * scale, (b.y - a.y) * 0.12f);
+    if (t.corner > 0) radius = fminf(radius, t.corner * scale), depth = fminf(depth, 3 * scale);  // (flat cells)
     plastic_add(dl, a, b, radius, col, PK_PILL, depth, gloss * t.pill_gloss, ring, w, t.edge);
+    if (lit && t.brackets) plastic_brackets(dl, a, b, scale);
+}
+
+void plastic_brackets(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale) {
+    float o = 3 * scale, th = 3 * scale, len = fminf(16 * scale, (b.y - a.y) * 0.4f);
+    ImU32 top = IM_COL32(0xE8, 0xD0, 0x60, 255), bot = IM_COL32(0x70, 0xD0, 0x70, 255);
+    float x0 = a.x - o, y0 = a.y - o, x1 = b.x + o, y1 = b.y + o;
+    const ImVec2 tl[] = {ImVec2(x0, y0 + len), ImVec2(x0, y0), ImVec2(x0 + len, y0)};
+    const ImVec2 tr[] = {ImVec2(x1 - len, y0), ImVec2(x1, y0), ImVec2(x1, y0 + len)};
+    const ImVec2 bl[] = {ImVec2(x0, y1 - len), ImVec2(x0, y1), ImVec2(x0 + len, y1)};
+    const ImVec2 br[] = {ImVec2(x1 - len, y1), ImVec2(x1, y1), ImVec2(x1, y1 - len)};
+    dl->AddPolyline(tl, 3, top, 0, th);
+    dl->AddPolyline(tr, 3, top, 0, th);
+    dl->AddPolyline(bl, 3, bot, 0, th);
+    dl->AddPolyline(br, 3, bot, 0, th);
 }
 
 void plastic_panel(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale) {

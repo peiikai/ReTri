@@ -1031,8 +1031,8 @@ static void tabs_body(float scale, bool in_game, void (*prelaunch)(float)) {
             if (sel && lit) col = ImVec4(col.x * 0.88f, col.y * 0.88f, col.z * 0.88f, col.w);  // (the cursor on it: deeper)
             if (!t.on) col.w *= 0.45f;
             plastic_pill(dl, ImVec2(p.x, p.y + (sel ? 0 : 2 * scale)), ImVec2(p.x + tw[k], p.y + th - 2 * scale), 10 * scale, col,
-                         (sel ? 7 : 4) * scale, sel ? 1.0f : 0.55f, scale, sel);
-            ImU32 tc = sel ? pt.text_sel : t.on ? pt.text : pt.text_dim;
+                         (sel ? 7 : 4) * scale, sel ? 1.0f : 0.55f, scale, pt.brackets ? lit : sel);  // (brackets: the cursor)
+            ImU32 tc = sel ? pt.text_tab_sel : t.on ? pt.text : pt.text_dim;
             ImVec2 ts(text_w[k], tfs);
             dl->AddText(ImGui::GetFont(), tfs, ImVec2(p.x + (tw[k] - ts.x) * 0.5f, p.y + (th - ts.y) * 0.5f - (sel ? 2 : 1) * scale),
                         tc, L(t.name));
