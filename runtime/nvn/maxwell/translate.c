@@ -30,6 +30,7 @@ bool maxwell_glsl_stack_vars = true;
 bool maxwell_gmem_mirror;
 bool maxwell_skip_unsupported_stores;  // (shader.h)
 const uint8_t *maxwell_dbg_code;
+static bool g_dbg_now;  // (translating the LARECOMP_DBG_FS shader)
 uint32_t maxwell_dbg_pc;
 int maxwell_dbg_reg;
 const uint8_t *maxwell_dbg_vs;
@@ -982,7 +983,7 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         sp(&c->body, c->branchy ? "    exit_now = true; break;\n" : "    break;\n");
     } else if (OPM(0xe330000000000000ull, 0xfff0000000000000ull)) {  // KIL
         c->info->uses_discard = true;
-        if (getenv("LARECOMP_NO_DISCARD")) {
+        if (getenv("LARECOMP_NO_DISCARD") && (!maxwell_dbg_code || g_dbg_now)) {  // (with LARECOMP_DBG_FS: that shader only)
         } else if (!c->glsl) sp(&c->body, "    discard_fragment();\n");
         else if (c->stage == STAGE_FRAGMENT) sp(&c->body, "    discard;\n");
         else sp(&c->body, "    /* kil */\n");  // GLSL has discard in fragment shaders only
@@ -2540,6 +2541,7 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
     }
     // translate
     bool dbg = maxwell_dbg_code && blob == maxwell_dbg_code && stage == STAGE_FRAGMENT;
+    g_dbg_now = dbg;
     static int annotate = -1;
     if (annotate < 0) annotate = getenv("LARECOMP_SAVE_MSL") != NULL;
     c->branchy = any_branch;

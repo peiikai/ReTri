@@ -84,6 +84,7 @@ static struct {
     uint32_t channel_mask;
     uint8_t color_state[4], ds[8], ms[0x18], poly[4];
     float poly_offset[3];  // factor, units, clamp (nvnCommandBufferSetPolygonOffsetClamp)
+    bool depth_clamp;  // nvnCommandBufferSetDepthClamp: depth is clamped, not clipped
     uint32_t attrib[16];
     int nattrib;
     uint32_t stream[16][2];
@@ -2439,12 +2440,19 @@ static void bind_textures(int stage, ShaderInfo *si) {
                 [b copyFromTexture:tex sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(w, hh, 1)
                           toBuffer:buf destinationOffset:0 destinationBytesPerRow:w destinationBytesPerImage:w * hh
                            options:MTLBlitOptionStencilFromDepthStencil];
+                id<MTLBuffer> dbuf = [dev newBufferWithLength:w * hh * 4 options:MTLResourceStorageModeShared];
+                [b copyFromTexture:tex sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(w, hh, 1)
+                          toBuffer:dbuf destinationOffset:0 destinationBytesPerRow:w * 4 destinationBytesPerImage:w * hh * 4
+                           options:MTLBlitOptionDepthFromDepthStencil];
                 [b endEncoding];
                 char path[96]; snprintf(path, sizeof path, "build/stencil_%llx_%d.pgm", (unsigned long long)g_cur_fs_hash, ndump);
                 NSString *ps = [NSString stringWithUTF8String:path];
                 [cb() addCompletedHandler:^(id<MTLCommandBuffer> c) {
                     FILE *f = fopen(ps.UTF8String, "wb");
                     if (f) { fprintf(f, "P5 %lu %lu 255\n", (unsigned long)w, (unsigned long)hh); fwrite(buf.contents, 1, w * hh, f); fclose(f); }
+                    NSString *dp = [ps stringByReplacingOccurrencesOfString:@".pgm" withString:@".depth"];  // (raw float32 depth)
+                    f = fopen(dp.UTF8String, "wb");
+                    if (f) { fwrite(dbuf.contents, 4, w * hh, f); fclose(f); }
                 }];
                 st.rt_dirty = true;
             }
@@ -4354,7 +4362,16 @@ static void draw_one(CmdRec *r, bool indexed) {
     for (int i = 0; i < st.nattrib; i++) vkey.attr_kind[i] = (uint8_t)attr_kind(st.attrib[i] & 0xFF);
     for (int i = 0; i < st.rt.ncolor; i++) if (st.rt.color[i]) fkey.rt_kind[i] = (uint8_t)rt_kind(st.rt.color[i]->format);
     Prog *pr = get_program(st.program, &vkey, &fkey);
-    if (!pr || !pr->ready) { (stat_skipped++, skip_why(4027)); return; }
+    if (!pr || !pr->ready) {
+        if (getenv("LARECOMP_LOG_SKIPS")) {  // (which programs: once per vs / fs pair)
+            static uint64_t seen[256]; static int ns;
+            uint64_t k = st.program->stages[0].code_addr * 31 + st.program->stages[1].code_addr;
+            int i = 0; for (; i < ns && seen[i] != k; i++) {}
+            if (i == ns && ns < 256) { seen[ns++] = k; LOG("[skips] not ready: vs %llx fs %llx (%s)\n", (unsigned long long)st.program->stages[0].code_addr,
+                                                          (unsigned long long)st.program->stages[1].code_addr, !pr ? "no program" : pr->failed ? "failed" : "compiling"); }
+        }
+        (stat_skipped++, skip_why(4027)); return;
+    }
     g_stencil_slots = 0;
     if (pr->fi && (fkey.stencil_slots = stencil_slots_of(pr->fi))) {  // (a texture read as its stencil: another program)
         g_stencil_slots = fkey.stencil_slots;
@@ -4413,6 +4430,17 @@ static void draw_one(CmdRec *r, bool indexed) {
                     int i = 0; for (; i < nh && hs[i] != last_hash; i++) {}
                     if (i == nh && nh < 512) { hs[nh] = last_hash; tw[nh] = st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->width : 0; th[nh] = st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->height : 0; nh++; }
                     if (i < 512) cnt[i]++;
+                    static int nd;  // (every draw in order: targets and depth state)
+                    if (nd++ < 6000)
+                        LOG("[fsdraw] %d %016llx rt %llx %ux%u depth %llx dt %d dw %d df %d st %d dc %d n %llu i %llu vs %llx\n", nd, (unsigned long long)last_hash,
+                            st.rt.ncolor && st.rt.color[0] ? (unsigned long long)st.rt.color[0]->addr : 0ull,
+                            st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->width : 0, st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->height : 0,
+                            st.rt.depth ? (unsigned long long)st.rt.depth->addr : 0ull, st.ds[0], st.ds[1], st.ds[2], st.ds[3], st.depth_clamp, r->x[2], r->x[6],
+                            (unsigned long long)st.program->stages[0].code_addr);
+                    for (int sg = 0; pr && sg < 2; sg++) for (int k = 0; k < (sg ? pr->fi : pr->vi)->ntex; k++) {
+                        NvnTexture *t = shader_texture_object(sg, &(sg ? pr->fi : pr->vi)->tex[k]);
+                        if (t && nd < 6000) LOG("[fsread] %d %s t%d %llx %ux%u fmt %#x\n", nd, sg ? "fs" : "vs", k, (unsigned long long)t->addr, t->width, t->height, t->format);
+                    }
                     static int nst;  // (and the draws that test or write stencil: their state)
                     if (st.ds[3] && nst++ < 4000)
                         LOG("[fsstencil] %016llx ds %02x %02x %02x %02x %02x %02x %02x %02x ref %x/%x wmask %x/%x vmask %x/%x rt %ux%u depth %llx\n",
@@ -4700,6 +4728,10 @@ static void draw_one(CmdRec *r, bool indexed) {
         if (n++ < 30) LOG("[nostencil] fs %llx depth %s format %#x (frame %llu)\n", st.program ? (unsigned long long)st.program->stages[1].code_addr : 0ull,
                           st.rt.depth ? "yes" : "none", st.rt.depth ? st.rt.depth->format : 0, (unsigned long long)renderer_exec_frame());
     }
+    {   static uint64_t raw_fs = 1;  // (debug) LARECOMP_DBG_RASTER=<fs hash>: that shader without depth test or culling
+        if (raw_fs == 1) raw_fs = getenv("LARECOMP_DBG_RASTER") ? strtoull(getenv("LARECOMP_DBG_RASTER"), NULL, 16) : 0;
+        if (raw_fs && g_cur_fs_hash == raw_fs) no_depth = true;
+    }
     uint64_t dsk = hmix(hmix(hmix(0xcbf29ce484222325ull, st.ds, 8), st.stencil_mask, sizeof st.stencil_mask), st.stencil_vmask, sizeof st.stencil_vmask) ^ decal_le ^
                    (uint64_t)(sc_mark != 0) << 40 ^ (uint64_t)no_depth << 41 ^ (uint64_t)no_stencil << 42;  // (snow: snow_cover_check)
     id<MTLDepthStencilState> dss = dsk == last_dsk ? last_dss : nil;
@@ -4761,10 +4793,15 @@ static void draw_one(CmdRec *r, bool indexed) {
     // rasterizer
     uint8_t cull = st.poly[0];
     if (vkey.flip_x) cull = 0;  // (mirror mode's composite: one full-screen quad, either winding)
+    {   static uint64_t raw_fs = 1;  // (LARECOMP_DBG_RASTER: no culling either)
+        if (raw_fs == 1) raw_fs = getenv("LARECOMP_DBG_RASTER") ? strtoull(getenv("LARECOMP_DBG_RASTER"), NULL, 16) : 0;
+        if (raw_fs && g_cur_fs_hash == raw_fs) cull = 0;
+    }
     [enc setCullMode:cull == 1 ? MTLCullModeFront : cull == 2 ? MTLCullModeBack : MTLCullModeNone];
     bool ccw = st.poly[1] == 1;
     [enc setFrontFacingWinding:(ccw != vkey.flip_y) ? MTLWindingCounterClockwise : MTLWindingClockwise];
     [enc setTriangleFillMode:st.poly[2] == 1 ? MTLTriangleFillModeLines : MTLTriangleFillModeFill];
+    [enc setDepthClipMode:st.depth_clamp ? MTLDepthClipModeClamp : MTLDepthClipModeClip];
     {   // polygon offset (decals on floors: without it they z-fight). Enables: bit 2 = fill (NVN PolygonOffsetEnable)
         static float last[3] = {0, 0, 0};
         float f[3] = {0, 0, 0};
@@ -5931,6 +5968,11 @@ static void copy_texture(const TexRefRec *src, const TexRefRec *dst, uint64_t fl
     extern bool renderer_texture_level_fresh(NvnTexture *t);
     renderer_texture_level_fresh(dt);  // nor a level-change clear
     const int32_t *sr = src->region, *dr = dst->region;
+    {   static long at = -1; if (at < 0) at = getenv("LARECOMP_LIST_FS_AT") ? atol(getenv("LARECOMP_LIST_FS_AT")) : 0;
+        if (at && (long)renderer_exec_frame() == at)
+            LOG("[fscopy] %llx %ux%u f%#x -> %llx %ux%u f%#x\n", (unsigned long long)st_->addr, st_->width, st_->height, st_->format,
+                (unsigned long long)dt->addr, dt->width, dt->height, dt->format);
+    }
     if (g_debug_frame) {
         static int nl;
         uint64_t total = tegra_total_size(&st_->layout), nz = 0;
@@ -6166,6 +6208,7 @@ static void exec_list(uint64_t handle, int depth) {
             break;
         }
         case CMD_SET_POLYGON_OFFSET: memcpy(st.poly_offset, r->f, sizeof st.poly_offset); break;
+        case CMD_SET_DEPTH_CLAMP: st.depth_clamp = r->x[0] != 0; break;
         case CMD_SET_PRIMITIVE_RESTART: st.prim_restart = r->x[0] != 0; st.restart_index = (uint32_t)r->x[1]; break;
         case CMD_SET_COPY_STRIDES: st.copy_row_stride = r->x[0]; st.copy_image_stride = r->x[1]; break;
         case CMD_CLEAR_COLOR: {
