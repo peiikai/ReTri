@@ -1296,6 +1296,31 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         if (dp != PT) { c->pred_used[dp] = 1; sp(&c->body, "      p%d = (sum >> 32) != 0ul;\n", dp); }
         if (d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      r%d = uint(sum);\n", d); }
         sp(&c->body, "    }\n");
+    } else if (OPM(0x3a00000000000000ull, 0xfe00000000000000ull)) {  // VMNMX (Ryujinx InstVmnmx): min / max of A and B
+        // (byte / half / word selects, signed or not; .MN = min), then the second op with C: acc / min / max (merges and
+        // saturation not modelled)
+        int asel = (int)(((w >> 45) & 8) | ((w >> 36) & 7)), bsel = (int)(((w >> 46) & 8) | ((w >> 28) & 7));
+        int vop = (int)bits(w, 51, 3);
+        bool mn = bits(w, 56, 1), bvideo = bits(w, 50, 1);
+        bool sgn = (asel & 8) || (bvideo && (bsel & 8));
+        char av[200], bv[200];
+        static const char *const ext[16] = {"uint((%s) & 0xFFu)", "uint(((%s) >> 8) & 0xFFu)", "uint(((%s) >> 16) & 0xFFu)",
+                                            "uint((%s) >> 24)", "uint((%s) & 0xFFFFu)", "uint((%s) >> 16)", "uint(%s)", "uint(%s)",
+                                            "uint(int(char((%s) & 0xFFu)))", "uint(int(char(((%s) >> 8) & 0xFFu)))",
+                                            "uint(int(char(((%s) >> 16) & 0xFFu)))", "uint(int(char((%s) >> 24)))",
+                                            "uint(int(short((%s) & 0xFFFFu)))", "uint(int(short((%s) >> 16)))", "uint(%s)", "uint(%s)"};
+        snprintf(av, sizeof av, ext[asel], R(a));
+        if (bvideo) snprintf(bv, sizeof bv, ext[bsel], R((int)bits(w, 20, 8)));
+        else snprintf(bv, sizeof bv, "0x%08xu", (uint32_t)bits(w, 20, 16));
+        const char *ty = sgn ? "int" : "uint";
+        char r1[600];
+        snprintf(r1, sizeof r1, "%s(%s(%s), %s(%s))", mn ? "min" : "max", ty, av, ty, bv);
+        const char *cv = R((int)bits(w, 39, 8));
+        if (vop == 4) sprintf(t, "uint(%s + %s(%s))", r1, ty, cv);
+        else if (vop == 5) sprintf(t, "uint(min(%s, %s(%s)))", r1, ty, cv);
+        else if (vop == 6) sprintf(t, "uint(max(%s, %s(%s)))", r1, ty, cv);
+        else sprintf(t, "uint(%s)", r1);
+        set_reg(c, d, t);
     } else if (OPM(0x50d8000000000000ull, 0xfff8000000000000ull)) {  // VOTE (Ryujinx InstVote): per lane for now -
         // ALL / ANY give the source predicate, EQ true, the ballot this lane's bit (right when the lanes agree)
         int mode = (int)bits(w, 48, 2), vp = (int)bits(w, 45, 3);
