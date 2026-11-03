@@ -1,11 +1,11 @@
 // Warp for another game on the engine (experimental: Echoes of Wisdom).
 //
-// EoW's event actions GameControl.RequestLevelJump (main+0x15a9fcc) and the respawn action (main+0x15a6520) don't
-// change level themselves: they write the level's jump request object R and return, and the game acts on it once it
-// sees a destination there. R has LA's request layout at another offset: level name at R+0x218 (length R+0x258),
-// locator (spawn point) at R+0x260 (length R+0x2a0, the field that says "a destination"), offset vec4 at R+0x2b0. The
-// actions find R through main+0x160a0b0: the level object's +0x1c0. A level registers R there while it loads; that
-// store is where we hear of it (rt_other_request_obj).
+// A warp starts the game's own fast-travel event (start_map_warp: event/MapWarp.bfevfl with our level and locator as
+// its parameters), as the map screen does; the event's GameControl.RequestLevelJump fills the level's jump request
+// and the event system performs it when the event ends. Writing the request alone does nothing: the game reads it only
+// when an event ends (its processor, main+0x160f7e0, runs then). The request has LA's layout at another offset: level
+// at R+0x218 (length +0x258), locator at +0x260 (length +0x2a0), offset +0x2b0; tools/gen.py hooks the processor to
+// tell us where it is (rt_other_request_holder). The places come from the game's level files (warp_other_places).
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -17,6 +17,8 @@
 
 #include "../hle.h"
 
+static volatile uint64_t g_loads;   // level files read (warp_other_file_read)
+static char g_loaded[64];           // the last level read
 static volatile uint64_t g_req;     // the current level's request object
 static volatile uint64_t g_holder;  // the request processor's object (the request at +0x10)
 static volatile uint64_t g_owner, g_ctx;  // (its owner - the job queue - and context, at the last run)
@@ -127,7 +129,75 @@ static void scan_globals(void) {
     LOG("[warp-scan] %d hits\n", hits);
 }
 
+// Start the game's own fast-travel event (event/MapWarp.bfevfl, entry LevelWarpStartMenu) with our level and locator
+// as its parameters - the sequence main+0x256f0c0 (the map screen's warp) runs: load the flow file through the resource
+// manager ([main+0x40311d0]), the entry, the event's flags, a two-entry parameter list, then hand the event to the
+// event system (main+0x160c640 with [main+0x401a250]). The event's RequestLevelJump does the rest.
+static void call(Cpu *c, uint64_t fn, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
+    c->x[0] = a0, c->x[1] = a1, c->x[2] = a2, c->x[3] = a3;
+    guest_call(c, fn);
+}
+static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
+    static uint64_t m;  // scratch: 0x000 path text, 0x100 path view, 0x110 entry view, 0x120 level view, 0x130 locator
+    // view, 0x140 resource out, 0x150 flow out, 0x160 event out, 0x170 params, 0x180 start out, 0x200 level text,
+    // 0x280 locator text, 0x300 entry text
+    if (!m) m = (uint64_t)(uintptr_t)hle_alloc(0x400);
+    memset((void *)(uintptr_t)m, 0, 0x400);
+    char *mm = (char *)(uintptr_t)m;
+    // (another level: LevelWarpStartMenu; a place in this one: LocationWarpStartMenu)
+    const char *path = "event/MapWarp.bfevfl", *entry = strcmp(level, g_loaded) ? "LevelWarpStartMenu" : "LocationWarpStartMenu";
+    strcpy(mm, path);
+    strcpy(mm + 0x200, level);
+    strcpy(mm + 0x280, locator);
+    strcpy(mm + 0x300, entry);
+    uint64_t *q = (uint64_t *)(uintptr_t)m;
+    q[0x100 / 8] = m, q[0x108 / 8] = strlen(path);
+    q[0x110 / 8] = m + 0x300, q[0x118 / 8] = strlen(entry);
+    q[0x120 / 8] = m + 0x200, q[0x128 / 8] = strlen(level);
+    q[0x130 / 8] = m + 0x280, q[0x138 / 8] = strlen(locator);
+    uint64_t saved[31], sp = c->sp, pc = c->pc;
+    memcpy(saved, c->x, sizeof saved);
+    bool ok = false;
+    call(c, 0x70026e7560ull, m + 0x140, *(uint64_t *)(uintptr_t)0x70040311d0ull, m + 0x100, 0);  // the flow file
+    uint64_t res = q[0x140 / 8];
+    LOG("[warp] event file %llx\n", (unsigned long long)res);
+    if (res) {
+        call(c, 0x700038eba0ull, res, 0, 0, 0);
+        call(c, 0x70006692e0ull, m + 0x150, m + 0x140, 0, 0);       // the flow
+        call(c, 0x700159f940ull, m + 0x160, m + 0x150, m + 0x110, 0);  // its entry: the event
+        uint64_t ev = q[0x160 / 8];
+        LOG("[warp] flow %llx event %llx\n", (unsigned long long)q[0x150 / 8], (unsigned long long)ev);
+        if (ev) {
+            call(c, 0x70015aa740ull, ev, 1, 0, 0);
+            call(c, 0x70015ad340ull, ev, 0, 0, 0);
+            *(uint64_t *)(uintptr_t)(ev + 0x2f0) = 0xffffffffffffbffeull;
+            *(uint32_t *)(uintptr_t)(ev + 0x2f8) = 0x40;
+            call(c, 0x70027adab0ull, m + 0x170, 2, 0, 0);  // the parameters
+            uint64_t prm = q[0x170 / 8];
+            call(c, 0x70027ae400ull, prm, 0x70032e917eull, 5, m + 0x120);  // "level"
+            call(c, 0x70027ae400ull, prm, 0x70032d5c42ull, 7, m + 0x130);  // "locator"
+            call(c, 0x700160c640ull, m + 0x180, *(uint64_t *)(uintptr_t)0x700401a250ull, m + 0x160, m + 0x170);
+            LOG("[warp] map-warp event started (%llx)\n", (unsigned long long)q[0x180 / 8]);
+            ok = true;
+        }
+    }
+    memcpy(c->x, saved, sizeof saved);
+    c->sp = sp, c->pc = pc;
+    return ok;
+}
+
 void warp_other_game_tick(Cpu *c) {
+    if (g_pending && !getenv("LARECOMP_WARP_REQUEST_ONLY")) {  // the game's own fast-travel event
+        pthread_mutex_lock(&g_lock);
+        char lv[64], lc[64];
+        snprintf(lv, sizeof lv, "%s", g_level);
+        snprintf(lc, sizeof lc, "%s", g_locator);
+        g_pending = 0;
+        pthread_mutex_unlock(&g_lock);
+        LOG("[warp] map-warp event to %s / %s\n", lv, lc);
+        start_map_warp(c, lv, lc);
+        return;
+    }
     {   // (debug) LARECOMP_WATCH_LIVE=<frame>: from then, who touches the request reached through LARECOMP_WARP_GLOBAL
         static long at = -1;
         if (at < 0) at = getenv("LARECOMP_WATCH_LIVE") ? atol(getenv("LARECOMP_WATCH_LIVE")) : 0;
@@ -313,8 +383,6 @@ const char *warp_other_place_level(int i) { return i >= 0 && i < g_nplaces ? g_p
 const char *warp_other_place_locator(int i) { return i >= 0 && i < g_nplaces ? g_places[i].locator : ""; }
 
 // ---- level loads (fs.c: the first read of each romfs file)
-static volatile uint64_t g_loads;
-static char g_loaded[64];
 const char *warp_other_current_level(void) { return g_loaded; }
 void warp_other_file_read(const char *path) {
     const char *p = strstr(path, "region_common/level/");
