@@ -466,6 +466,7 @@ static void pool_entries_forget(NvnTexture *t);
 // it see the slots empty, as without the render thread. (The NvnTexture stays allocated until then, so no other
 // texture can take its address while a slot still names it.)
 void nvn_texture_destroy(NvnTexture *t) {
+    if (game_other()) { extern void renderer_texture_destroying(NvnTexture *t); renderer_texture_destroying(t); }
     pool_entries_forget(t);
     backend_texture_destroyed(t);
     free(t);

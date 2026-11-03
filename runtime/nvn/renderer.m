@@ -445,6 +445,21 @@ static void wait_cb(id<MTLCommandBuffer> c) {
 static pthread_mutex_t gone_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct { void *nvn, *mtl; } gone[4096];
 static int ngone;
+// (render thread, before the texture's memory is freed: nvn_texture_destroy) Nothing of the renderer's current state
+// may keep pointing at it - a pass using it is closed and the render targets forget it. The next texture can be
+// allocated at the same address: a stale pointer then named a different texture (another game: GPU page faults when
+// effects with temporary render targets came and went, only at full speed).
+void renderer_texture_destroying(NvnTexture *t) {
+    bool used = st.rt.depth == t;
+    for (int i = 0; i < st.rt.ncolor && i < 8; i++) used |= st.rt.color[i] == t;
+    if (!used) { td_forget(t); return; }
+    if (enc) end_pass();
+    for (int i = 0; i < st.rt.ncolor && i < 8; i++) if (st.rt.color[i] == t) st.rt.color[i] = NULL;
+    if (st.rt.depth == t) st.rt.depth = NULL;
+    st.rt_dirty = true;
+    td_forget(t);
+}
+
 void renderer_texture_gone(void *nvn_tex, void *mtl_tex) {
     pthread_mutex_lock(&gone_lock);
     if (ngone < 4096) { gone[ngone].nvn = nvn_tex; gone[ngone].mtl = mtl_tex; ngone++; }
@@ -892,6 +907,16 @@ static void begin_pass(void) {
             rp.renderTargetWidth = (NSUInteger)pass_rt_w;
             rp.renderTargetHeight = (NSUInteger)pass_rt_h;
         }
+        if (game_other() && mw > 0 && mh > 0 && (cw > mw || ch > mh || !rp.renderTargetWidth)) {
+            // (another game: attachments of different sizes - Metal's default render area is then undefined; the smallest
+            // one bounds it, so nothing is drawn past an attachment's end)
+            static int nlog;
+            if ((cw > mw || ch > mh) && nlog++ < 10) LOG("[pass] attachments of different sizes: area %dx%d, smallest %dx%d\n", cw, ch, mw, mh);
+            if (!pass_rt_w || pass_rt_w > mw) pass_rt_w = mw;
+            if (!pass_rt_h || pass_rt_h > mh) pass_rt_h = mh;
+            rp.renderTargetWidth = (NSUInteger)pass_rt_w;
+            rp.renderTargetHeight = (NSUInteger)pass_rt_h;
+        }
     }
     // Commit the frame in chunks: the GPU starts on the first passes while the CPU still encodes the rest. The
     // game waits for its previous frame before it submits the next one, so with one command buffer per frame the
@@ -1155,7 +1180,16 @@ static uint64_t ring_alloc_padded(const void *data, uint64_t copy, uint64_t tota
         aligned = 0;
     }
     memcpy((uint8_t *)ring.contents + aligned, data, copy);
-    memset((uint8_t *)ring.contents + aligned + copy, 0, total - copy);
+    // (zeros past the copy: Maxwell reads 0 there. All of it - EoW's effect shaders index far past their bound size, and
+    // stale ring data instead of zeros led to GPU page faults)
+    memset((uint8_t *)ring.contents + aligned + copy, 0, total - copy > 0x1000 ? 0x1000 : total - copy);
+    static uint64_t nz, zbytes, last_log;  // (diagnostics: how much zeroing indexed buffers cost)
+    nz++, zbytes += total - copy;
+    uint64_t now = plat_now_ns();
+    if (getenv("LARECOMP_LOG_PAD") && now - last_log > 2000000000ull) {
+        LOG("[pad] %llu padded buffers, %.1f MB zeroed in the last ~2 s\n", (unsigned long long)nz, zbytes / 1e6);
+        nz = zbytes = 0, last_log = now;
+    }
     ring_off = aligned + total;
     return aligned;
 }
@@ -1731,7 +1765,11 @@ static Prog *get_program(NvnProgram *p, ShaderKey *vkey, ShaderKey *fkey) {
         uint64_t vh = shader_stage_hash(&p->stages[0]), fh = shader_stage_hash(&p->stages[1]), ck = prog_content_key(vh, fh, vkey, fkey);
         pr = vh && fh ? prep_find_prog(ck) : nil;
         if (pr) cache[key] = pr;
-        else shader_first_visit("program", vh, fh, ck);
+        else {
+            shader_first_visit("program", vh, fh, ck);
+            if (game_other()) LOG("[shader] program vs %llx fs %llx = %016llx %016llx\n", (unsigned long long)p->stages[0].code_addr,
+                                  (unsigned long long)p->stages[1].code_addr, (unsigned long long)vh, (unsigned long long)fh);
+        }
     }
     if (pr) {
         prog_tab[slot].key = h;
@@ -2607,13 +2645,14 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
         uint64_t size = si->cbuf_size[k];
         if (!r.addr) {
             static const uint8_t zeros[0x10000];
-            uint64_t off = ring_alloc(zeros, size ? size : 256);
+            uint64_t off = ring_alloc(zeros, (si->cbuf_dynamic & (1u << k)) && game_other() ? 0x10000 : size ? size : 256);
             if (stage == 0) [enc setVertexBuffer:ring offset:off atIndex:k];
             else [enc setFragmentBuffer:ring offset:off atIndex:k];
             continue;
         }
         if ((si->cbuf_dynamic & (1u << k)) && r.size) size = r.size > 0x10000 ? 0x10000 : r.size;  // indexed: whole buffer
         uint64_t need = size < 16 ? 16 : size;  // (what the shader reads: past the bound size, zeros - ring_alloc_padded)
+        if ((si->cbuf_dynamic & (1u << k)) && game_other()) need = 0x10000;  // (indexed: any index stays in zeros we own)
         if (size > r.size && r.size) size = r.size;
         if (size < 16) size = 16;
         uint64_t off = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);  // snapshot: later CPU writes must not leak in
@@ -2812,12 +2851,13 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
             if (r.addr) {
                 if ((si->cbuf_dynamic & (1u << k)) && r.size) size = r.size > 0x10000 ? 0x10000 : r.size;
                 uint64_t need = size < 16 ? 16 : size;  // (as the draws': past the bound size, zeros)
+                if ((si->cbuf_dynamic & (1u << k)) && game_other()) need = 0x10000;
                 if (size > r.size && r.size) size = r.size;
                 if (size < 16) size = 16;
                 off = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);
             } else {
                 static const uint8_t zeros[0x10000];
-                off = ring_alloc(zeros, size);
+                off = ring_alloc(zeros, (si->cbuf_dynamic & (1u << k)) && game_other() ? 0x10000 : size);
             }
         }
         [ce setBuffer:ring offset:off atIndex:k];
@@ -4003,7 +4043,24 @@ static void draw_one(CmdRec *r, bool indexed) {
                     while (*p == ',') p++;
                 }
             }
-            for (int i = 0; i < nat; i++) if (fs == skip_at[i]) { stat_skipped++; return; }
+            for (int i = 0; i < nat; i++) if (fs == skip_at[i]) {
+                static int nlog;  // (what the skipped draw would have been: its vertex setup and counts)
+                if (nlog++ < 6) {
+                    LOG("[skip-fs] fs %llx: op %u x %llx %llx %llx %llx %llx %llx | attrs", (unsigned long long)fs, r->op,
+                        (unsigned long long)r->x[0], (unsigned long long)r->x[1], (unsigned long long)r->x[2],
+                        (unsigned long long)r->x[3], (unsigned long long)r->x[4], (unsigned long long)r->x[5]);
+                    for (int k = 0; k < st.nattrib; k++)
+                        LOG(" a%d(f%#x s%u o%u)", k, st.attrib[k] & 0xFF, (st.attrib[k] >> 8) & 0x1F, st.attrib[k] >> 13);
+                    LOG(" | streams");
+                    for (int k = 0; k < 16; k++)
+                        if (st.vbuf[k].addr || st.stream[k][0])
+                            LOG(" vb%d(%llx,%llu,stride %u div %u)", k, (unsigned long long)st.vbuf[k].addr,
+                                (unsigned long long)st.vbuf[k].size, st.stream[k][0], st.stream[k][1]);
+                    LOG("\n");
+                }
+                stat_skipped++;
+                return;
+            }
             extern bool pot_level_active(void);
             if (last_hash == 0xa2177dbb72197bd9ull && pot_level_active()) { stat_skipped++; return; }  // item twinkle
         }
@@ -5485,9 +5542,22 @@ static void copy_texture(const TexRefRec *src, const TexRefRec *dst, uint64_t fl
         return;
     }
     if (renderer_format_is_depth(dt->format) || (s.pixelFormat == d.pixelFormat && sw == dw && sh == dh && s.sampleCount == d.sampleCount)) {
+        long cw2 = MIN(sw, dw), ch2 = MIN(sh, dh);
+        if (game_other()) {  // (another game: the region inside both textures - a copy past one faults the GPU)
+            long lw = MIN(cw2, MIN((long)s.width - (long)sx0, (long)d.width - (long)dx0));
+            long lh = MIN(ch2, MIN((long)s.height - (long)sy0, (long)d.height - (long)dy0));
+            if (lw != cw2 || lh != ch2) {
+                static int nlog;
+                if (nlog++ < 10) LOG("[copy] clamped %ldx%ld -> %ldx%ld (src %lux%lu at %ld,%ld, dst %lux%lu at %ld,%ld)\n", cw2, ch2, lw, lh,
+                                     (unsigned long)s.width, (unsigned long)s.height, (long)sx0, (long)sy0, (unsigned long)d.width,
+                                     (unsigned long)d.height, (long)dx0, (long)dy0);
+            }
+            if (lw <= 0 || lh <= 0 || sx0 < 0 || sy0 < 0 || dx0 < 0 || dy0 < 0) return;
+            cw2 = lw, ch2 = lh;
+        }
         id<MTLBlitCommandEncoder> b = [cb() blitCommandEncoder];
         [b copyFromTexture:s sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(sx0, sy0, 0)
-                sourceSize:MTLSizeMake(MIN(sw, dw), MIN(sh, dh), 1) toTexture:d destinationSlice:0 destinationLevel:0
+                sourceSize:MTLSizeMake(cw2, ch2, 1) toTexture:d destinationSlice:0 destinationLevel:0
          destinationOrigin:MTLOriginMake(dx0, dy0, 0)];
         [b endEncoding];
         return;

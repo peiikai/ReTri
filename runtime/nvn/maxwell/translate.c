@@ -1484,8 +1484,15 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         }
     } else if (OPM(0x5c30000000000000ull, 0xfff8000000000000ull) || OPM(0x4c30000000000000ull, 0xfff8000000000000ull) ||
                OPM(0x3830000000000000ull, 0xfef8000000000000ull)) {  // FLO
-        const char *bv = B(false);
-        sprintf(t, bits(w, 48, 1) ? "(int(%s) < 0 ? (31u - clz(~%s)) : (31u - clz(%s)))" : "(31u - clz(%s))", bv, bv, bv);
+        // (Ryujinx InstFlo: .S bit 48 signed, .SH bit 41 the shift amount - the position xor 31, as BFE.BREV + FLO.SH
+        // finds the lowest set bit - and NegB bit 40 inverts the source. No bit set: 0xFFFFFFFF either way. Without .SH,
+        // EoW's light-mask loops cleared the wrong bit and never ended: GPU hangs / faults)
+        char src[300], pos[700];
+        snprintf(src, sizeof src, bits(w, 40, 1) ? "(~%s)" : "%s", B(false));
+        snprintf(pos, sizeof pos, bits(w, 48, 1) ? "(int(%s) < 0 ? (31u - clz(~%s)) : (31u - clz(%s)))" : "(31u - clz(%s))",
+                 src, src, src);
+        if (bits(w, 41, 1)) snprintf(t, sizeof t, "(%s == 0xFFFFFFFFu ? 0xFFFFFFFFu : (%s ^ 31u))", pos, pos);
+        else snprintf(t, sizeof t, "%s", pos);
         set_reg(c, d, t);
     } else if (OPM(0x5c08000000000000ull, 0xfff8000000000000ull) || OPM(0x4c08000000000000ull, 0xfff8000000000000ull) ||
                OPM(0x3808000000000000ull, 0xfef8000000000000ull)) {  // POPC
@@ -2447,7 +2454,9 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
     // ---------------------------------------------------------- MSL source
     Str s = {0};
     sp(&s, "#include <metal_stdlib>\nusing namespace metal;\n");
-    sp(&s, "static inline uint cbr(constant uint4 *cb, uint off) { return cb[off >> 4][(off >> 2) & 3]; }\n");
+    // (indexed reads stay inside the 64 KB a constant buffer can be: Maxwell returns 0 past the bound size, and the
+    // renderer binds such buffers zero-padded to 64 KB for other games - an index from vertex data read far past)
+    sp(&s, "static inline uint cbr(constant uint4 *cb, uint off) { return cb[(off >> 4) & 0xFFFu][(off >> 2) & 3]; }\n");
     sp(&s, "static inline uint bfe_u(uint v, uint ctl) { uint pos = ctl & 0xFFu, len = (ctl >> 8) & 0xFFu; if (len == 0u) return 0u; if (pos >= 32u) return 0u; return extract_bits(v, pos, min(len, 32u - pos)); }\n");
     sp(&s, "static inline uint bfe_s(uint v, uint ctl) { uint pos = ctl & 0xFFu, len = (ctl >> 8) & 0xFFu; if (len == 0u) return 0u; if (pos >= 32u) return (int(v) < 0) ? 0xFFFFFFFFu : 0u; return uint(extract_bits(int(v), pos, min(len, 32u - pos))); }\n");
     sp(&s, "static inline uint bfi(uint ins, uint ctl, uint base) { uint pos = ctl & 0xFFu, len = (ctl >> 8) & 0xFFu; if (len == 0u || pos >= 32u) return base; return insert_bits(base, ins, pos, min(len, 32u - pos)); }\n");

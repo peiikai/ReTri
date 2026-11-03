@@ -1552,7 +1552,9 @@ static void present_hooks(void) {
     if (slow_ms < 0) slow_ms = getenv("LARECOMP_SIM_SLOW_FRAME_MS") ? atol(getenv("LARECOMP_SIM_SLOW_FRAME_MS")) : 0;
     static long slow_until = -1;  // LARECOMP_SLOW_FRAME_UNTIL=<frame>: the stall ends there (frame pacing recovery tests)
     if (slow_until < 0) slow_until = getenv("LARECOMP_SLOW_FRAME_UNTIL") ? atol(getenv("LARECOMP_SLOW_FRAME_UNTIL")) : 0;
-    if (slow_ms > 0 && total_frames > 2600 && (!slow_until || (long)total_frames < slow_until)) usleep((useconds_t)slow_ms * 1000);
+    static long slow_from = -1;  // LARECOMP_SLOW_FRAME_FROM=<frame> (default 2600): where the simulated stall starts
+    if (slow_from < 0) slow_from = getenv("LARECOMP_SLOW_FRAME_FROM") ? atol(getenv("LARECOMP_SLOW_FRAME_FROM")) : 2600;
+    if (slow_ms > 0 && (long)total_frames > slow_from && (!slow_until || (long)total_frames < slow_until)) usleep((useconds_t)slow_ms * 1000);
     extern void fnprof_frame(uint64_t frame);
     fnprof_frame(total_frames);
     extern void reboot_test_frame(uint64_t frame);  // runtime/main.c (LARECOMP_REBOOT_AT)
