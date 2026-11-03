@@ -517,6 +517,39 @@ static ssize_t romfs_read(uint8_t *dst, uint64_t size, uint64_t off) {
     return (ssize_t)done;
 }
 
+// (debug) LARECOMP_FS_TRAP=<text>: a file opened / first read whose path has it - the path and the guest callers
+static void fs_trap(const char *p) {
+    static const char *trap = (const char *)1;
+    if (trap == (const char *)1) trap = getenv("LARECOMP_FS_TRAP");
+    Cpu *gc = trap && strstr(p, trap) ? kernel_current_cpu() : NULL;
+    if (!gc) return;
+    LOG("[fs-trap] %s lr %llx callers:", p, (unsigned long long)gc->x[30]);
+    uint64_t fp = gc->x[29];
+    for (int i = 0; i < 24 && fp >= GUEST_LO && fp < GUEST_HI; i++, fp = *(uint64_t *)(uintptr_t)fp)
+        LOG(" %llx", (unsigned long long)*(uint64_t *)(uintptr_t)(fp + 8));
+    LOG("\n");
+    { extern void rt_trace_dump(void); rt_trace_dump(); }
+    // (debug) LARECOMP_FS_SCAN=<text>: then every NUL-ended copy of it in the guest heap, with the strings around it
+    const char *want = getenv("LARECOMP_FS_SCAN");
+    if (!want) return;
+    extern uint64_t kernel_heap_size(void);
+    size_t wl = strlen(want);
+    const uint8_t *h = (const uint8_t *)(uintptr_t)HEAP_BASE, *end = h + kernel_heap_size();
+    int hits = 0;
+    for (const uint8_t *q = h + 1; q + wl + 1 < end && hits < 60; q++) {
+        if (*q != (uint8_t)want[0] || q[-1] != 0 || q[wl] != 0 || memcmp(q, want, wl)) continue;
+        hits++;
+        LOG("[fs-scan] %llx:", (unsigned long long)(uintptr_t)q);
+        for (const uint8_t *r = q - 0x100; r < q + 0x140; r++) {  // printable runs of 4+ before a NUL
+            if (r < h || r[-1] != 0 || r[0] < 'A' || r[0] > 'z') continue;
+            int n = 0;
+            while (n < 64 && r[n] >= 0x20 && r[n] < 0x7f) n++;
+            if (n >= 4 && r[n] == 0) LOG(" %+d:'%.*s'", (int)(r - q), n, r);
+        }
+        LOG("\n");
+    }
+}
+
 // Path of the RomFS file containing image offset `off` (NULL if none).
 const char *romfs_file_at(uint64_t off) {
     int lo = 0, hi = rom_nfiles - 1;
@@ -550,6 +583,8 @@ static void storage(Service *s, IpcReq *req, IpcResp *resp) {
             if (path && path != last) {
                 last = path;
                 if (getenv("LARECOMP_LOG_FILES")) LOG("[fs] read %s\n", path);
+                fs_trap(path);
+                { extern void warp_other_file_read(const char *path); warp_other_file_read(path); }
                 romfs_file_read_hook(path);
             }
         }
@@ -1010,6 +1045,7 @@ static void filesystem(Service *s, IpcReq *req, IpcResp *resp) {
     }
     case 8: {  // OpenFile(mode)
         uint32_t mode = IN(uint32_t, 0);
+        fs_trap(p);
         bool save = fs->journaled && (mode & 2);
         char work[2100];
         struct stat sb;

@@ -542,6 +542,7 @@ def main():
     # patches, hooks or randomizer code (all of them are LA addresses)
     args = ap.parse_args()
 
+    global HOOKS, PATCHES
     t0 = time.time()
     m = Module(args.name, args.nso, args.base, args.simd)
     import game_addresses
@@ -553,8 +554,50 @@ def main():
         if args.name == 'main' and game_addresses.game_for_build_id(m.nso.build_id) != args.game:
             sys.exit(f'{args.name}: main build ID {m.nso.build_id[:16].upper()} is not {args.game}')
         print(f'{args.name}: game {game_addresses.GAMES[args.game][0]} (no LA patches)', file=sys.stderr)
+        if args.name == 'main' and args.game == 'eow':
+            # (warp, runtime/hle/warp_other.c) the level-jump request processor (main+0x160f7e0, x0 = its object,
+            # the request at +0x10): its `mov x20, x0` tells us where the request is
+            def _eow_request(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0xaa0003f4, hex(w)  # mov x20, x0
+                return ('{ extern void rt_other_request_holder(uint64_t); rt_other_request_holder(c->x[0]); c->x[20] = c->x[0]; }'
+                        f'  /* {a:#x}: mov x20, x0 (level-jump request processor) */')
+            PATCHES[0x700160f804] = _eow_request
+        if args.name == 'main' and os.environ.get('GEN_TRACE_STORE_OFF'):  # (debug) every `str xT, [xN, #off]` and
+            # `stp` whose either slot is at one of these offsets (comma-separated): the runtime hears of it
+            # (rt_trace_store: site, base, value) - finding where an object is registered
+            offs = {int(o, 0) for o in os.environ['GEN_TRACE_STORE_OFF'].split(',')}
+            def _reg(r):
+                return 'c->sp' if r == 31 else f'c->x[{r}]'
+            def _trace(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                rn = (w >> 5) & 31
+                base = _reg(rn)
+                if (w & 0xFFC00000) == 0xF9000000:
+                    off = ((w >> 10) & 0xFFF) * 8
+                    pairs = [(off, w & 31)]
+                else:  # stp (signed offset)
+                    imm = (w >> 15) & 0x7F
+                    off = (imm - 128 if imm & 64 else imm) * 8
+                    pairs = [(off, w & 31), (off + 8, (w >> 10) & 31)]
+                body = ''.join(f'*(uint64_t *)(uintptr_t)({base} + {o}) = {"0ull" if r == 31 else _reg(r)}; ' for o, r in pairs)
+                body += 'uint64_t b_ = ' + base + '; '
+                calls = ''.join(f'rt_trace_store({a:#x}ull, b_ + {o}, {"0ull" if r == 31 else _reg(r)}); ' for o, r in pairs if o in offs)
+                return ('{ extern void rt_trace_store(uint64_t, uint64_t, uint64_t); ' + body + calls + '}'
+                        f'  /* {a:#x}: traced store */')
+            n = 0
+            for i, w in enumerate(m.words):
+                if (w & 0xFFC00000) == 0xF9000000 and ((w >> 10) & 0xFFF) * 8 in offs and ((w >> 5) & 31) != (w & 31):
+                    PATCHES[m.lo + i * 4] = _trace
+                    n += 1
+                elif (w & 0xFFC00000) == 0xA9000000:
+                    imm = (w >> 15) & 0x7F
+                    off = (imm - 128 if imm & 64 else imm) * 8
+                    if (off in offs or off + 8 in offs) and ((w >> 5) & 31) not in (w & 31, (w >> 10) & 31):
+                        PATCHES[m.lo + i * 4] = _trace
+                        n += 1
+            print(f'{args.name}: {n} stores to {sorted(hex(o) for o in offs)} traced', file=sys.stderr)
     elif args.name == 'main':
-        global HOOKS, PATCHES
         try:
             version = game_addresses.select_build_id(m.nso.build_id)
         except game_addresses.UnknownGameVersion as e:

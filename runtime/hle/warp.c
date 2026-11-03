@@ -901,3 +901,36 @@ void rt_log_resname(uint64_t p) {
     const char *s = (const char *)(uintptr_t)*(uint64_t *)(uintptr_t)p;
     if (s) LOG("[resname] %.120s\n", s);
 }
+
+// (debug, tools/gen.py GEN_TRACE_STORE_OFF) every traced `str xT, [xN, #off]`: the values stored, with their site;
+// rt_trace_dump shows which hold a level-jump request's strings (level at +0x218, length at +0x258)
+static struct { uint64_t pc, val; } g_tr[8192];
+static int g_ntr;
+static pthread_mutex_t g_tr_lock = PTHREAD_MUTEX_INITIALIZER;
+void rt_trace_store(uint64_t pc, uint64_t base, uint64_t val) {
+    (void)base;
+    if (val < GUEST_LO || val >= GUEST_HI) return;
+    pthread_mutex_lock(&g_tr_lock);
+    int i = 0;
+    for (; i < g_ntr && !(g_tr[i].pc == pc && g_tr[i].val == val); i++) {}
+    if (i == g_ntr && g_ntr < 8192) g_tr[g_ntr].pc = pc, g_tr[g_ntr++].val = val;
+    pthread_mutex_unlock(&g_tr_lock);
+}
+void rt_trace_dump(void) {
+    pthread_mutex_lock(&g_tr_lock);
+    LOG("[trace] %d stored values\n", g_ntr);
+    for (int i = 0; i < g_ntr; i++) {
+        const char *s = (const char *)(uintptr_t)(g_tr[i].val + 0x218);
+        uint64_t len = *(const uint64_t *)(uintptr_t)(g_tr[i].val + 0x258);
+        int n = 0;
+        while (n < 64 && s[n] >= 0x20 && s[n] < 0x7f) n++;
+        if (len == 0 && *(const uint64_t *)(uintptr_t)(g_tr[i].val + 0x2a0) == 0 && !s[0] && !*(const char *)(uintptr_t)(g_tr[i].val + 0x260))
+            LOG("[trace] empty request shape: site %llx value %llx\n", (unsigned long long)g_tr[i].pc, (unsigned long long)g_tr[i].val);
+        if (getenv("LARECOMP_TRACE_ALL")) LOG("[trace] all: site %llx value %llx len218 %llu len2a0 %llu vt %llx\n", (unsigned long long)g_tr[i].pc, (unsigned long long)g_tr[i].val,
+            (unsigned long long)len, (unsigned long long)*(const uint64_t *)(uintptr_t)(g_tr[i].val + 0x2a0), (unsigned long long)*(const uint64_t *)(uintptr_t)g_tr[i].val);
+        if (n >= 3 && (uint64_t)n == len)
+            LOG("[trace] site %llx value %llx: '%.*s' / '%.64s'\n", (unsigned long long)g_tr[i].pc,
+                (unsigned long long)g_tr[i].val, n, s, (const char *)(uintptr_t)(g_tr[i].val + 0x260));
+    }
+    pthread_mutex_unlock(&g_tr_lock);
+}

@@ -759,6 +759,7 @@ static void fill_state(Cpu *c) {
     if (id != 0) return;  // docked: only player 1 (FullKey); Handheld stays disconnected
     extern void warp_game_tick(Cpu *c);
     if (!game_other()) warp_game_tick(c);  // game main thread, once per frame: apply a queued warp
+    else { extern void warp_other_game_tick(Cpu *c); warp_other_game_tick(c); }
     if (!game_other()) { extern void give_item_tick(Cpu *c, uint64_t frame); extern uint64_t renderer_present_count(void);
       give_item_tick(c, renderer_present_count());
       extern void chamber_game_tick(Cpu *c, uint64_t frame);

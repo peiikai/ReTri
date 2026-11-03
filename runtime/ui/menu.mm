@@ -45,6 +45,7 @@ extern "C" int game_in_play(void);  // hle/warp.c
 void save_editor_on_open(void);
 void rando_tab_draw(float scale);
 bool warp_tab_draw(float scale);  // warp_tab.mm: true when a warp started
+bool warp_other_tab_draw(float scale);  // warp_other_tab.mm: the same, another game
 extern "C" void cheats_draw(float scale);  // cheats.mm
 extern "C" void difficulty_draw(float scale);  // difficulty.mm
 void controls_tab_draw(float scale);  // controls_ui.mm
@@ -918,8 +919,9 @@ static void tabs_body(float scale, bool in_game, void (*prelaunch)(float)) {
     static const int order[] = {8, 0, 1, 6, 7, 3, 5, 4, 2, 9};  // Controls, Video, Audio, Gameplay, Cosmetics, Randomizer,
                                                                 // Cheats, Warp, Save Editor, Quit (ids stay: test hooks)
     for (int i : order)  // (Quit: in game only - the start screen has its own QUIT, and an eleventh tab cut names short)
-        if ((i != 9 || !prelaunch) && (!game_other() || i == 8 || i == 0 || i == 1 || i == 9))  // (another game: Controls,
-            tabs[ntabs++] = {names[i], i, in_game || (i != 2 && i != 4 && i != 5)};          // Video, Audio, Quit)
+        if ((i != 9 || !prelaunch) && (!game_other() || i == 8 || i == 0 || i == 1 || i == 9 ||  // (another game:
+                                       (i == 4 && getenv("LARECOMP_OTHER_WARP_TAB"))))  // Controls, Video, Audio, Quit;
+            tabs[ntabs++] = {names[i], i, in_game || (i != 2 && i != 4 && i != 5)};  // Warp only for testing - it doesn't jump yet)
     int cur = 0;  // g_tab / g_tab_request hold ids
     for (int i = 0; i < ntabs; i++) if (tabs[i].id == g_tab) cur = i;
     if (!tabs[cur].on) cur = 0;
@@ -1062,7 +1064,9 @@ static void tabs_body(float scale, bool in_game, void (*prelaunch)(float)) {
             else ImGui::TextDisabled("%s", L("Load a save to edit it."));
             break;
         case 3: rando_tab_draw(scale); break;
-        case 4: if (warp_tab_draw(scale)) set_open(false); break;
+        case 4:
+            if (game_other() ? warp_other_tab_draw(scale) : warp_tab_draw(scale)) set_open(false);
+            break;
         case 5: cheats_draw(scale); break;
         case 6: difficulty_draw(scale); break;
         case 7: tab_cosmetics(); break;
