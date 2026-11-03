@@ -2926,7 +2926,17 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
             for (int i = 0; i < 16; i++) {
                 uint32_t *e = &drv[(base + 16 * i) / 4];
                 uint64_t sa = st.sbuf[stage][i].addr;
-                if (sa && game_other() && si->uses_gmem_store) gw_note_kind(sa, st.sbuf[stage][i].size, true);  // (stays in place)
+                if (sa && game_other() && si->uses_gmem_store) {
+                    gw_note_kind(sa, st.sbuf[stage][i].size, true);  // (stays in place)
+                    static uint64_t watch = 1;  // (debug) LARECOMP_LOG_STORE_TO=<addr>: draws whose shaders can store into addr+0x1000
+                    if (watch == 1) watch = getenv("LARECOMP_LOG_STORE_TO") ? strtoull(getenv("LARECOMP_LOG_STORE_TO"), NULL, 16) : 0;
+                    if (watch && sa < watch + 0x1000 && sa + st.sbuf[stage][i].size > watch) {
+                        static int n;
+                        if (n++ < 40) LOG("[storeto] stage %d slot %d %llx+%llu fs hash %016llx vs %llx fs %llx frame %llu\n", stage, i, (unsigned long long)sa,
+                                          (unsigned long long)st.sbuf[stage][i].size, (unsigned long long)g_cur_fs_hash, (unsigned long long)st.program->stages[0].code_addr,
+                                          (unsigned long long)st.program->stages[1].code_addr, (unsigned long long)renderer_exec_frame());
+                    }
+                }
                 else if (sa && (si->ssbo_read & (1u << i))) { bind_note(2, sa, st.sbuf[stage][i].size); sa = snap_storage(sa, st.sbuf[stage][i].size, false); }
                 e[0] = (uint32_t)sa;
                 e[1] = (uint32_t)(sa >> 32);
@@ -2967,6 +2977,10 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
         static int allubo = -1;  // (debug) LARECOMP_UBO_IN_PLACE=1: every uniform buffer in place (another game)
         if (allubo < 0) allubo = ENV("LARECOMP_UBO_IN_PLACE") ? 1 : 0;
         bool gpu_written = iubo ? g_indirect_args != 0 : game_other() && (allubo || gw_hit(r.addr, size));
+        {   static uint64_t snapfs = 1;  // (debug) LARECOMP_UBO_SNAP_FS=<fs hash>: that shader's uniforms always copied at the draw
+            if (snapfs == 1) snapfs = getenv("LARECOMP_UBO_SNAP_FS") ? strtoull(getenv("LARECOMP_UBO_SNAP_FS"), NULL, 16) : 0;
+            if (snapfs && g_cur_fs_hash == snapfs) gpu_written = false;
+        }
         if (gpu_written && ENV("LARECOMP_LOG_GW")) {
             static int n;
             if (n++ < 400) LOG("[gw] uniform buffer %llx+%llu read in place (stage %d slot %d, frame %llu)\n", (unsigned long long)r.addr,
@@ -4367,7 +4381,8 @@ static void draw_one(CmdRec *r, bool indexed) {
         if (nf == 1) nf = getenv("LARECOMP_NOFLIP_VS") ? strtoull(getenv("LARECOMP_NOFLIP_VS"), NULL, 16) : 0;
         uint64_t fs = st.program->stages[1].code_addr;
         if (fs != last_fs) { last_fs = fs; last_h = fs ? hmix(1469598103934665603ull, (const void *)(uintptr_t)(fs + 0x30), 0x200) : 0; }
-        if (last_h == 0xd6c58a42e55a9f9eull || (nf && st.program->stages[0].code_addr == nf)) vkey.flip_y = fkey.flip_y = false;
+        static int keep = -1; if (keep < 0) keep = getenv("LARECOMP_RIFT_FLIP") != NULL;  // (debug: the flip as for every draw)
+        if ((last_h == 0xd6c58a42e55a9f9eull && !keep) || (nf && st.program->stages[0].code_addr == nf)) vkey.flip_y = fkey.flip_y = false;
     }
     vkey.depth_minus_one = nvn_depth_mode() == 0;
     for (int i = 0; i < st.nattrib; i++) vkey.attr_kind[i] = (uint8_t)attr_kind(st.attrib[i] & 0xFF);
@@ -4476,6 +4491,26 @@ static void draw_one(CmdRec *r, bool indexed) {
             {   // (debug) LARECOMP_DRAW_INFO=<fs hash>: that shader's draws - targets, depth / stencil / blend state, textures
                 static uint64_t want = 1; static int nlog;
                 if (want == 1) want = getenv("LARECOMP_DRAW_INFO") ? strtoull(getenv("LARECOMP_DRAW_INFO"), NULL, 16) : 0;
+                if (want && last_hash == want && nlog == 5 && getenv("LARECOMP_SCAN_MAPROWS")) {  // (debug) rows like a map projection near the buffer
+                    Range u = st.ubuf[1][4 - cbuf_base];
+                    for (uint64_t a = (u.addr & ~15ull) - 0x40000; a < u.addr + 0x40000; a += 16) {
+                        const float *f = (const float *)(uintptr_t)a;
+                        bool urow = fabsf(f[0]) > 0.02f && fabsf(f[0]) < 0.06f && fabsf(f[1]) < 0.01f && fabsf(f[2]) < 0.01f && fabsf(f[3]) > 4 && fabsf(f[3]) < 40;
+                        bool vrow = fabsf(f[2]) > 0.02f && fabsf(f[2]) < 0.06f && fabsf(f[0]) < 0.01f && fabsf(f[1]) < 0.01f && fabsf(f[3]) > 4 && fabsf(f[3]) < 40;
+                        if (urow || vrow) LOG("[maprow] %llx (buffer %+lld): %g %g %g %g\n", (unsigned long long)a, (long long)(a - u.addr), f[0], f[1], f[2], f[3]);
+                    }
+                }
+                if (want && last_hash == want && nlog < 6 && pr) {  // (and the fragment stage's cb4: size read, rows 19-22 and 33-34)
+                    Range u = st.ubuf[1][4 - cbuf_base];
+                    const float *f = (const float *)(uintptr_t)u.addr;
+                    if (f && u.size >= 35 * 16 && getenv("LARECOMP_SCAN_MAPROWS")) {  // (the other buffer of the pair: 0x500 away)
+                        const float *g = (const float *)(uintptr_t)(u.addr ^ 0x500 ? (u.addr & 0x500 ? u.addr - 0x500 : u.addr + 0x500) : u.addr);
+                        LOG("[drawinfo] other buffer r33 %g %g %g %g r34 %g %g %g %g\n", g[132], g[133], g[134], g[135], g[136], g[137], g[138], g[139]);
+                    }
+                    if (f && u.size >= 35 * 16)
+                        LOG("[drawinfo] fs cb4 %llx+%llu (shader reads %u): r19 %g %g %g %g r33 %g %g %g %g r34 %g %g %g %g\n", (unsigned long long)u.addr,
+                            (unsigned long long)u.size, (unsigned)pr->fi->cbuf_size[4], f[76], f[77], f[78], f[79], f[132], f[133], f[134], f[135], f[136], f[137], f[138], f[139]);
+                }
                 if (want && last_hash == want && nlog < 6) {
                     LOG("[drawinfo] viewport %g %g %g %g scissor %d %d %d %d poly %d %d origin %d\n", st.viewport[0][0], st.viewport[0][1], st.viewport[0][2], st.viewport[0][3],
                         st.scissor[0][0], st.scissor[0][1], st.scissor[0][2], st.scissor[0][3], st.poly[0], st.poly[1], nvn_window_origin());
@@ -6401,6 +6436,15 @@ static void exec_list(uint64_t handle, int depth) {
         }
         case CMD_UPDATE_UNIFORM_BUFFER:
             // (buffer, size, offset, dataSize, data): apply the update in command order
+            {   static uint64_t watch = 1;  // (debug) LARECOMP_LOG_UBO_UPDATE=<addr>: updates touching addr..addr+0x1000
+                if (watch == 1) watch = getenv("LARECOMP_LOG_UBO_UPDATE") ? strtoull(getenv("LARECOMP_LOG_UBO_UPDATE"), NULL, 16) : 0;
+                uint64_t a = r->x[0] + r->x[2];
+                if (watch && a < watch + 0x1000 && a + r->x[3] > watch) {
+                    static int n;
+                    if (n++ < 200) LOG("[uboupd] frame %llu %llx+%llu: %g %g %g %g\n", (unsigned long long)renderer_exec_frame(), (unsigned long long)a, (unsigned long long)r->x[3],
+                                       ((float *)x)[0], r->x[3] > 4 ? ((float *)x)[1] : 0, r->x[3] > 8 ? ((float *)x)[2] : 0, r->x[3] > 12 ? ((float *)x)[3] : 0);
+                }
+            }
             memcpy((void *)(uintptr_t)(r->x[0] + r->x[2]), x, r->x[3]);
             break;
         case CMD_FENCE_SYNC: {
