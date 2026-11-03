@@ -833,6 +833,15 @@ static void emit_texs(Ctx *c, uint64_t w, bool fetch) {
 }
 
 // TEX (full form): coordinates from consecutive registers at gpr8, extra parameters at gpr20.
+// A texture the key names as a stencil read (ShaderKey.stencil_slots, by its handle's slot): a plain 2D texture of
+// integers - the depth / stencil buffer's stencil through a view (EoW's rifts read the bits the scene marks there)
+static bool tex_is_stencil(const Ctx *c, int slot) {
+    if (!c->key || c->glsl || !c->key->stencil_slots || slot < 0 || slot >= c->info->ntex) return false;
+    const ShaderTexture *t = &c->info->tex[slot];
+    int h = ((int)t->handle_offset - 0x20) / 8;
+    return t->type == TEXTYPE_2D && !t->shadow && h >= 0 && h < 16 && (c->key->stencil_slots >> h & 1);
+}
+
 static void emit_tex(Ctx *c, uint64_t w, bool bindless) {
     int d = (int)bits(w, 0, 8), a = (int)bits(w, 8, 8), b = (int)bits(w, 20, 8);
     uint32_t index = bindless ? 0 : (uint32_t)bits(w, 36, 13);
@@ -897,7 +906,12 @@ static void emit_tex(Ctx *c, uint64_t w, bool bindless) {
     char cexpr[420], call[1024];
     if (ncoord == 2 && c->stage != STAGE_VERTEX) { snprintf(cexpr, sizeof cexpr, "uvs(float2(%s), rscale[%d])", coords, slot + 1); c->uses_rscale = true; }
     else snprintf(cexpr, sizeof cexpr, "%s(%s)", vec, coords);
-    if (dc)
+    if (tex_is_stencil(c, slot) && ncoord == 2 && !array && !dc && getenv("LARECOMP_STENCIL_FORCE"))  // (debug) a fixed value
+        sprintf(call, "as_type<float4>(uint4(%uu))", (unsigned)strtoul(getenv("LARECOMP_STENCIL_FORCE"), NULL, 0));
+    else if (tex_is_stencil(c, slot) && ncoord == 2 && !array && !dc)  // (the texel under the coordinate, its integer as is)
+        sprintf(call, "as_type<float4>(t%d.read(uint2(clamp(%s, 0.0f, 0.99999f) * float2(t%d.get_width(), t%d.get_height()))))", slot, cexpr,
+                slot, slot);
+    else if (dc)
         sprintf(call, "float4(t%d.sample_compare(s%d, %s%s%s, %s%s%s))", slot, slot, cexpr, array ? ", " : "",
                 layer, dref, lod, off);
     else
@@ -2636,7 +2650,8 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
     for (int i = 0; i < info->ntex; i++) {
         ShaderTexture *t = &info->tex[i];
         const char *tn = tex_type_name(t->type);
-        sp(&args, ", %s%s<float> t%d [[texture(%d)]]", t->shadow ? "depth" : "texture", tn, i, i);
+        if (tex_is_stencil(c, i)) sp(&args, ", texture2d<uint> t%d [[texture(%d)]]", i, i);  // (a stencil read: integers)
+        else sp(&args, ", %s%s<float> t%d [[texture(%d)]]", t->shadow ? "depth" : "texture", tn, i, i);
         if (!smap) sp(&args, ", sampler s%d [[sampler(%d)]]", i, i);
     }
     if (info->uses_images) {

@@ -1801,6 +1801,7 @@ static uint64_t prog_content_key(uint64_t vh, uint64_t fh, const ShaderKey *vkey
     b = (const uint8_t *)vkey;
     for (size_t i = 0; i < sizeof *vkey; i++) { h ^= b[i]; h *= 0x100000001B3ull; }
     for (int i = 0; i < 8; i++) { h ^= fkey->rt_kind[i]; h *= 0x100000001B3ull; }
+    if (fkey->stencil_slots) { h ^= fkey->stencil_slots; h *= 0x100000001B3ull; }  // (only then: other keys as before)
     return h;
 }
 
@@ -1825,6 +1826,7 @@ static Prog *get_program(NvnProgram *p, ShaderKey *vkey, ShaderKey *fkey) {
     const uint8_t *vb = (const uint8_t *)vkey;
     for (size_t i = 0; i < sizeof *vkey; i++) { h ^= vb[i]; h *= 0x100000001B3ull; }
     for (int i = 0; i < 8; i++) { h ^= fkey->rt_kind[i]; h *= 0x100000001B3ull; }
+    if (fkey->stencil_slots) { h ^= fkey->stencil_slots; h *= 0x100000001B3ull; }
     if (!h) h = 1;
     uint32_t slot = (uint32_t)(h ^ (h >> 31)) & (PROG_TAB - 1);
     while (prog_tab[slot].key && prog_tab[slot].key != h) slot = (slot + 1) & (PROG_TAB - 1);
@@ -1836,9 +1838,10 @@ static Prog *get_program(NvnProgram *p, ShaderKey *vkey, ShaderKey *fkey) {
     // (every byte of the keys, in hex: NSData's description shows only the first 16 and last 8 bytes of the 52-byte
     // key, so variants differing in attr_kind[16..], depth_minus_one, flip_y or a later field shared one entry -
     // whichever variant came first served the others)
-    char kb[2 * (sizeof *vkey + 8) + 1], *kp = kb;
+    char kb[2 * (sizeof *vkey + 8) + 8], *kp = kb;  // (+ "s<stencil slots>")
     for (size_t i = 0; i < sizeof *vkey; i++) kp += snprintf(kp, 3, "%02x", vb[i]);
     for (int i = 0; i < 8; i++) kp += snprintf(kp, 3, "%02x", fkey->rt_kind[i]);
+    if (fkey->stencil_slots) snprintf(kp, 8, "s%04x", fkey->stencil_slots);
     NSString *key = [NSString stringWithFormat:@"%llx/%llx/%s", p->stages[0].code_addr, p->stages[1].code_addr, kb];
     Prog *pr = cache[key];
     if (!pr) {  // prepared before the game (the same code and keys)
@@ -2184,6 +2187,27 @@ static NvnTexture *shader_texture_object(int stage, ShaderTexture *st_) {
     return ((NvnTexEntry *)st.tpool->entries)[tic].tex;
 }
 
+// Fragment texture slots (0-15) bound to a depth / stencil texture in stencil mode (the texture's own mode, or its
+// view's): the shader reads the stencil's integers (ShaderKey.stencil_slots; EoW's rifts test bits the scene marks in
+// the stencil). g_stencil_slots: the current draw's, for bind_textures (an X32_Stencil8 view).
+static uint16_t g_stencil_slots;
+static uint16_t stencil_slots_of(ShaderInfo *fi) {
+    uint16_t m = 0;
+    for (int i = 0; i < fi->ntex; i++) {
+        ShaderTexture *t = &fi->tex[i];
+        int slot = ((int)t->handle_offset - 0x20) / 8;
+        if (slot < 0 || slot >= 16 || t->type != TEXTYPE_2D || t->shadow || t->bindless) continue;
+        uint64_t h = st.tex[1][slot];
+        uint32_t tic = h & 0xFFFFF;
+        if (!h || !st.tpool || tic >= (uint32_t)st.tpool->count) continue;
+        NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
+        if (!e->tex) continue;
+        uint32_t mode = e->has_view && (e->view.setmask & 16) ? e->view.ds_mode : e->tex->ds_mode;
+        if (mode == 1) m |= (uint16_t)(1u << slot);
+    }
+    return m;
+}
+
 static bool is_attachment(NvnTexture *t) {
     if (!t) return false;
     if (t == st.rt.depth) return true;
@@ -2401,6 +2425,34 @@ static void bind_textures(int stage, ShaderInfo *si) {
         NvnSamplerDesc *sd = h && st.spool && tsc < (uint32_t)st.spool->count ? &((NvnSamplerDesc *)st.spool->entries)[tsc] : NULL;
         if (sd) smp = sampler_for(sd);
         if (st_->shadow) tex = shadow_slot_texture(tex, st_, i, h);
+        if (stage == 1 && slot >= 0 && slot < 16 && (g_stencil_slots >> slot & 1) && tex &&
+            (tex.pixelFormat == MTLPixelFormatDepth32Float_Stencil8 || tex.pixelFormat == MTLPixelFormatStencil8)) {
+            static long dump_at = -1;  // (debug) LARECOMP_DUMP_STENCIL=<frame>: that frame's first stencil read, as build/stencil_<fs>.pgm
+            if (dump_at < 0) dump_at = ENV("LARECOMP_DUMP_STENCIL") ? atol(ENV("LARECOMP_DUMP_STENCIL")) : 0;
+            static int ndump;
+            if (dump_at && (long)renderer_exec_frame() == dump_at && ndump < 4 && tex.pixelFormat == MTLPixelFormatDepth32Float_Stencil8) {
+                ndump++;
+                end_pass();
+                NSUInteger w = tex.width, hh = tex.height;
+                id<MTLBuffer> buf = [dev newBufferWithLength:w * hh options:MTLResourceStorageModeShared];
+                id<MTLBlitCommandEncoder> b = [cb() blitCommandEncoder];
+                [b copyFromTexture:tex sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(w, hh, 1)
+                          toBuffer:buf destinationOffset:0 destinationBytesPerRow:w destinationBytesPerImage:w * hh
+                           options:MTLBlitOptionStencilFromDepthStencil];
+                [b endEncoding];
+                char path[96]; snprintf(path, sizeof path, "build/stencil_%llx_%d.pgm", (unsigned long long)g_cur_fs_hash, ndump);
+                NSString *ps = [NSString stringWithUTF8String:path];
+                [cb() addCompletedHandler:^(id<MTLCommandBuffer> c) {
+                    FILE *f = fopen(ps.UTF8String, "wb");
+                    if (f) { fprintf(f, "P5 %lu %lu 255\n", (unsigned long)w, (unsigned long)hh); fwrite(buf.contents, 1, w * hh, f); fclose(f); }
+                }];
+                st.rt_dirty = true;
+            }
+            if (tex.pixelFormat != MTLPixelFormatStencil8) {  // (the stencil of a depth / stencil texture: its view)
+                id<MTLTexture> base = tex;
+                tex = view_cached(base, MTLPixelFormatX32_Stencil8, ^{ return [base newTextureViewWithPixelFormat:MTLPixelFormatX32_Stencil8]; });
+            }
+        }
         if (!tex) tex = dummy_texture(st_->type);
         if (!smp) smp = default_sampler();
         static uint64_t dump_fs = 1;  // LARECOMP_DUMP_FS_TEX=<fs code addr>: save that shader's textures, its first 3 draws
@@ -3040,6 +3092,7 @@ static CsProg *compute_program(NvnProgram *p) {
     return cp;
 }
 
+static uint64_t cs_addr_of_current(void) { return st.program ? st.program->stages[5].code_addr : 0; }
 static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     static int skip_all = -1;  // (test) LARECOMP_SKIP_COMPUTE=1: no compute work at all; =<cs addr>,<cs addr>...: not those programs
     static uint64_t skip_cs[64];
@@ -3177,6 +3230,11 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
             if (e->tex) tex = sampled_texture(e->tex, &e->view, e->has_view, st_->type);
             else if (e->dead_format) nvn_dead_slot_sampled(e, tic);
             if (e->tex && i < 64) { renderer_texture_scale(e->tex, &tex_sc[0][i][0], &tex_sc[0][i][1]); renderer_texture_fraction(e->tex, &tex_fr[0][i][0], &tex_fr[0][i][1]); }
+            if (e->tex && ENV("LARECOMP_LOG_CS_STENCIL") && (e->has_view && (e->view.setmask & 16) ? e->view.ds_mode : e->tex->ds_mode) == 1) {
+                static uint64_t seen[64]; static int nseen;  // (debug) compute reading a depth / stencil texture's stencil
+                int k = 0; for (; k < nseen && seen[k] != cs_addr_of_current(); k++) {}
+                if (k == nseen && nseen < 64) { seen[nseen++] = cs_addr_of_current(); LOG("[cs-stencil] cs %llx t%d %ux%u fmt %#x at %llx (frame %llu)\n", (unsigned long long)cs_addr_of_current(), i, e->tex->width, e->tex->height, e->tex->format, (unsigned long long)e->tex->addr, (unsigned long long)renderer_exec_frame()); }
+            }
             for (int k = 0; k < nfeedback; k++)
                 if (e->tex == feedback_tex[k]) {
                     id<MTLTexture> fc = feedback_copy[k];
@@ -4297,6 +4355,12 @@ static void draw_one(CmdRec *r, bool indexed) {
     for (int i = 0; i < st.rt.ncolor; i++) if (st.rt.color[i]) fkey.rt_kind[i] = (uint8_t)rt_kind(st.rt.color[i]->format);
     Prog *pr = get_program(st.program, &vkey, &fkey);
     if (!pr || !pr->ready) { (stat_skipped++, skip_why(4027)); return; }
+    g_stencil_slots = 0;
+    if (pr->fi && (fkey.stencil_slots = stencil_slots_of(pr->fi))) {  // (a texture read as its stencil: another program)
+        g_stencil_slots = fkey.stencil_slots;
+        pr = get_program(st.program, &vkey, &fkey);
+        if (!pr || !pr->ready) { (stat_skipped++, skip_why(4029)); return; }
+    }
     {   // mirror mode (runtime/hle/mirror.c): the scene's composite into the window image is drawn mirrored - the
         // unblended full-screen draw sampling the scene image (the window images also serve as scratch
         // targets earlier in the frame: those draws sample much smaller images; the HUD after it blends)
@@ -4332,13 +4396,67 @@ static void draw_one(CmdRec *r, bool indexed) {
         if (log_hash == 1) log_hash = getenv("LARECOMP_LOG_FSHASH") ? 0 : 2;
         if (!log_hash && g_debug_frame) LOG("[fshash] fs=%llx hash %016llx\n", fs, last_hash);
         {   // LARECOMP_SKIP_FSHASH=h1,h2,...: drop draws using these fragment shaders (find which draw makes what)
-            static uint64_t skip[16];
+            static uint64_t skip[256];
             static int nskip = -1;
             if (nskip < 0) {
                 nskip = 0;
-                for (const char *p = getenv("LARECOMP_SKIP_FSHASH"); p && *p && nskip < 16;) {
+                for (const char *p = getenv("LARECOMP_SKIP_FSHASH"); p && *p && nskip < 256;) {
                     skip[nskip++] = strtoull(p, (char **)&p, 16);
                     while (*p == ',') p++;
+                }
+            }
+            {   // (debug) LARECOMP_LIST_FS_AT=<frame>: that frame's fragment shaders (hash, draws, first target size)
+                static long at = -1; static uint64_t hs[512]; static int cnt[512], nh; static unsigned tw[512], th[512]; static bool done;
+                if (at < 0) at = getenv("LARECOMP_LIST_FS_AT") ? atol(getenv("LARECOMP_LIST_FS_AT")) : 0;
+                long fr = (long)renderer_exec_frame();
+                if (at && fr == at) {
+                    int i = 0; for (; i < nh && hs[i] != last_hash; i++) {}
+                    if (i == nh && nh < 512) { hs[nh] = last_hash; tw[nh] = st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->width : 0; th[nh] = st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->height : 0; nh++; }
+                    if (i < 512) cnt[i]++;
+                    static int nst;  // (and the draws that test or write stencil: their state)
+                    if (st.ds[3] && nst++ < 4000)
+                        LOG("[fsstencil] %016llx ds %02x %02x %02x %02x %02x %02x %02x %02x ref %x/%x wmask %x/%x vmask %x/%x rt %ux%u depth %llx\n",
+                            (unsigned long long)last_hash, st.ds[0], st.ds[1], st.ds[2], st.ds[3], st.ds[4], st.ds[5], st.ds[6], st.ds[7],
+                            st.stencil_ref[0], st.stencil_ref[1], st.stencil_mask[0], st.stencil_mask[1], st.stencil_vmask[0], st.stencil_vmask[1],
+                            st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->width : 0, st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->height : 0,
+                            st.rt.depth ? (unsigned long long)st.rt.depth->addr : 0ull);
+                    if (st.ds[3] && nst < 4000 && st.rt.depth) LOG("[fsstencil]   depth %ux%u fmt %#x\n", st.rt.depth->width, st.rt.depth->height, st.rt.depth->format);
+                    for (int sg = 0; pr && sg < 2; sg++) for (int k = 0; k < (sg ? pr->fi : pr->vi)->ntex; k++) {
+                        NvnTexture *t = shader_texture_object(sg, &(sg ? pr->fi : pr->vi)->tex[k]);
+                        if (t && (t->format == 0x35 || t->format == 0x36 || t->format == 0x34 || t->format == 0x33) && nst++ < 4000)
+                            LOG("[fsdepthread] %016llx %s t%d %llx %ux%u fmt %#x stencil-slots %#x rt %ux%u depth %llx\n", (unsigned long long)last_hash, sg ? "fs" : "vs", k,
+                                (unsigned long long)t->addr, t->width, t->height, t->format, g_stencil_slots,
+                                st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->width : 0, st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->height : 0,
+                                st.rt.depth ? (unsigned long long)st.rt.depth->addr : 0ull);
+                    }
+                } else if (at && fr > at && !done) {
+                    done = true;
+                    for (int i = 0; i < nh; i++) LOG("[fslist] %016llx %d draws %ux%u\n", (unsigned long long)hs[i], cnt[i], tw[i], th[i]);
+                }
+            }
+            {   // (debug) LARECOMP_DRAW_INFO=<fs hash>: that shader's draws - targets, depth / stencil / blend state, textures
+                static uint64_t want = 1; static int nlog;
+                if (want == 1) want = getenv("LARECOMP_DRAW_INFO") ? strtoull(getenv("LARECOMP_DRAW_INFO"), NULL, 16) : 0;
+                if (want && last_hash == want && nlog++ < 6) {
+                    LOG("[drawinfo] frame %llu mode %llu count %llu inst %llu | rt %d x %ux%u fmt %#x depth %s fmt %#x | ds %02x %02x %02x %02x %02x %02x %02x %02x"
+                        " | blend0 %02x%02x%02x%02x%02x%02x%02x%02x colormask %08x | vs %llx fs %llx\n",
+                        (unsigned long long)renderer_exec_frame(), r->x[0], r->x[2], r->x[6], st.rt.ncolor,
+                        st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->width : 0, st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->height : 0,
+                        st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->format : 0, st.rt.depth ? "yes" : "no", st.rt.depth ? st.rt.depth->format : 0,
+                        st.ds[0], st.ds[1], st.ds[2], st.ds[3], st.ds[4], st.ds[5], st.ds[6], st.ds[7],
+                        st.blend[0][0], st.blend[0][1], st.blend[0][2], st.blend[0][3], st.blend[0][4], st.blend[0][5], st.blend[0][6], st.blend[0][7],
+                        *(uint32_t *)&st.channel_mask, (unsigned long long)st.program->stages[0].code_addr, (unsigned long long)st.program->stages[1].code_addr);
+                    for (int sg = 0; sg < 2; sg++) for (int i = 0; i < (sg ? pr->fi : pr->vi)->ntex; i++) {
+                        NvnTexture *t = shader_texture_object(sg, &(sg ? pr->fi : pr->vi)->tex[i]);
+                        uint64_t h = handle_at(sg, ((int)(sg ? pr->fi : pr->vi)->tex[i].handle_offset - 0x20) / 8);
+                        NvnTexEntry *e = h && st.tpool && (h & 0xFFFFF) < (uint64_t)st.tpool->count ? &((NvnTexEntry *)st.tpool->entries)[h & 0xFFFFF] : NULL;
+                        if (e && t) LOG("[drawinfo]   (ds mode %u, view %d mask %#x ds mode %u; stencil slots %#x)\n", t->ds_mode, e->has_view,
+                                        e->view.setmask, e->view.ds_mode, g_stencil_slots);
+                        LOG("[drawinfo]   %s t%d: %s %ux%u fmt %#x target %u at %llx obj %p gpu-owned %d%s (depth target at %llx obj %p)\n", sg ? "fs" : "vs", i,
+                            t ? "tex" : "none", t ? t->width : 0, t ? t->height : 0, t ? t->format : 0, t ? t->target : 0, t ? (unsigned long long)t->addr : 0ull,
+                            (void *)t, t ? (int)renderer_is_gpu_owned(t) : 0, t && t == st.rt.depth ? " (the depth target)" : "",
+                            st.rt.depth ? (unsigned long long)st.rt.depth->addr : 0ull, (void *)st.rt.depth);
+                    }
                 }
             }
             for (int i = 0; i < nskip; i++) if (last_hash == skip[i]) { (stat_skipped++, skip_why(4072)); return; }
@@ -4542,6 +4660,27 @@ static void draw_one(CmdRec *r, bool indexed) {
                             (unsigned long long)t->addr, st.program ? (unsigned long long)st.program->stages[1].code_addr : 0ull,
                             (unsigned long long)renderer_exec_frame());
                     }
+            }
+        }
+    }
+    {   // (debug) LARECOMP_LOG_OVERLAP=<w>x<h>: textures sampled (any stage) whose memory overlaps a render target of
+        // that size (a mask read through a bigger texture or another layout), once per fragment shader
+        static int ow = -1, oh; static NvnTexture *mask; static uint64_t seen[64]; static int nseen;
+        if (ow < 0) { ow = 0; const char *e = ENV("LARECOMP_LOG_OVERLAP"); if (e) sscanf(e, "%dx%d", &ow, &oh); }
+        for (int i = 0; ow && i < st.rt.ncolor; i++)
+            if (st.rt.color[i] && (int)st.rt.color[i]->width == ow && (int)st.rt.color[i]->height == oh) mask = st.rt.color[i];
+        if (mask && pr) for (int sg = 0; sg < 2; sg++) for (int i = 0; i < (sg ? pr->fi : pr->vi)->ntex; i++) {
+            NvnTexture *t = shader_texture_object(sg, &(sg ? pr->fi : pr->vi)->tex[i]);
+            if (!t || t == mask || !t->addr) continue;
+            uint64_t ma = mask->addr, me = ma + tegra_total_size(&mask->layout), ta = t->addr, te = ta + tegra_total_size(&t->layout);
+            if (ta >= me || ma >= te) continue;
+            uint64_t fs = st.program ? st.program->stages[1].code_addr : 0;
+            int k = 0; for (; k < nseen && seen[k] != fs; k++) {}
+            if (k == nseen && nseen < 64) {
+                seen[nseen++] = fs;
+                LOG("[overlap] stage %d t%d %ux%u fmt %#x target %u at %llx+%llx overlaps the %dx%d target at %llx+%llx: fs %llx frame %llu\n", sg, i,
+                    t->width, t->height, t->format, t->target, (unsigned long long)ta, (unsigned long long)(te - ta), ow, oh, (unsigned long long)ma,
+                    (unsigned long long)(me - ma), (unsigned long long)fs, (unsigned long long)renderer_exec_frame());
             }
         }
     }
@@ -6233,6 +6372,13 @@ static void exec_list(uint64_t handle, int depth) {
         }
         case CMD_COPY_TEXTURE_TO_TEXTURE: {
             const TexRefRec *t = x;
+            if (ENV("LARECOMP_LOG_COPIES")) {  // (debug) texture copies with a 1024x1024 end
+                NvnTexture *a = (NvnTexture *)(uintptr_t)t[0].tex, *b = (NvnTexture *)(uintptr_t)t[1].tex;
+                static int n;
+                if (a && b && (a->width == 1024 || b->width == 1024) && n++ < 30)
+                    LOG("[copy] %ux%u fmt %#x -> %ux%u fmt %#x (frame %llu)\n", a->width, a->height, a->format, b->width, b->height, b->format,
+                        (unsigned long long)renderer_exec_frame());
+            }
             copy_texture(&t[0], &t[1], r->x[6]);
             break;
         }
@@ -6242,7 +6388,15 @@ static void exec_list(uint64_t handle, int depth) {
             break;
         }
         case CMD_COPY_BUFFER_TO_TEXTURE: copy_buffer_to_texture(r->x[0], x); break;
-        case CMD_COPY_TEXTURE_TO_BUFFER: copy_texture_to_buffer(x, r->x[3]); break;
+        case CMD_COPY_TEXTURE_TO_BUFFER:
+            if (ENV("LARECOMP_LOG_COPIES")) {
+                const TexRefRec *t = x; NvnTexture *a = (NvnTexture *)(uintptr_t)t[0].tex;
+                static int n;
+                if (a && n++ < 30) LOG("[copy] %ux%u fmt %#x -> buffer %llx (frame %llu)\n", a->width, a->height, a->format, (unsigned long long)r->x[3],
+                                       (unsigned long long)renderer_exec_frame());
+            }
+            copy_texture_to_buffer(x, r->x[3]);
+            break;
         case CMD_COPY_BUFFER_TO_BUFFER:
             { static int nlog; if (nlog++ < 40 && ENV("LARECOMP_LOG_BINDS")) LOG("[copybuf] frame %llu %llx -> %llx %llu bytes\n", (unsigned long long)renderer_exec_frame(), r->x[0], r->x[1], r->x[2]); }
             renderer_flush();
