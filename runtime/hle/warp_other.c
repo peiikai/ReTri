@@ -19,6 +19,7 @@
 
 static volatile uint64_t g_req;     // the current level's request object
 static volatile uint64_t g_holder;  // the request processor's object (the request at +0x10)
+static volatile uint64_t g_owner, g_ctx;  // (its owner - the job queue - and context, at the last run)
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static char g_level[64], g_locator[64];
 static volatile int g_pending;
@@ -35,7 +36,15 @@ void rt_other_request_holder(uint64_t p) {
     if (getenv("LARECOMP_LOG_WARP") && !(++calls & (calls - 1)))
         LOG("[warp] processor run #%llu (holder %llx, request %llx, destination length %llu)\n", (unsigned long long)calls,
             (unsigned long long)p, (unsigned long long)r, r ? (unsigned long long)*(const uint64_t *)(uintptr_t)(r + 0x2a0) : 0ull);
-    if (r >= GUEST_LO && r < GUEST_HI) { g_holder = p; rt_other_request_obj(r); }
+    if (getenv("LARECOMP_LOG_WARP")) {
+        uint64_t o = *(const uint64_t *)(uintptr_t)(p + 8);
+        LOG("[warp] job %llx: vt %llx owner %llx req %llx ctl %llx ctx %llx +28 %llx; owner queue blocks %llx index %llu count %llu\n",
+            (unsigned long long)p, (unsigned long long)*(const uint64_t *)(uintptr_t)p, (unsigned long long)o, (unsigned long long)r,
+            (unsigned long long)*(const uint64_t *)(uintptr_t)(p + 0x18), (unsigned long long)*(const uint64_t *)(uintptr_t)(p + 0x20),
+            (unsigned long long)*(const uint64_t *)(uintptr_t)(p + 0x28), (unsigned long long)*(const uint64_t *)(uintptr_t)(o + 0x200),
+            (unsigned long long)*(const uint64_t *)(uintptr_t)(o + 0x218), (unsigned long long)*(const uint64_t *)(uintptr_t)(o + 0x220));
+    }
+    if (r >= GUEST_LO && r < GUEST_HI) { g_holder = p; g_owner = *(const uint64_t *)(uintptr_t)(p + 8); g_ctx = *(const uint64_t *)(uintptr_t)(p + 0x20); rt_other_request_obj(r); }
 }
 
 void warp_other_request(const char *level, const char *locator) {
@@ -119,7 +128,6 @@ static void scan_globals(void) {
 }
 
 void warp_other_game_tick(Cpu *c) {
-    (void)c;
     {   // (debug) LARECOMP_WATCH_LIVE=<frame>: from then, who touches the request reached through LARECOMP_WARP_GLOBAL
         static long at = -1;
         if (at < 0) at = getenv("LARECOMP_WATCH_LIVE") ? atol(getenv("LARECOMP_WATCH_LIVE")) : 0;
@@ -165,6 +173,39 @@ void warp_other_game_tick(Cpu *c) {
     g_pending = 0;
     pthread_mutex_unlock(&g_lock);
     LOG("[warp] jumping to %s / %s (request %llx)\n", g_level, g_locator, (unsigned long long)r);
+    if (getenv("LARECOMP_WARP_CALL") && g_owner && g_ctx) {  // (experiment) run the request processor on a job of our own
+        // P: {vtable, the game's owner, our request, 0, the last context, 0} - no reference counts of the game's to drop.
+        // The processor first pops its own entry off the owner's job queue (+0x200 block array of 256 16-byte entries,
+        // +0x218 front index, +0x220 count): with the queue empty, one empty entry is put at the front for it.
+        uint64_t O = g_owner, idx = *(uint64_t *)(uintptr_t)(O + 0x218), cnt = *(uint64_t *)(uintptr_t)(O + 0x220);
+        uint64_t blocks = *(uint64_t *)(uintptr_t)(O + 0x200), blk = blocks ? *(uint64_t *)(uintptr_t)(blocks + (idx >> 8) * 8) : 0;
+        if (cnt || !blk) {
+            LOG("[warp] job queue busy (index %llu, count %llu, block %llx): not now\n", (unsigned long long)idx, (unsigned long long)cnt, (unsigned long long)blk);
+            return;
+        }
+        static uint64_t P, R2;
+        if (!P) { P = (uint64_t)(uintptr_t)hle_alloc(0x200); R2 = (uint64_t)(uintptr_t)hle_alloc(0x400); }
+        memset((void *)(uintptr_t)(blk + (idx & 0xff) * 16), 0, 16);
+        *(uint64_t *)(uintptr_t)(blk + (idx & 0xff) * 16) = P;  // (the entry names the job, no reference count)
+        *(uint64_t *)(uintptr_t)(O + 0x220) = 1;
+        memset((void *)(uintptr_t)R2, 0, 0x400);
+        memcpy((void *)(uintptr_t)(R2 + 0x200), (void *)(uintptr_t)(r + 0x200), 0xc0);
+        memset((void *)(uintptr_t)P, 0, 0x200);
+        *(uint64_t *)(uintptr_t)P = 0x7003dc6f98ull;
+        *(uint64_t *)(uintptr_t)(P + 8) = O;
+        *(uint64_t *)(uintptr_t)(P + 0x10) = R2;
+        *(uint64_t *)(uintptr_t)(P + 0x20) = g_ctx;
+        uint64_t saved[31], sp = c->sp, pc = c->pc;
+        memcpy(saved, c->x, sizeof saved);
+        c->x[0] = P;
+        LOG("[warp] calling the request processor on job %llx (owner %llx, context %llx)\n", (unsigned long long)P,
+            (unsigned long long)O, (unsigned long long)g_ctx);
+        guest_call(c, 0x700160f7e0ull);
+        memcpy(c->x, saved, sizeof saved);
+        c->sp = sp, c->pc = pc;
+        LOG("[warp] processor returned; owner queue index %llu count %llu\n", (unsigned long long)*(uint64_t *)(uintptr_t)(O + 0x218),
+            (unsigned long long)*(uint64_t *)(uintptr_t)(O + 0x220));
+    }
     if (getenv("LARECOMP_WATCH_REQ")) {  // (debug) who reads it now
         extern uint64_t g_watch_lo, g_watch_hi;
         extern void watch_arm(void);
