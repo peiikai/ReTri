@@ -326,6 +326,8 @@ static void end_pass(void) {
             [c commit];
             [c waitUntilCompleted];
             char path[256], apath[256];
+            LOG("[pass] %03d color %ux%u format %#x tex %p depth %s\n", debug_pass_no, st.rt.color[0]->width, st.rt.color[0]->height,
+                st.rt.color[0]->format, (void *)st.rt.color[0], st.rt.depth ? "yes" : "no");
             snprintf(path, sizeof path, "build/pass_%03d.png", debug_pass_no);
             snprintf(apath, sizeof apath, "build/pass_%03d_a.png", debug_pass_no++);
             renderer_save_game_texture(st.rt.color[0], t, path, apath);  // (the part the pass drew: Dynamic resolution)
@@ -470,7 +472,61 @@ static int ngone;
 // may keep pointing at it - a pass using it is closed and the render targets forget it. The next texture can be
 // allocated at the same address: a stale pointer then named a different texture (another game: GPU page faults when
 // effects with temporary render targets came and went, only at full speed).
+// (another game) Render targets by guest address: a texture object made over a render target's memory (EoW samples
+// its quarter-size masks through objects of another size) has no contents of its own here - each object has its own
+// Metal texture - so it reads the render target's, its texels at the same coordinates (rt_alias_of, bind_textures).
+static NvnTexture *g_rt_addr[128];
+static uint64_t g_rt_seq[128], g_rt_counter;  // (when each was last bound as a target: the newest has the contents)
+static void rt_addr_note(NvnTexture *t) {
+    if (!t || !t->addr || !game_other()) return;
+    int at = -1, free_ = -1;
+    for (int i = 0; i < 128; i++) {
+        if (g_rt_addr[i] == t) at = i;
+        if (!g_rt_addr[i] && free_ < 0) free_ = i;
+    }
+    if (at < 0) {
+        if (free_ < 0) {  // (full: the one bound longest ago makes room)
+            free_ = 0;
+            for (int i = 1; i < 128; i++) if (g_rt_seq[i] < g_rt_seq[free_]) free_ = i;
+        }
+        at = free_;
+        g_rt_addr[at] = t;
+    }
+    g_rt_seq[at] = ++g_rt_counter;
+}
+static NvnTexture *rt_alias_of(NvnTexture *t) {
+    static int off = -1;  // (experimental, off: LARECOMP_RT_ALIAS=1 - EoW draws its masks through both objects at an
+    // address, so "the newest" picks the sampled one itself; the order of its dynamic-resolution passes isn't known yet)
+    if (off < 0) off = !(ENV("LARECOMP_RT_ALIAS") && atoi(ENV("LARECOMP_RT_ALIAS")));
+    if (off || !t || !t->addr) return NULL;
+    if (ENV("LARECOMP_LOG_ALIAS") && t->format == 0x1 && (t->width == 896 || t->width == 448)) {
+        static int n; int same = 0, regs = 0;
+        for (int i = 0; i < 128; i++) { regs += g_rt_addr[i] != NULL; same += g_rt_addr[i] && g_rt_addr[i]->addr == t->addr; }
+        if (n++ < 10) {
+            LOG("[aliaschk] t %p %ux%u addr %llx: %d registered, %d at that address:", (void *)t, t->width, t->height, (unsigned long long)t->addr, regs, same);
+            for (int i = 0; i < 128; i++) if (g_rt_addr[i] && g_rt_addr[i]->addr == t->addr) LOG(" %p %ux%u seq %llu", (void *)g_rt_addr[i], g_rt_addr[i]->width, g_rt_addr[i]->height, (unsigned long long)g_rt_seq[i]);
+            LOG(" (counter %llu)\n", (unsigned long long)g_rt_counter);
+        }
+    }
+    int best = -1;
+    for (int i = 0; i < 128; i++)
+        if (g_rt_addr[i] && g_rt_addr[i]->addr == t->addr && g_rt_addr[i]->format == t->format && (best < 0 || g_rt_seq[i] > g_rt_seq[best]))
+            best = i;
+    if (ENV("LARECOMP_LOG_ALIAS")) {
+        static int n;
+        for (int i = 0; i < 128 && n < 60 && t->format != 0x3f; i++)
+            if (g_rt_addr[i] && g_rt_addr[i] != t && g_rt_addr[i]->addr == t->addr) {
+                int self = -1; for (int k = 0; k < 128; k++) if (g_rt_addr[k] == t) self = k;
+                n++; LOG("[aliasdec] t %p %ux%u fmt %#x self-seq %llu | rt %p %ux%u fmt %#x seq %llu | best %d\n", (void *)t, t->width, t->height, t->format,
+                         self >= 0 ? (unsigned long long)g_rt_seq[self] : 0ull, (void *)g_rt_addr[i], g_rt_addr[i]->width, g_rt_addr[i]->height,
+                         g_rt_addr[i]->format, (unsigned long long)g_rt_seq[i], best);
+            }
+    }
+    return best >= 0 && g_rt_addr[best] != t ? g_rt_addr[best] : NULL;  // (the newest target at that address, if another object)
+}
+
 void renderer_texture_destroying(NvnTexture *t) {
+    for (int i = 0; i < 128; i++) if (g_rt_addr[i] == t) g_rt_addr[i] = NULL;
     bool used = st.rt.depth == t;
     for (int i = 0; i < st.rt.ncolor && i < 8; i++) used |= st.rt.color[i] == t;
     if (!used) { td_forget(t); return; }
@@ -2108,6 +2164,12 @@ static void snapshots_invalidate(NvnTexture *t) {  // NULL = all
 static NvnTexture *shader_texture_object(int stage, ShaderTexture *st_) {
     int slot = ((int)st_->handle_offset - 0x20) / 8;
     uint64_t h = (slot >= 0 && slot < 32) ? st.tex[stage][slot] : 0;
+    if ((slot < 0 || slot >= 32) && ENV("LARECOMP_LOG_TEXSLOT")) {  // (debug) a handle outside the bound slots
+        static int n;
+        if (n++ < 20) LOG("[texslot] stage %d handle offset %#x (bindless %d cbuf %u off %#x) program vs %llx fs %llx cs %llx frame %llu\n", stage, (unsigned)st_->handle_offset, (int)st_->bindless, st_->bindless_cbuf, st_->bindless_offset,
+                          st.program ? (unsigned long long)st.program->stages[0].code_addr : 0ull,
+                          st.program ? (unsigned long long)st.program->stages[1].code_addr : 0ull, st.program ? (unsigned long long)st.program->stages[5].code_addr : 0ull, (unsigned long long)renderer_exec_frame());
+    }
     uint32_t tic = h & 0xFFFFF;
     if (!h || !st.tpool || tic >= (uint32_t)st.tpool->count) return NULL;
     return ((NvnTexEntry *)st.tpool->entries)[tic].tex;
@@ -2229,7 +2291,14 @@ static void bind_textures(int stage, ShaderInfo *si) {
         if (i < 64) { tex_wh[stage][i][0] = tex_wh[stage][i][1] = 0; tex_fr[stage][i][0] = tex_fr[stage][i][1] = 1; }
         if (h && st.tpool && tic < (uint32_t)st.tpool->count) {
             NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
-            if (e->tex) tex = sampled_texture(e->tex, &e->view, e->has_view, st_->type);
+            NvnTexture *alias = game_other() && e->tex ? rt_alias_of(e->tex) : NULL;
+            if (alias) {  // (a render target's memory through another object: its contents - rt_alias_of)
+                static NvnTextureView none;
+                tex = sampled_texture(alias, &none, false, st_->type);
+                static int nlog;
+                if (nlog++ < 8) LOG("[metal] texture %ux%u fmt %#x reads render target %ux%u at %llx\n", e->tex->width, e->tex->height,
+                                    e->tex->format, alias->width, alias->height, (unsigned long long)e->tex->addr);
+            } else if (e->tex) tex = sampled_texture(e->tex, &e->view, e->has_view, st_->type);
             else if (e->dead_format) nvn_dead_slot_sampled(e, tic);
             if (e->tex && stage == 1) {
                 extern int renderer_texpatch_of(NvnTexture *t);
@@ -2258,8 +2327,12 @@ static void bind_textures(int stage, ShaderInfo *si) {
                 draw_item_cursor |= texpatch_is_item_cursor(id);
             }
             if (e->tex && i < 64) {
-                renderer_texture_scale(e->tex, &tex_sc[stage][i][0], &tex_sc[stage][i][1]);
-                renderer_texture_fraction(e->tex, &tex_fr[stage][i][0], &tex_fr[stage][i][1]);
+                renderer_texture_scale(alias ? alias : e->tex, &tex_sc[stage][i][0], &tex_sc[stage][i][1]);
+                renderer_texture_fraction(alias ? alias : e->tex, &tex_fr[stage][i][0], &tex_fr[stage][i][1]);
+                if (alias) {  // (the alias's UVs span its own size: the render target's texels at the same coordinates)
+                    tex_fr[stage][i][0] *= (float)e->tex->width / (float)alias->width;
+                    tex_fr[stage][i][1] *= (float)e->tex->height / (float)alias->height;
+                }
                 tex_wh[stage][i][0] = e->tex->width; tex_wh[stage][i][1] = e->tex->height;
             }
             for (int k = 0; k < nfeedback; k++)
@@ -4428,6 +4501,46 @@ static void draw_one(CmdRec *r, bool indexed) {
     // depth / stencil tests into colour-only passes ~100k times a minute, and GPU faults followed)
     bool no_depth = game_other() && !st.rt.depth;
     bool no_stencil = game_other() && (!st.rt.depth || !renderer_format_has_stencil(st.rt.depth->format));
+    {   // (debug) LARECOMP_LOG_ALIAS=1: a texture sampled whose memory is a render target's, through another texture object
+        static int on = -1; static NvnTexture *rts[64]; static int nrt; static int nlog;
+        if (on < 0) on = ENV("LARECOMP_LOG_ALIAS") != NULL;
+        if (on) {
+            for (int i = 0; i < st.rt.ncolor; i++) {
+                NvnTexture *c = st.rt.color[i];
+                if (!c) continue;
+                int k = 0; for (; k < nrt && rts[k] != c; k++) {}
+                if (k == nrt && nrt < 64) rts[nrt++] = c;
+            }
+            for (int sg = 0; pr && sg < 2; sg++) for (int i = 0; i < (sg ? pr->fi : pr->vi)->ntex; i++) {
+                NvnTexture *t = shader_texture_object(sg, &(sg ? pr->fi : pr->vi)->tex[i]);
+                if (!t || !t->addr) continue;
+                for (int k = 0; k < nrt; k++)
+                    if (rts[k] != t && rts[k]->addr == t->addr && nlog < 40) {
+                        nlog++;
+                        LOG("[alias] stage %d t%d %ux%u fmt %#x (obj %p) reads rt %ux%u fmt %#x (obj %p) at %llx, fs %llx frame %llu\n", sg, i,
+                            t->width, t->height, t->format, (void *)t, rts[k]->width, rts[k]->height, rts[k]->format, (void *)rts[k],
+                            (unsigned long long)t->addr, st.program ? (unsigned long long)st.program->stages[1].code_addr : 0ull,
+                            (unsigned long long)renderer_exec_frame());
+                    }
+            }
+        }
+    }
+    {   // (debug) LARECOMP_LOG_TEXSIZE=<w>x<h>: fragment shaders sampling a render target of that size (once each)
+        static int tw = -1, th; static uint64_t seen[64]; static int nseen;
+        if (tw < 0) { tw = 0; const char *e = ENV("LARECOMP_LOG_TEXSIZE"); if (e) sscanf(e, "%dx%d", &tw, &th); }
+        for (int sg = 0; tw && pr && sg < 2; sg++) for (int i = 0; i < (sg ? pr->fi : pr->vi)->ntex; i++) {
+            NvnTexture *t = shader_texture_object(sg, &(sg ? pr->fi : pr->vi)->tex[i]);
+            if (!t || (int)t->width != tw || (int)t->height != th) continue;
+            uint64_t fs = st.program ? st.program->stages[1].code_addr : 0;
+            int k = 0; for (; k < nseen && seen[k] != fs; k++) {}
+            if (k == nseen && nseen < 64) { seen[nseen++] = fs; LOG("[texsize] %s fs %llx samples %dx%d format %#x as t%d (rt %ux%u, frame %llu)\n", sg ? "fragment" : "vertex", (unsigned long long)fs, tw, th, t->format, i, st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->width : 0, st.rt.ncolor && st.rt.color[0] ? st.rt.color[0]->height : 0, (unsigned long long)renderer_exec_frame()); }
+        }
+    }
+    if (no_stencil && st.ds[3] && ENV("LARECOMP_LOG_NOSTENCIL")) {  // (debug) a draw that tests stencil without one
+        static int n;
+        if (n++ < 30) LOG("[nostencil] fs %llx depth %s format %#x (frame %llu)\n", st.program ? (unsigned long long)st.program->stages[1].code_addr : 0ull,
+                          st.rt.depth ? "yes" : "none", st.rt.depth ? st.rt.depth->format : 0, (unsigned long long)renderer_exec_frame());
+    }
     uint64_t dsk = hmix(hmix(hmix(0xcbf29ce484222325ull, st.ds, 8), st.stencil_mask, sizeof st.stencil_mask), st.stencil_vmask, sizeof st.stencil_vmask) ^ decal_le ^
                    (uint64_t)(sc_mark != 0) << 40 ^ (uint64_t)no_depth << 41 ^ (uint64_t)no_stencil << 42;  // (snow: snow_cover_check)
     id<MTLDepthStencilState> dss = dsk == last_dsk ? last_dss : nil;
@@ -5857,6 +5970,7 @@ static void exec_list(uint64_t handle, int depth) {
                 st.rt.has_cview[i] = rt->has_view[i];
             }
             st.rt.depth = (NvnTexture *)(uintptr_t)rt->depth;
+            for (int i = 0; i < st.rt.ncolor; i++) rt_addr_note(st.rt.color[i]);
             st.rt.dview = rt->dview;
             st.rt.has_dview = rt->has_dview;
             bool same = rt_same(&old, &st.rt);
