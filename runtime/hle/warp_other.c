@@ -502,7 +502,10 @@ static void tour_frame(uint64_t frame) {
         } else if (t - t0 > 30) {
             LOG("[tour] result %d %s %s: no load in 30 s (last level read: %s)\n", cur, g_places[cur].level,
                 g_places[cur].locator, g_loaded);
-            cur++, state = 0;
+            // (some places forbid warping out - a battle arena: the driver starts again from the save, at the next one)
+            LOG("[tour] restart after %d\n", cur);
+            fflush(stderr);
+            _exit(3);
         }
     } else if (state == 2 && t - t0 - t_load > 6.0) {
         extern char g_window_shot_request[256];
