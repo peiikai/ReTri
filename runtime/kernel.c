@@ -810,6 +810,14 @@ static void svc_impl(Cpu *c, uint32_t imm, uint64_t pc) {
     }
     case 0x26:  // Break
         if (x[0] & 0x80000000u) { LOG("[kernel] Break notification %llx\n", x[0]); x[0] = R_OK; break; }
+        if (x[2] == 4 && x[1] >= GUEST_LO && x[1] < GUEST_HI) {  // (an aborted result: its value and the guest callers)
+            LOG("[kernel] svcBreak: result %#x (module %u, description %u); callers:", *(uint32_t *)(uintptr_t)x[1],
+                *(uint32_t *)(uintptr_t)x[1] & 0x1ff, (*(uint32_t *)(uintptr_t)x[1] >> 9) & 0x1fff);
+            uint64_t fp = x[29];
+            for (int i = 0; i < 12 && fp >= GUEST_LO && fp < GUEST_HI; i++, fp = *(uint64_t *)(uintptr_t)fp)
+                LOG(" %llx", (unsigned long long)*(uint64_t *)(uintptr_t)(fp + 8));
+            LOG("\n");
+        }
         FATAL("svcBreak(reason=%llx, info=%llx, size=%llx) at %llx\n", x[0], x[1], x[2], pc);
     case 0x27: debug_string(x[0], x[1]); x[0] = R_OK; break;
     case 0x29: {  // GetInfo(_, id0, handle, id1)

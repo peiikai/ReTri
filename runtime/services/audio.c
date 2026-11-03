@@ -816,6 +816,14 @@ static void request_update(Renderer *r, IpcReq *req, IpcResp *resp) {
     const uint32_t *h = (const uint32_t *)ip;
     uint32_t behavior_sz = h[1], pools_sz = h[2], voices_sz = h[3], chans_sz = h[4], effects_sz = h[5];
     uint32_t mixes_sz = h[6], sinks_sz = h[7], perf_sz = h[8];
+    static bool header_logged;
+    if (!header_logged) {  // (the first update: the revision's layout, for newer SDKs)
+        header_logged = true;
+        LOG("[audren] first update: rev %d, in %llu / out %llu bytes, header", (int)(h[0] >> 24) - '0',
+            (unsigned long long)in->size, (unsigned long long)out->size);
+        for (int i = 0; i < 16; i++) LOG(" %x", h[i]);
+        LOG("\n");
+    }
     {
         static int dump_n = -1;
         static long count;
@@ -865,8 +873,10 @@ static void request_update(Renderer *r, IpcReq *req, IpcResp *resp) {
     }
     // effects (not processed): report them as enabled/disabled per request
     const uint8_t *ein = vin + voices_sz;
-    oh[5] = neffects * 0x10;
-    for (uint32_t i = 0; i < neffects && o + 0x10 <= out->size; i++, o += 0x10) {
+    // (REV9+: EffectOutStatusVersion2, the old 0x10-byte status then a 0x80-byte result state - left zero)
+    uint32_t eo = (r->revision >> 24) - '0' >= 9 ? 0x90 : 0x10;
+    oh[5] = neffects * eo;
+    for (uint32_t i = 0; i < neffects && o + eo <= out->size; i++, o += eo) {
         const uint8_t *e = ein + i * 0xC0;
         op[o] = e[2] ? 3 : 4;  // EffectState Enabled / Disabled
         if (i < r->effects) effect_update(&r->fx[i], e);

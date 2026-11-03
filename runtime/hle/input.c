@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../game_addresses.h"
 #include "../hle.h"
 #include "../nvn/nvn.h"
 #include "../nvn/renderer.h"
@@ -757,8 +758,8 @@ static void fill_state(Cpu *c) {
     if (nlog < 6 && (sampling % 600) == 1) { nlog++; LOG("[input] GetNpadState id %#x lr %llx\n", id, c->x[30]); }
     if (id != 0) return;  // docked: only player 1 (FullKey); Handheld stays disconnected
     extern void warp_game_tick(Cpu *c);
-    warp_game_tick(c);  // game main thread, once per frame: apply a queued warp
-    { extern void give_item_tick(Cpu *c, uint64_t frame); extern uint64_t renderer_present_count(void);
+    if (!game_other()) warp_game_tick(c);  // game main thread, once per frame: apply a queued warp
+    if (!game_other()) { extern void give_item_tick(Cpu *c, uint64_t frame); extern uint64_t renderer_present_count(void);
       give_item_tick(c, renderer_present_count());
       extern void chamber_game_tick(Cpu *c, uint64_t frame);
       chamber_game_tick(c, renderer_present_count());
@@ -806,12 +807,13 @@ static void fill_state(Cpu *c) {
     }
     int32_t lx = clamp_axis((menu ? 0 : key_lx + pad_lx) + script_lx), ly = clamp_axis((menu ? 0 : key_ly + pad_ly) + script_ly);
     int32_t rx = clamp_axis((menu ? 0 : key_rx + pad_rx) + script_rx), ry = clamp_axis((menu ? 0 : key_ry + pad_ry) + script_ry);
-    if (!menu) {  // d-pad items (setting): the Items page assigns, play uses (runtime/hle/dpad_items.c; before mirroring:
+    bool la = !game_other();  // (another game on the engine: none of LA's input features, they read LA's state)
+    if (!menu && la) {  // d-pad items (setting): the Items page assigns, play uses (runtime/hle/dpad_items.c; before mirroring:
         extern uint64_t dpad_items_input(uint64_t b);  // the d-pad as held)
         b = dpad_items_input(b);
     }
     extern bool mirror_input(void);  // mirror mode, the world on screen (runtime/hle/mirror.c): left and right swap
-    bool mirrored = !menu && mirror_input();
+    bool mirrored = !menu && la && mirror_input();
     if (mirrored) {
         lx = -lx;
         uint64_t l = (b >> BTN_LEFT) & 1, r = (b >> BTN_RIGHT) & 1;
@@ -846,7 +848,7 @@ static void fill_state(Cpu *c) {
     if (ry > 16000) b |= 1ull << 21;
     if (rx > 16000) b |= 1ull << 22;
     if (ry < -16000) b |= 1ull << 23;
-    {   // the pause menu's companion slot (runtime/hle/pets.c) takes the d-pad / sticks / A while the cursor is on it
+    if (la) {   // the pause menu's companion slot (runtime/hle/pets.c) takes the d-pad / sticks / A while the cursor is on it
         extern uint64_t pets_menu_input(uint64_t b, int32_t st[4]);
         int32_t st[4] = {lx, ly, rx, ry};
         b = pets_menu_input(b, st);

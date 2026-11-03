@@ -1,6 +1,7 @@
 // NVN command buffers: commands are recorded into the guest-provided command memory as CmdRec
 // records, so the game's own memory management and out-of-memory callbacks work as designed.
 // A command handle is the guest address of a list's first record.
+#include "../game_addresses.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -60,6 +61,19 @@ NVN(nvnCommandBufferSetCommandMemoryCallbackEnabled) { (void)c; }
 static CmdRec *rec(Cpu *c, NvnCmdBuf *cb, uint32_t op, uint32_t extra) {
     uint32_t size = (uint32_t)((sizeof(CmdRec) + extra + 7) & ~7u);
     for (int tries = 0; !cb->mem || cb->used + size + JUMP_RESERVE > cb->size; tries++) {
+        if (game_other() && cb->mem) {  // (another game: our records are bigger than NVN's commands, so its command
+            // memory runs out where the hardware's wouldn't, and it may have no handler for it. Chain into host memory:
+            // experimental, never freed.)
+            static uint64_t overflows;
+            uint64_t n = 256 * 1024 > size + JUMP_RESERVE ? 256 * 1024 : size + JUMP_RESERVE;
+            uint8_t *more = malloc(n);
+            if (!more) FATAL("nvn: out of command memory (need %u)\n", size);
+            CmdRec *j = raw_rec(cb->mem + cb->used, CMD_JUMP, sizeof(CmdRec));
+            j->x[0] = (uint64_t)(uintptr_t)more;
+            cb->mem = (uint64_t)(uintptr_t)more, cb->size = n, cb->used = 0;
+            if (++overflows % 100 == 1) LOG("[nvn] command memory overflow %llu (host chunk)\n", (unsigned long long)overflows);
+            continue;
+        }
         if (!cb->callback || tries == 2) FATAL("nvn: out of command memory (need %u)\n", size);
         uint64_t saved[8];
         memcpy(saved, c->x, sizeof saved);
