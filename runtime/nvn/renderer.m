@@ -2575,7 +2575,14 @@ static bool translate_compute(CsProg *cp, const uint8_t *code, size_t max) {
     maxwell_gmem_size = HEAP_MAX;
     ShaderKey k = {0};
     cp->si = slow_translate(code, max, STAGE_COMPUTE, &k);
-    if (!cp->si->msl) { LOG("[compute] translate failed: %s (code %llx)\n", cp->si->error, cp->code_addr); cp->failed = true; return false; }
+    if (!cp->si->msl) {
+        LOG("[compute] translate failed: %s (code %llx):", cp->si->error, cp->code_addr);
+        for (int i = 0, n = 0; i < 128 && n < 12; i++)
+            if (((const uint64_t *)code)[i]) n++, LOG(" +%x=%016llx", i * 8, (unsigned long long)((const uint64_t *)code)[i]);
+        LOG("\n");
+        cp->failed = true;
+        return false;
+    }
     return true;
 }
 

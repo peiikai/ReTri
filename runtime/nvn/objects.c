@@ -1,4 +1,5 @@
 // NVN objects, builders, and state objects (everything except command recording).
+#include "../game_addresses.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,6 +50,8 @@ NVN(nvnDeviceInitialize) {
         extern void shader_prep_boot(const char *romfs);
         shader_prep_boot(g_romfs_dir);  // (LARECOMP_SHADER_PREP=1, tests: what the start screen's setup does)
     }
+    extern bool maxwell_skip_unsupported_stores;
+    maxwell_skip_unsupported_stores = game_other() != NULL;  // (experimental: see maxwell/shader.h)
     LOG("[nvn] device initialized\n");
     RET(1);
 }

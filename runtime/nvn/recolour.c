@@ -5,6 +5,7 @@
 // of the same size, mip count and bytes is that texture (the game uploads the files' block-linear data as is, the way
 // texpatch.c recognises the tunic). The renderers ask recolour_class_of for each texture a draw samples and, for a
 // draw with a class, set the per-draw tint from recolour_tint.
+#include "../game_addresses.h"
 #include "recolour.h"
 
 #include <dirent.h>
@@ -193,6 +194,7 @@ static void load(void) {
 }
 
 int recolour_identify(const NvnTexture *t, uint64_t total) {
+    if (game_other()) return -1;  // (LA's textures only: another game on the engine may share hashes)
     pthread_once(&g_once, load);
     uint32_t hsize[4] = {0};
     uint64_t hval[4] = {0};

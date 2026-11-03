@@ -27,7 +27,8 @@ uint32_t maxwell_gmem_chunk_shift;  // 0: one buffer for the whole heap (GLSL; s
 bool maxwell_gmem_lazy;
 bool maxwell_gmem_fs_miss;
 bool maxwell_glsl_stack_vars = true;
-bool maxwell_gmem_mirror;  // (shader.h)
+bool maxwell_gmem_mirror;
+bool maxwell_skip_unsupported_stores;  // (shader.h)
 const uint8_t *maxwell_dbg_code;
 uint32_t maxwell_dbg_pc;
 int maxwell_dbg_reg;
@@ -462,12 +463,23 @@ static bool emit_half(Ctx *c, uint64_t w) {
         hstore(c, d, t, merge, sat);
         return true;
     }
-    // ---- HSETP2 / HSET2 (reg forms)
-    if ((op & 0xfff8) == 0x5d20 || (op & 0xfff8) == 0x5d18) {
-        bool setp = (op & 0xfff8) == 0x5d20;
+    // ---- HSETP2 / HSET2 (reg forms), HSETP2 imm (7e00) / cbuf (7e80): field layout per Ryujinx's InstHsetp2I / C
+    bool hsetp2_ic = (op & 0xfe80) == 0x7e00 || (op & 0xfe80) == 0x7e80;
+    if ((op & 0xfff8) == 0x5d20 || (op & 0xfff8) == 0x5d18 || hsetp2_ic) {
+        bool setp = (op & 0xfff8) == 0x5d20 || hsetp2_ic;
         const char *x = HS(R(a), (int)bits(w, 47, 2), bits(w, 43, 1), bits(w, 44, 1));
-        const char *y = HS(R((int)bits(w, 20, 8)), (int)bits(w, 28, 2), bits(w, 31, 1), bits(w, 30, 1));
-        int cop = (int)bits(w, 35, 4), bop = (int)bits(w, 45, 2);
+        const char *y;
+        int cop = (int)bits(w, 35, 4), bop = (int)bits(w, 45, 2), hand_bit = 49;
+        if (!hsetp2_ic) {
+            y = HS(R((int)bits(w, 20, 8)), (int)bits(w, 28, 2), bits(w, 31, 1), bits(w, 30, 1));
+        } else if ((op & 0xfe80) == 0x7e00) {
+            sprintf(ib, "0x%08xu", himm(w));
+            y = HS(ib, 0, false, false);
+            cop = (int)bits(w, 49, 4), hand_bit = 53;
+        } else {
+            y = HS(cbuf_ref(c, (int)bits(w, 34, 5), bits(w, 20, 14) * 4, NULL, cb), 1, bits(w, 56, 1), bits(w, 54, 1));
+            cop = (int)bits(w, 49, 4), hand_bit = 53;
+        }
         const char *pp = P((int)bits(w, 39, 3), bits(w, 42, 1));
         char lx[512], ly[512];
         sp(&c->body, "    { float2 hx_ = %s, hy_ = %s; bool pp = %s;\n", x, y, pp);
@@ -476,7 +488,7 @@ static bool emit_half(Ctx *c, uint64_t w) {
         sp(&c->body, "      bool l = %s, h = %s;\n", lx, ly);
         if (setp) {
             int pa = (int)bits(w, 3, 3), pb = (int)bits(w, 0, 3);
-            if (bits(w, 49, 1)) {  // .H_AND: each half is combined with the predicate first, then they're ANDed
+            if (bits(w, hand_bit, 1)) {  // .H_AND: each half is combined with the predicate first, then they're ANDed
                 sp(&c->body, "      l = (l %s pp) && (h %s pp); h = !l;\n", bool_op(bop), bool_op(bop));
                 if (pa != PT) { c->pred_used[pa] = 1; sp(&c->body, "      p%d = l;\n", pa); }
                 if (pb != PT) { c->pred_used[pb] = 1; sp(&c->body, "      p%d = h;\n", pb); }
@@ -1259,6 +1271,38 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         } else {
             set_reg(c, d, t);
         }
+    } else if (OPM(0x5bd0000000000000ull, 0xfff8000000000000ull) || OPM(0x4bd0000000000000ull, 0xfff8000000000000ull) ||
+               OPM(0x36d0000000000000ull, 0xfef8000000000000ull)) {  // LEA: d = b + (a << s) [+ cc] (Ryujinx InstLea*)
+        bool wcc = bits(w, 47, 1), x = bits(w, 46, 1);
+        int s = (int)bits(w, 39, 5), dp = (int)bits(w, 48, 3);
+        c->uses_cc = true;
+        sp(&c->body, "    { uint lo_ = %s%s << %du; ulong sum = ulong(lo_) + ulong(%s)%s;%s\n", bits(w, 45, 1) ? "-" : "", R(a), s,
+           B(false), x ? " + ulong(cc)" : "", wcc ? " cc = uint(sum >> 32) & 1u;" : "");
+        if (dp != PT) { c->pred_used[dp] = 1; sp(&c->body, "      p%d = (sum >> 32) != 0ul;\n", dp); }
+        if (d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      r%d = uint(sum);\n", d); }
+        sp(&c->body, "    }\n");
+    } else if (OPM(0x5bd8000000000000ull, 0xfff8000000000000ull) || OPM(0x1800000000000000ull, 0xfc00000000000000ull)) {
+        // LEA.HI: d = b + high word of ({c, a} << s) [+ cc] (Ryujinx InstLeaHiR / C)
+        bool cf = OPM(0x1800000000000000ull, 0xfc00000000000000ull);
+        bool wcc = bits(w, 47, 1), x = cf ? bits(w, 57, 1) : bits(w, 38, 1), nega = cf ? bits(w, 56, 1) : bits(w, 37, 1);
+        int s = (int)(cf ? bits(w, 51, 5) : bits(w, 28, 5)), dp = (int)bits(w, 48, 3);
+        char bb[256];
+        const char *bv = cf ? cbuf_ref(c, (int)bits(w, 34, 5), bits(w, 20, 14) * 4, NULL, bb) : R((int)bits(w, 20, 8));
+        c->uses_cc = true;
+        sp(&c->body, "    { ulong v_ = (ulong(%s) << 32) | ulong(%s);%s uint hi_ = uint((v_ << %du) >> 32);\n",
+           R((int)bits(w, 39, 8)), R(a), nega ? " v_ = 0ul - v_;" : "", s);
+        sp(&c->body, "      ulong sum = ulong(hi_) + ulong(%s)%s;%s\n", bv, x ? " + ulong(cc)" : "",
+           wcc ? " cc = uint(sum >> 32) & 1u;" : "");
+        if (dp != PT) { c->pred_used[dp] = 1; sp(&c->body, "      p%d = (sum >> 32) != 0ul;\n", dp); }
+        if (d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      r%d = uint(sum);\n", d); }
+        sp(&c->body, "    }\n");
+    } else if (OPM(0x50d8000000000000ull, 0xfff8000000000000ull)) {  // VOTE (Ryujinx InstVote): per lane for now -
+        // ALL / ANY give the source predicate, EQ true, the ballot this lane's bit (right when the lanes agree)
+        int mode = (int)bits(w, 48, 2), vp = (int)bits(w, 45, 3);
+        sp(&c->body, "    { bool vs_ = %s;\n", P((int)bits(w, 39, 3), bits(w, 42, 1)));
+        if (vp != PT) { c->pred_used[vp] = 1; sp(&c->body, "      p%d = %s;\n", vp, mode == 2 ? "true" : "vs_"); }
+        if (d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      r%d = vs_ ? 1u : 0u;\n", d); }
+        sp(&c->body, "    }\n");
     } else if (OPM(0x1400000000000000ull, 0xfc00000000000000ull)) {  // ISCADD32I
         sprintf(t, "((%s << %du) + 0x%08xu)", R(a), (int)bits(w, 53, 5), (uint32_t)bits(w, 20, 32));
         set_reg(c, d, t);
@@ -1351,8 +1395,10 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
                OPM(0x3800000000000000ull, 0xfef8000000000000ull)) {  // BFE
         const char *bv = B(false);
         bool sgn = bits(w, 48, 1);
-        if (bits(w, 40, 1)) fail(c, "bfe brev");
-        sprintf(t, sgn ? "bfe_s(%s, %s)" : "bfe_u(%s, %s)", R(a), bv);
+        char av[256];
+        if (bits(w, 40, 1)) sprintf(av, c->glsl ? "bitfieldReverse(%s)" : "reverse_bits(%s)", R(a));  // .BREV: A reversed first
+        else snprintf(av, sizeof av, "%s", R(a));
+        sprintf(t, sgn ? "bfe_s(%s, %s)" : "bfe_u(%s, %s)", av, bv);
         set_reg(c, d, t);
     } else if (OPM(0x5bf0000000000000ull, 0xfff8000000000000ull) || OPM(0x4bf0000000000000ull, 0xfff8000000000000ull) ||
                OPM(0x36f0000000000000ull, 0xfef8000000000000ull) || OPM(0x53f0000000000000ull, 0xfff8000000000000ull)) {  // BFI
@@ -1776,6 +1822,11 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         if (!c->glsl) sp(&c->body, "    threadgroup_barrier(mem_flags::mem_threadgroup);\n");
         else if (c->stage == STAGE_COMPUTE) sp(&c->body, "    barrier();\n");
         else sp(&c->body, "    /* bar */\n");  // GLSL barrier() is compute / tessellation only
+    } else if (maxwell_skip_unsupported_stores && (OPM(0xebf8000000000000ull, 0xfff8000000000000ull) ||  // RED
+                                                   OPM(0xeb20000000000000ull, 0xfff8000000000000ull))) {  // SUST.B
+        // (experimental, other games: global reductions and surface stores aren't translated yet - skipped, so the rest
+        // of the shader still runs; only their side effects are missing)
+        sp(&c->body, "    /* skipped %s */\n", (w >> 51) == (0xebf8000000000000ull >> 51) ? "red" : "sust.b");
     } else {
         fail(c, "unknown instruction %016llx at %#x", (unsigned long long)w, pc);
     }
@@ -2276,8 +2327,9 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
     c->glsl = key && key->glsl;
     const uint8_t *sph = blob + 0x30;
     const uint8_t *code = blob + 0x80;
-    // compute programs have neither the 0x30-byte NVN header nor an SPH: code starts at the blob
-    if (stage == STAGE_COMPUTE) code = blob;
+    // compute programs have no SPH, and in older SDKs no NVN header either: code starts at the blob
+    if (stage == STAGE_COMPUTE) code = *(const uint32_t *)blob == 0x12345679 ? blob + 0x100 : blob;  // (0x12345679: the
+    // compute header of newer SDKs: 0x100 bytes)
     if (stage == STAGE_FRAGMENT) {
         c->omap_target = *(const uint32_t *)(sph + 0x48);
         c->omap_depth = (*(const uint32_t *)(sph + 0x4C) >> 1) & 1;

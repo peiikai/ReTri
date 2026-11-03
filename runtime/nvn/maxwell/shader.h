@@ -126,6 +126,8 @@ extern bool maxwell_glsl_stack_vars;
 // its storage buffers through the address table (GMap / GFast, as compute does), which points into copies of the
 // guest memory they cover (vulkan/exec.c gmir_). Accesses outside the table read 0 and drop their stores.
 extern bool maxwell_gmem_mirror;
+// Experimental (another game on the engine): RED and SUST.B are skipped instead of failing the shader.
+extern bool maxwell_skip_unsupported_stores;
 // Lazy mode, vertex / fragment: the chunks under the draw's storage buffers (where the heap reads are) come as push
 // constants, GDirect { uvec4 gd[GMEM_DIRECT_MAX]; } (x = first word, y = words, 0: unused, z, w = device address), and
 // as storage buffers GDir<k> at GMEM_DIRECT_BINDING + k of the chunk set: an access in one is a compare and a plain

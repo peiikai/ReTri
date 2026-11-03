@@ -16,6 +16,7 @@
 // Plus / Minus = Menu / View, Options / Create. A button remapped on a Nintendo-style pad gets Nintendo letters; one
 // moved to a stick click / the d-pad gets LS / RS (L3 / R3) or an arrow. Stick glyphs stay. (The keyboard has no
 // glyphs of its own: keyboard bindings don't change the prompts.)
+#include "../game_addresses.h"
 #include "texpatch.h"
 
 #include <math.h>
@@ -259,6 +260,7 @@ static bool g_tunic_layout_ok;
 bool texpatch_is_item_cursor(int id) { return id >= 0 && id < g_nrefs && g_refs[id].role == R_ITEM_CURSOR; }
 
 int texpatch_identify(const NvnTexture *t) {
+    if (game_other()) return -1;  // (LA's textures only: another game on the engine may share hashes)
     pthread_once(&g_once, load_refs);
     if (!t->addr || t->depth > 1) return -1;
     uint64_t total = tegra_total_size(&t->layout);
