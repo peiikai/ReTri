@@ -615,9 +615,10 @@ def main():
                 scanned[key] = m.scan(a, end)
             new |= scanned[key][1] - start_set
         if not new and not orphans_done:
-            # (another game) a 16-byte-aligned address right after an unconditional branch / return that nothing in its
-            # function reaches (no branch, no jump-table case) is a function of its own: EoW calls some only through
-            # pointers built at run time - no relocation, ADR or eh_frame entry names them (a crash at main+0x181c250)
+            # (another game) an address right after an unconditional branch / return that nothing in its function
+            # reaches (no branch, no jump-table case) is a function of its own: EoW calls some only through pointers
+            # built at run time - no relocation, ADR or eh_frame entry names them (crashes at main+0x181c250, then at
+            # main+0x181c63c: not 16-byte aligned, a function the compiler placed right after a tail call's branch)
             orphans_done = True
             labels = set()
             for i, a in enumerate(order):
@@ -629,7 +630,7 @@ def main():
             for i, w in enumerate(m.words):
                 if (w & 0xFC000000) == 0x14000000 or (w & 0xFFFFFC1F) in (0xD61F0000, 0xD65F0000):
                     t = m.lo + (i + 1) * 4
-                    if (t % 16 == 0 and i + 1 < len(m.words) and m.words[i + 1] not in (0, 0xD503201F)
+                    if (i + 1 < len(m.words) and m.words[i + 1] not in (0, 0xD503201F)
                             and t not in labels and t not in start_set):
                         new.add(t)
             print(f'{args.name}: {len(new)} unreferenced functions added', file=sys.stderr)
