@@ -705,7 +705,11 @@ void nvn_dead_slot_sampled(const NvnTexEntry *e, uint32_t slot) {
     }
 }
 NVN(nvnTexturePoolRegisterTexture) { register_texture(c); }
-NVN(nvnTexturePoolRegisterImage) { register_texture(c); }
+NVN(nvnTexturePoolRegisterImage) {
+    register_texture(c);
+    NvnTexture *t = HOST(NvnTexture, A(2));
+    if (t && game_other() && getenv("LARECOMP_SUST")) t->image_use = true;  // (off by default, as SUST.B in translate.c)  // (metal.m: allocated writable - compute image stores, other games)
+}
 
 NVN(nvnSamplerPoolInitialize) {
     desc_pool_init(A(0), A(1), A(2), (int)A(3), sizeof(NvnSamplerDesc), g_sampler_pools);

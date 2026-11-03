@@ -1849,7 +1849,7 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         }
         sp(&c->body, "      }\n    }\n");
     } else if (!c->glsl && c->stage == STAGE_COMPUTE && OPM(0xeb20000000000000ull, 0xfff8000000000000ull) &&
-               !getenv("LARECOMP_NO_SUST")) {
+               getenv("LARECOMP_SUST")) {  // (off by default: writable textures led to GPU page faults - under study)
         // SUST.B (Metal compute; Ryujinx InstSustB): formatted store of R[d..] (the Rgba mask's components, in order) at
         // R[a] (x), R[a+1] (y), R[a+2] (layer: 2D array / cube faces) into the image whose handle is R[c]
         int rgba = (int)bits(w, 20, 4), dim = (int)bits(w, 33, 3), hc = (int)bits(w, 39, 8);

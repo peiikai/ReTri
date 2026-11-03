@@ -33,6 +33,7 @@ typedef struct NvnTexture {
     uint64_t debug_id;
     uint32_t pool_refs;  // texture pool entries that name it (cleared when it is finalized: runtime/nvn/objects.c)
     bool format_views;   // named through a view in a format the backend can only give with a flag (Metal: PixelFormatView)
+    bool image_use;      // registered as an image (nvnTexturePoolRegisterImage): compute stores into it (other games)
     char label[64];
 } NvnTexture;
 

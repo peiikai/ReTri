@@ -179,6 +179,7 @@ typedef struct {
     int tp;              // runtime/nvn/texpatch.c: 0 not checked yet, -1 none, else known UI texture + 1
     uint32_t tp_gen;     // texpatch_generation() it was last uploaded with
     bool format_views;   // allocated with MTLTextureUsagePixelFormatView (NvnTexture.format_views)
+    bool image_use;      // allocated with MTLTextureUsageShaderWrite (NvnTexture.image_use)
 } TexBackend;
 
 // Live textures (diagnostics: the overworld slowdown at 32:9 - the same textures used 870 MB and 4x the GPU time
@@ -359,7 +360,7 @@ static TexBackend *tex_backend(NvnTexture *t) {
             release_backend_texture(t, b);
             create_backend_texture(t, b);
         }
-        if (t->format_views && !b->format_views) texture_allow_format_views(t, b);
+        if ((t->format_views && !b->format_views) || (t->image_use && !b->image_use)) texture_allow_format_views(t, b);
         return b;
     }
     TexBackend *b = calloc(1, sizeof *b);
@@ -459,9 +460,10 @@ static void create_backend_texture(NvnTexture *t, TexBackend *b) {
     // format (backend_texture_view_format): either flag keeps Apple GPUs from compressing the texture losslessly, which
     // cost 6-11% of the GPU time at 5120x1440 (2026-10-18).
     d.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget | (t->format_views ? MTLTextureUsagePixelFormatView : 0);
-    // (another game: compute shaders store into textures - SUST.B, renderer.m. Uncompressed formats only; it costs Apple
-    // GPUs' lossless compression, so LA keeps it off)
-    if (game_other() && mf.pf < MTLPixelFormatBC1_RGBA && !renderer_format_is_depth(t->format) && !getenv("LARECOMP_NO_SHADERWRITE"))
+    // (another game: textures registered as images - compute shaders store into them, SUST.B in renderer.m. Only those:
+    // the flag on every texture led to GPU page faults, and it costs Apple GPUs' lossless compression)
+    b->image_use = t->image_use;
+    if (game_other() && t->image_use && mf.pf < MTLPixelFormatBC1_RGBA && !renderer_format_is_depth(t->format))
         d.usage |= MTLTextureUsageShaderWrite;
     b->format_views = t->format_views;
     d.storageMode = MTLStorageModePrivate;
