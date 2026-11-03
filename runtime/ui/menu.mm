@@ -91,6 +91,11 @@ extern "C" void menu_test_open(void) {
 void menu_tabs_focus(bool first_tab);
 static void set_open(bool open) {
     if (open == g_open.load()) return;
+    if (open && game_other()) {  // (another game: the menu's tabs read LA's game state - no menu until it has a safe one)
+        static int nlog;
+        if (!nlog++) LOG("[menu] not available for this game yet\n");
+        return;
+    }
     g_open.store(open);
     menu_sfx_play(open ? MENU_SFX_OPEN : MENU_SFX_CLOSE);
     input_reset();  // nothing held while the menu had focus leaks into the game
