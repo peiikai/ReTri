@@ -1849,10 +1849,60 @@ static dispatch_queue_t compile_queue(const char *name) {
                                               : DISPATCH_QUEUE_CONCURRENT;
     return dispatch_queue_create(name, attr);
 }
+// Another game: the builds run on threads of our own, a pool per queue (programs, pipelines, compute), not on GCD's.
+// GCD runs a concurrent queue's work only while the CPU isn't busy with other threads of at least its priority, and
+// EoW's own threads keep every core busy once Link moves: no build was started any more, every new pipeline stayed
+// pending and its draws were skipped - the screen went black for good (a sample showed no build running at all).
+// Each pool's threads run at utility priority, so the game still comes first, but they always run.
+typedef struct BuildJob { void (^job)(void); struct BuildJob *next; } BuildJob;
+typedef struct { dispatch_queue_t q; pthread_mutex_t m; pthread_cond_t cv; BuildJob *head, *tail; } BuildPool;
+static void *build_worker(void *arg) {
+    BuildPool *bp = arg;
+    pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+    for (;;) {
+        pthread_mutex_lock(&bp->m);
+        while (!bp->head) pthread_cond_wait(&bp->cv, &bp->m);
+        BuildJob *j = bp->head;
+        bp->head = j->next;
+        if (!bp->head) bp->tail = NULL;
+        pthread_mutex_unlock(&bp->m);
+        @autoreleasepool { j->job(); }
+        j->job = nil;
+        free(j);
+    }
+    return NULL;
+}
 static void compile_async(dispatch_queue_t q, void (^job)(void)) {
-    // (no cap on how many at once: a pipeline build waits for other builds, and capped, EoW's town stayed black - every
-    // slot held by a build waiting for one that couldn't start. The queues' utility priority keeps the game first.)
-    dispatch_async(q, job);
+    if (!game_other()) { dispatch_async(q, job); return; }
+    static BuildPool pools[4];
+    static pthread_mutex_t pools_lock = PTHREAD_MUTEX_INITIALIZER;
+    BuildPool *bp = NULL;
+    pthread_mutex_lock(&pools_lock);
+    for (int i = 0; i < 4 && !bp; i++) {
+        if (pools[i].q == q) bp = &pools[i];
+        else if (!pools[i].q) {
+            bp = &pools[i];
+            bp->q = q;
+            pthread_mutex_init(&bp->m, NULL);
+            pthread_cond_init(&bp->cv, NULL);
+            long n = (long)[[NSProcessInfo processInfo] activeProcessorCount] / 2;
+            if (n < 2) n = 2;
+            for (long k = 0; k < n; k++) {
+                pthread_t t;
+                pthread_create(&t, NULL, build_worker, bp);
+                pthread_detach(t);
+            }
+        }
+    }
+    pthread_mutex_unlock(&pools_lock);
+    if (!bp) { dispatch_async(q, job); return; }
+    BuildJob *j = calloc(1, sizeof *j);
+    j->job = [job copy];
+    pthread_mutex_lock(&bp->m);
+    if (bp->tail) bp->tail->next = j; else bp->head = j;
+    bp->tail = j;
+    pthread_cond_signal(&bp->cv);
+    pthread_mutex_unlock(&bp->m);
 }
 
 static id<MTLSamplerState> sampler_for(NvnSamplerDesc *d) {
