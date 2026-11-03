@@ -653,6 +653,13 @@ static void svc_impl(Cpu *c, uint32_t imm, uint64_t pc) {
     case 0x01: {  // SetHeapSize
         uint64_t size = x[1];
         if (size > HEAP_MAX) { x[0] = R_OUT_OF_RESOURCE; break; }
+        if (getenv("LARECOMP_TOUCH_HEAP") && size > heap_size) {  // (test) every new page backed now: GPU writes to pages
+            uint64_t t0 = plat_now_ns();                         // the CPU never touched (a no-copy buffer) may fault
+            for (uint64_t a = HEAP_BASE + heap_size; a < HEAP_BASE + size; a += 0x4000)
+                __atomic_fetch_add((volatile uint8_t *)(uintptr_t)a, 0, __ATOMIC_RELAXED);
+            LOG("[kernel] heap %#llx -> %#llx bytes, touched in %llu ms\n", (unsigned long long)heap_size,
+                (unsigned long long)size, (unsigned long long)((plat_now_ns() - t0) / 1000000));
+        }
         heap_size = size;
         region_remove(HEAP_BASE);
         if (size) region_add(HEAP_BASE, size, 5, 3);

@@ -1653,6 +1653,19 @@ static bool translate_program(Prog *pr, const uint8_t *vcode, size_t vmax, const
         snprintf(path, sizeof path, "build/msl/%llx_fs.metal", faddr);
         f = fopen(path, "w"); fputs(pr->fi->msl, f); fclose(f);
     }
+    if (getenv("LARECOMP_SAVE_MSL_HASH")) {  // (debug) by code content, prepared (vaddr 0) or not: build/msl/h<hash>_<stage>_<how>
+        mkdir("build/msl", 0755);
+        extern uint64_t shader_code_hash(const uint8_t *code, size_t n);
+        char path[256];
+        const char *how = vaddr ? "run" : "prep";
+        snprintf(path, sizeof path, "build/msl/h%016llx_vs_%s.metal", (unsigned long long)shader_code_hash(vcode, vmax), how);
+        FILE *f = fopen(path, "w"); if (f) { fputs(pr->vi->msl, f); fclose(f); }
+        snprintf(path, sizeof path, "build/msl/h%016llx_fs_%s.metal", (unsigned long long)shader_code_hash(fcode, fmax), how);
+        f = fopen(path, "w"); if (f) { fputs(pr->fi->msl, f); fclose(f); }
+        if (vaddr) LOG("[msl-hash] vs %llx = h%016llx, fs %llx = h%016llx\n", (unsigned long long)vaddr,
+                       (unsigned long long)shader_code_hash(vcode, vmax), (unsigned long long)faddr,
+                       (unsigned long long)shader_code_hash(fcode, fmax));
+    }
     return true;
 }
 
@@ -2728,6 +2741,16 @@ static CsProg *compute_program(NvnProgram *p) {
 }
 
 static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
+    static int skip_all = -1;  // (test) LARECOMP_SKIP_COMPUTE=1: no compute work at all; =<cs addr>: not that program
+    static uint64_t skip_cs;
+    if (skip_all < 0) { const char *e = getenv("LARECOMP_SKIP_COMPUTE"); skip_cs = e ? strtoull(e, NULL, 16) : 0; skip_all = e && skip_cs == 1; }
+    if (skip_all || (skip_cs > 1 && st.program && st.program->stages[5].code_addr == skip_cs)) return;
+    if (game_other() && ((uint64_t)gx * gy * gz > (1u << 22) || !gx || !gy || !gz)) {  // (garbage group counts: skipped)
+        static int nlog;
+        if (nlog++ < 20) LOG("[dispatch-guard] skipped: cs %llx groups %ux%ux%u\n",
+                             st.program ? (unsigned long long)st.program->stages[5].code_addr : 0ull, gx, gy, gz);
+        return;
+    }
     snap_reason = "compute"; snapshots_invalidate(NULL);
     {   // (debug) LARECOMP_WATCH_ADDR: the data watchpoint (dispatch.c) armed once the game draws
         static bool armed;
@@ -4129,26 +4152,31 @@ static void draw_one(CmdRec *r, bool indexed) {
     // depth / stencil
     static uint64_t last_dsk;
     static id<MTLDepthStencilState> last_dss;
+    // (another game: a test whose attachment the pass doesn't have is off - Metal leaves it undefined; EoW draws with
+    // depth / stencil tests into colour-only passes ~100k times a minute, and GPU faults followed)
+    bool no_depth = game_other() && !st.rt.depth;
+    bool no_stencil = game_other() && (!st.rt.depth || !renderer_format_has_stencil(st.rt.depth->format));
     uint64_t dsk = hmix(hmix(hmix(0xcbf29ce484222325ull, st.ds, 8), st.stencil_mask, sizeof st.stencil_mask), st.stencil_vmask, sizeof st.stencil_vmask) ^ decal_le ^
-                   (uint64_t)(sc_mark != 0) << 40;  // (snow: the stencil marks, snow_cover_check)
+                   (uint64_t)(sc_mark != 0) << 40 ^ (uint64_t)no_depth << 41 ^ (uint64_t)no_stencil << 42;  // (snow: snow_cover_check)
     id<MTLDepthStencilState> dss = dsk == last_dsk ? last_dss : nil;
     NSString *dk = nil;
     if (!dss) {
         dk = [NSString stringWithFormat:@"ds %02x%02x%02x%02x%02x%02x%02x%02x %x %x %x %x%s%s", st.ds[0], st.ds[1], st.ds[2], st.ds[3],
                     st.ds[4], st.ds[5], st.ds[6], st.ds[7], st.stencil_mask[0], st.stencil_vmask[0], st.stencil_mask[1], st.stencil_vmask[1],
                     decal_le ? " le" : "", sc_mark ? " snow" : ""];
+        if (no_depth || no_stencil) dk = [dk stringByAppendingFormat:@"%s%s", no_depth ? " nod" : "", no_stencil ? " nos" : ""];
         dss = cache[dk];
     }
     if (!dss) {
         MTLDepthStencilDescriptor *dd = [MTLDepthStencilDescriptor new];
         static int nodt = -1;
         if (nodt < 0) nodt = getenv("LARECOMP_NO_DEPTH_TEST") != NULL;
-        if (st.ds[0] && !nodt) {
+        if (st.ds[0] && !nodt && !no_depth) {
             dd.depthCompareFunction = decal_le ? MTLCompareFunctionLessEqual : compare_fn(st.ds[2]);
             dd.depthWriteEnabled = st.ds[1] != 0;
         }
         else { dd.depthCompareFunction = MTLCompareFunctionAlways; dd.depthWriteEnabled = NO; }
-        if (st.ds[3] || sc_mark) {
+        if ((st.ds[3] || sc_mark) && !no_stencil) {
             uint32_t ops = st.ds[5] | st.ds[6] << 8 | st.ds[7] << 16;
             for (int f = 0; f < 2; f++) {
                 MTLStencilDescriptor *sd = [MTLStencilDescriptor new];
@@ -4492,6 +4520,7 @@ static void draw_one(CmdRec *r, bool indexed) {
             else if (st.vbuf[i].addr && stride && (last + 1) * stride > (st.vbuf[i].size ? st.vbuf[i].size : 16))
                 bad = i, why = "past the buffer";
         }
+        if (cnt > 16u * 1024 * 1024 || ninst > 1u << 20) bad = 99, why = "absurd count";  // (garbage: billions of shader runs)
         if (bad >= 0 || (restart && indexed)) {
             static int nlog;
             if (nlog++ < 20)
@@ -4499,9 +4528,9 @@ static void draw_one(CmdRec *r, bool indexed) {
                     "vb%d %llx size %llu stride %u div %u\n", why, st.program ? (unsigned long long)st.program->stages[0].code_addr : 0ull,
                     st.program ? (unsigned long long)st.program->stages[1].code_addr : 0ull, (uint32_t)r->x[0],
                     indexed ? "indexed" : "arrays", cnt, (unsigned long long)maxv, restart, (unsigned long long)binst,
-                    (unsigned long long)ninst, bad, bad >= 0 ? (unsigned long long)st.vbuf[bad].addr : 0ull,
-                    bad >= 0 ? (unsigned long long)st.vbuf[bad].size : 0ull, bad >= 0 ? st.stream[bad][0] : 0,
-                    bad >= 0 ? st.stream[bad][1] : 0);
+                    (unsigned long long)ninst, bad, bad >= 0 && bad < 16 ? (unsigned long long)st.vbuf[bad].addr : 0ull,
+                    bad >= 0 && bad < 16 ? (unsigned long long)st.vbuf[bad].size : 0ull, bad >= 0 && bad < 16 ? st.stream[bad][0] : 0,
+                    bad >= 0 && bad < 16 ? st.stream[bad][1] : 0);
             if (bad >= 0) continue;
         }
     }
@@ -4531,7 +4560,9 @@ static void draw_one(CmdRec *r, bool indexed) {
             uint64_t ioff;
             bool in_heap = iaddr >= HEAP_BASE && iaddr + (uint64_t)count * isz <= HEAP_BASE + HEAP_MAX && (iaddr % isz) == 0;
             if (in_heap) { bind_note(1, iaddr, (uint64_t)count * isz); snap_note_vertex_bind(iaddr, (uint64_t)count * isz); }
-            if (in_heap && !dyn_copy(iaddr, (uint64_t)count * isz)) {
+            // (another game: indices always copied - read in place, the game rewrote them before the GPU got there
+            // and garbage indices fetched past the heap: GPU page faults / hangs)
+            if (in_heap && !game_other() && !dyn_copy(iaddr, (uint64_t)count * isz)) {
                 ib = g_guest_buffer; ioff = iaddr - HEAP_BASE;
             } else {
                 ioff = ring_alloc((void *)(uintptr_t)iaddr, (uint64_t)count * isz); ib = ring;
