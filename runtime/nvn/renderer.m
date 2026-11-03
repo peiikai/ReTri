@@ -3157,6 +3157,17 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
         ShaderTexture *st_ = &si->tex[i];
         int slot = ((int)st_->handle_offset - 0x20) / 8;
         uint64_t h = handle_at(5, slot);
+        if (ENV("LARECOMP_LOG_ALIAS") && h && st.tpool && (h & 0xFFFFF) < (uint32_t)st.tpool->count) {  // (debug) compute
+            NvnTexture *t = ((NvnTexEntry *)st.tpool->entries)[h & 0xFFFFF].tex;
+            static int n;
+            for (int k = 0; t && k < 128 && n < 40; k++)
+                if (g_rt_addr[k] && g_rt_addr[k]->addr == t->addr) {
+                    n++; LOG("[alias-cs] cs %llx t%d %ux%u fmt %#x reads rt %ux%u fmt %#x at %llx (frame %llu)\n",
+                             st.program ? (unsigned long long)st.program->stages[5].code_addr : 0ull, i, t->width, t->height, t->format,
+                             g_rt_addr[k]->width, g_rt_addr[k]->height, g_rt_addr[k]->format, (unsigned long long)t->addr,
+                             (unsigned long long)renderer_exec_frame());
+                }
+        }
         id<MTLTexture> tex = nil;
         id<MTLSamplerState> smp = nil;
         uint32_t tic = h & 0xFFFFF, tsc = (uint32_t)(h >> 20) & 0xFFF;

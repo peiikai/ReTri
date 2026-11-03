@@ -385,10 +385,10 @@ NVN(nvnCommandBufferDrawElementsBaseVertex) {
 NVN(nvnCommandBufferDrawElementsInstanced) { trace_draw(c, c->x[3]); Snap s = snap(c); record(c, CMD_DRAW_ELEMENTS, 0, &s); }
 PLAIN(nvnCommandBufferDrawArraysIndirect, CMD_DRAW_ARRAYS_INDIRECT)
 PLAIN(nvnCommandBufferDrawElementsIndirect, CMD_DRAW_ELEMENTS_INDIRECT)
-NVN(nvnCommandBufferMultiDrawArraysIndirectCount) { (void)c; }
-NVN(nvnCommandBufferMultiDrawElementsIndirectCount) { (void)c; }
-NVN(nvnCommandBufferDrawTransformFeedback) { (void)c; }
-NVN(nvnCommandBufferDrawTexture) { (void)c; }
+NVN(nvnCommandBufferMultiDrawArraysIndirectCount) { static int n; if (n++ % 600 == 0) LOG("[nvn] MultiDrawArraysIndirectCount #%d ignored (x1 %llx x2 %llx x3 %llx)\n", n, A(1), A(2), A(3)); }
+NVN(nvnCommandBufferMultiDrawElementsIndirectCount) { static int n; if (n++ % 600 == 0) LOG("[nvn] MultiDrawElementsIndirectCount #%d ignored (x1 %llx x2 %llx x3 %llx)\n", n, A(1), A(2), A(3)); }
+NVN(nvnCommandBufferDrawTransformFeedback) { static int n; if (n++ % 600 == 0) LOG("[nvn] DrawTransformFeedback #%d ignored (x1 %llx x2 %llx x3 %llx)\n", n, A(1), A(2), A(3)); }
+NVN(nvnCommandBufferDrawTexture) { static int n; if (n++ % 600 == 0) LOG("[nvn] DrawTexture #%d ignored (x1 %llx x2 %llx x3 %llx)\n", n, A(1), A(2), A(3)); }
 PLAIN(nvnCommandBufferDispatchCompute, CMD_DISPATCH)
 PLAIN(nvnCommandBufferDispatchComputeIndirect, CMD_DISPATCH_INDIRECT)
 NVN(nvnCommandBufferBeginTransformFeedback) { (void)c; }
