@@ -2788,6 +2788,62 @@ static bool gw_hit(uint64_t addr, uint64_t size) {
         if ((on || g_gw[i].always) && addr < g_gw[i].addr + g_gw[i].size && g_gw[i].addr < addr + size) return true;
     return false;
 }
+// (another game) A block a compute dispatch writes and draws then read as a uniform buffer gets a copy of its own per
+// frame: the dispatch writes the copy, and every bind of the block for the rest of that frame - draws, other dispatches
+// - reads the copy. EoW fits its shadow cascades on the GPU into such a block; the game resets the block to identity
+// early in its next frame, a few ms after submitting this one, which the Switch GPU never sees before its shadow passes
+// but ours sometimes did: read in place, the block could be reset between the dispatch and the shadow draws - the
+// whole scene in shadow for a frame (darker), or the water's shadows flickering. Blocks the dispatch also reads as a
+// uniform buffer (the scene's view constants: the CPU writes rows of them late) stay in place.
+// OFF by default (LARECOMP_GW_COPY=1: on): in a walking tour it made the darker frames more frequent (4 instead of
+// about 1) and one frame came out garbled - the game seems to read the dispatch's results back on the CPU (the
+// receivers' shadow rows in the scene's view constants follow them), and with the copy they never reached its memory.
+typedef struct { uint64_t addr, size, copy, frame; } GwCopy;
+static GwCopy g_gwc[32];
+static int g_ngwc;
+static bool gwc_on(void) {
+    static int on = -1;
+    if (on < 0) on = game_other() && ENV("LARECOMP_GW_COPY") && atoi(ENV("LARECOMP_GW_COPY"));
+    return on;
+}
+static GwCopy *gwc_find(uint64_t addr, uint64_t size) {
+    for (int i = 0; i < g_ngwc; i++) if (g_gwc[i].addr == addr && g_gwc[i].size == size) return &g_gwc[i];
+    return NULL;
+}
+static void gwc_note_uniform_reader(uint64_t addr, uint64_t size) {  // (a draw read this GPU-written range as uniforms)
+    if (!gwc_on() || size > 0x1000 || gwc_find(addr, size)) return;
+    for (int i = 0; i < g_ngwc; i++)  // (a range inside one already known: that one)
+        if (addr >= g_gwc[i].addr && addr + size <= g_gwc[i].addr + g_gwc[i].size) return;
+    if (g_ngwc == 32) return;
+    g_gwc[g_ngwc++] = (GwCopy){addr, size, 0, 0};
+    LOG("[gw] %llx+%llu: a GPU-written block read as uniforms - a copy per frame for it\n", (unsigned long long)addr, (unsigned long long)size);
+}
+static uint64_t gwc_for_writer(uint64_t addr, uint64_t size) {  // (a dispatch that stores binds it: this frame's copy)
+    if (!gwc_on()) return addr;
+    for (int i = 0; i < g_ngwc; i++) {
+        GwCopy *e = &g_gwc[i];
+        if (addr < e->addr || addr + size > e->addr + e->size) continue;
+        uint64_t f = renderer_exec_frame();
+        if (!e->copy || e->frame != f) {
+            uint64_t at = ring_take((e->size + 255) & ~255ull, NULL);
+            if (!at) return addr;
+            memcpy((void *)(uintptr_t)at, (const void *)(uintptr_t)e->addr, e->size);
+            e->copy = at, e->frame = f;
+        }
+        return e->copy + (addr - e->addr);
+    }
+    return addr;
+}
+static uint64_t gwc_redirect(uint64_t addr, uint64_t size) {  // (any bind: this frame's copy when the block has one)
+    if (!gwc_on() || !g_ngwc) return addr;
+    uint64_t f = renderer_exec_frame();
+    for (int i = 0; i < g_ngwc; i++) {
+        GwCopy *e = &g_gwc[i];
+        if (e->copy && e->frame == f && addr >= e->addr && addr + size <= e->addr + e->size) return e->copy + (addr - e->addr);
+    }
+    return addr;
+}
+
 // An indirect draw being translated (CMD_DRAW_*_INDIRECT): its arguments' guest address, and the index buffer's
 // (before the first index) - drawn with Metal's indirect draw from the guest heap, see the executor
 static uint64_t g_indirect_args, g_indirect_ibase;
@@ -3009,7 +3065,7 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
                                           (unsigned long long)st.program->stages[1].code_addr, (unsigned long long)renderer_exec_frame());
                     }
                 }
-                else if (sa && (si->ssbo_read & (1u << i))) { bind_note(2, sa, st.sbuf[stage][i].size); sa = snap_storage(sa, st.sbuf[stage][i].size, false); }
+                else if (sa && (si->ssbo_read & (1u << i))) { bind_note(2, sa, st.sbuf[stage][i].size); sa = snap_storage(gwc_redirect(sa, st.sbuf[stage][i].size), st.sbuf[stage][i].size, false); }
                 e[0] = (uint32_t)sa;
                 e[1] = (uint32_t)(sa >> 32);
                 e[2] = (uint32_t)st.sbuf[stage][i].size;
@@ -3096,6 +3152,8 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
                               (unsigned long long)size, stage, k, (unsigned long long)renderer_exec_frame());
         }
         if (gpu_written && r.addr >= HEAP_BASE && r.addr + need <= HEAP_BASE + HEAP_MAX && !(r.addr & 15)) {  // (GPU-written: in place, see g_gw)
+            gwc_note_uniform_reader(r.addr, size);
+            r.addr = gwc_redirect(r.addr, need);
             static int lw = -1;
             if (lw < 0) lw = getenv("LARECOMP_LATE_WRITES") != NULL;
             if (lw && size <= 4096) {  // (debug: a copy only to compare later - slot + 100: read in place)
@@ -3254,6 +3312,27 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
             LOG("[cs] %llx first run at frame %llu, groups %ux%ux%u\n", (unsigned long long)cs_addr, (unsigned long long)renderer_exec_frame(), gx, gy, gz);
         }
     }
+    {   // (debug) LARECOMP_LOG_CS_EVERY=<cs addr>: each dispatch of that program - frame, groups, its first uniform buffer's
+        // first 8 words and storage slots 0-1 at translation, and those slots again once the GPU has run it
+        static uint64_t want = 1;
+        if (want == 1) want = getenv("LARECOMP_LOG_CS_EVERY") ? strtoull(getenv("LARECOMP_LOG_CS_EVERY"), NULL, 16) : 0;
+        if (want && cs_addr == want) {
+            const uint32_t *u = (const uint32_t *)(uintptr_t)st.ubuf[5][0].addr;
+            const uint32_t *s0 = (const uint32_t *)(uintptr_t)st.sbuf[5][0].addr, *s1 = (const uint32_t *)(uintptr_t)st.sbuf[5][1].addr;
+            unsigned long long fr = renderer_exec_frame();
+            LOG("[csevery] frame %llu groups %ux%ux%u u0 %llx: %08x %08x %08x %08x %08x | s0 %llx: %08x %08x | s1 %llx: %d %d %d %d %d %d\n", fr, gx, gy, gz,
+                (unsigned long long)st.ubuf[5][0].addr, u ? u[0] : 0, u ? u[1] : 0, u ? u[2] : 0, u ? u[3] : 0, u ? u[4] : 0,
+                (unsigned long long)st.sbuf[5][0].addr, s0 ? s0[0] : 0, s0 ? s0[1] : 0, (unsigned long long)st.sbuf[5][1].addr,
+                s1 ? (int)s1[0] : 0, s1 ? (int)s1[1] : 0, s1 ? (int)s1[2] : 0, s1 ? (int)s1[3] : 0, s1 ? (int)s1[4] : 0, s1 ? (int)s1[5] : 0);
+            uint64_t a0 = st.sbuf[5][0].addr, a1 = st.sbuf[5][1].addr;
+            [cb() addCompletedHandler:^(id<MTLCommandBuffer> c) {
+                (void)c;
+                const float *f0 = (const float *)(uintptr_t)a0; const int32_t *i1 = (const int32_t *)(uintptr_t)a1;
+                LOG("[csevery] frame %llu done: s0 %g %g %g %g | s1 %d %d %d %d %d %d\n", fr, f0 ? f0[0] : 0, f0 ? f0[1] : 0, f0 ? f0[2] : 0, f0 ? f0[3] : 0,
+                    i1 ? i1[0] : 0, i1 ? i1[1] : 0, i1 ? i1[2] : 0, i1 ? i1[3] : 0, i1 ? i1[4] : 0, i1 ? i1[5] : 0);
+            }];
+        }
+    }
     if (game_other() && ((uint64_t)gx * gy * gz > (1u << 22) || !gx || !gy || !gz)) {  // (garbage group counts: skipped)
         static int nlog;
         if (nlog++ < 20) LOG("[dispatch-guard] skipped: cs %llx groups %ux%ux%u\n",
@@ -3293,7 +3372,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
             drv[0x200 / 4] = gx; drv[0x204 / 4] = gy; drv[0x208 / 4] = gz;
             for (int i = 0; i < 16; i++) {
                 uint32_t *u = &drv[(0x210 + 16 * i) / 4];
-                if (i < 18) { u[0] = (uint32_t)st.ubuf[5][i].addr; u[1] = (uint32_t)(st.ubuf[5][i].addr >> 32); u[2] = (uint32_t)st.ubuf[5][i].size; }
+                if (i < 18) { uint64_t ua = gwc_redirect(st.ubuf[5][i].addr, st.ubuf[5][i].size); u[0] = (uint32_t)ua; u[1] = (uint32_t)(ua >> 32); u[2] = (uint32_t)st.ubuf[5][i].size; }
                 uint32_t *e = &drv[(0x310 + 16 * i) / 4];
                 // every slot goes through the snapshot table: inputs the CPU rewrites are read from a copy; a slot the
                 // program writes (BowWow's soft-body state, LARECOMP_SSBO_PROBE=1 shows which) is copied only when its
@@ -3314,7 +3393,11 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
                     if (game_other() && si->uses_gmem_store) {  // (the slot itself always; the window with the GPU path)
                         gw_note_kind(sa, st.sbuf[5][i].size, true);
                         if (gw_on() && st.sbuf[5][i].size < g_gw_min) gw_note(sa, g_gw_min);
-                    } else sa = snap_storage(sa, st.sbuf[5][i].size, true);
+                        bool also_uniform = false;  // (a block it reads as uniforms too stays in place: see GwCopy)
+                        for (int j = 0; j < 18; j++)
+                            if (st.ubuf[5][j].addr && st.ubuf[5][j].addr < sa + st.sbuf[5][i].size && sa < st.ubuf[5][j].addr + st.ubuf[5][j].size) also_uniform = true;
+                        sa = also_uniform ? sa : gwc_for_writer(sa, st.sbuf[5][i].size);
+                    } else sa = snap_storage(gwc_redirect(sa, st.sbuf[5][i].size), st.sbuf[5][i].size, true);
                 }
                 e[0] = (uint32_t)sa; e[1] = (uint32_t)(sa >> 32); e[2] = (uint32_t)st.sbuf[5][i].size;
             }
@@ -3334,7 +3417,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
                 if ((si->cbuf_dynamic & (1u << k)) && game_other()) need = 0x10000;
                 if (size > r.size && r.size) size = r.size;
                 if (size < 16) size = 16;
-                off = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);
+                off = ring_alloc_padded((void *)(uintptr_t)gwc_redirect(r.addr, size), size, need);
             } else {
                 static const uint8_t zeros[0x10000];
                 off = ring_alloc(zeros, (si->cbuf_dynamic & (1u << k)) && game_other() ? 0x10000 : size);
@@ -4510,24 +4593,36 @@ static void snow_cover_check_timed(CmdRec *r, bool indexed, Prog *pr) {
 
 // A frame's draws (vertices, times instances) and those dropped because their program or pipeline was still being
 // built: when the camera brings in a new pipeline the ground and buildings share, every chunk of them was dropped and
-// the frame showed black under the HUD for a frame or two. When the scene misses a lot - 4 or more draws into a target
-// of half the image's width or more (the ground's chunks share a pipeline), a few large quads there (128 vertices or
-// fewer: the water's surface, 60-75) or a tenth of the frame's vertices - the present shows the previous image instead
-// (renderer_frame_incomplete, metal.m): a held frame rather than a flash - at most 20 in a row, then the frame as it
-// is. A single object still just appears a few frames late (counting it too - by its vertices - held frames for half
-// a second while one character's shader built, used up the run and the ground then went black unheld).
-// LARECOMP_NO_HOLD=1: off.
+// the frame showed black under the HUD for a frame or two. When the scene suddenly misses something large - among the
+// draws into a target of half the image's width or more that are newly not ready (8 frames or less), one of 2000
+// vertices or more, a large quad (128 or fewer: the water's surface, 60-75), two or more of them, or a tenth of the
+// frame's vertices - the present shows the previous image instead (renderer_frame_incomplete, metal.m): a held frame
+// rather than a flash, at most 20 in a row. Draws waiting longer are left out (one slow character, a small quad that
+// waited 96 frames: counted, they kept the hold on until its limit ran out and the ground then went black unheld);
+// a single small object still just appears a few frames late. LARECOMP_NO_HOLD=1: off.
 static uint64_t g_frame_vtx, g_frame_notready_vtx;
-static int g_frame_scene_skips;  // (dropped draws into targets half the image's width or more)
+static int g_frame_scene_skips;  // (newly dropped draws into targets half the image's width or more)
 static bool g_frame_big_skip;
 static uint64_t draw_vtx(CmdRec *r, bool indexed) {
     uint64_t inst = indexed ? r->x[6] : r->x[4];
     return r->x[2] * (inst ? inst : 1);
 }
 static void note_not_ready(CmdRec *r, bool indexed) {
+    // (how long this program pair has been waiting: frames since it was first dropped, its entry kept while it is)
+    static struct { uint64_t key, first, last; } wait[64];
+    uint64_t key = g_cur_fs_hash * 31 + (st.program ? st.program->stages[0].code_addr : 0), f = renderer_exec_frame();
+    int i = 0, old = 0;
+    for (; i < 64 && wait[i].key != key; i++) if (wait[i].last < wait[old].last) old = i;
+    if (i == 64 || f > wait[i].last + 4) {  // (new, or not seen for a while: waiting from now)
+        if (i == 64) i = old;
+        wait[i].key = key, wait[i].first = f;
+    }
+    wait[i].last = f;
+    if (f - wait[i].first > 8) return;  // (a straggler)
     uint64_t v = draw_vtx(r, indexed);
     g_frame_notready_vtx += v;
-    if (st.rt.ncolor && st.rt.color[0] && st.rt.color[0]->width >= 640 && (v <= 128 || ++g_frame_scene_skips >= 4)) g_frame_big_skip = true;
+    if (st.rt.ncolor && st.rt.color[0] && st.rt.color[0]->width >= 640 && (v >= 2000 || v <= 128 || ++g_frame_scene_skips >= 2))
+        g_frame_big_skip = true;
 }
 bool renderer_frame_incomplete(void) {
     static int off = -1;

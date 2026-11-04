@@ -183,6 +183,13 @@ $(B)/inc/shader_variants.inc: runtime/nvn/shader_variants.txt
 	@mkdir -p $(dir $@)
 	(LC_ALL=C tr -d '\r' < $< | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$$/\\n"/'; echo '""') > $@
 $(B)/rt/nvn/shader_prep.o: $(B)/inc/shader_variants.inc
+# (the EoW experiment) its own list, from the shader tours, when the file is there: kept out of commits (build/ is
+# ignored) - EoW builds only (GEN=generated-eow)
+EOW_SHADER_LIST ?= $(if $(findstring eow,$(GEN)),build/eow/shader_variants_eow.txt,)
+$(B)/inc/shader_variants_other.inc: $(wildcard $(EOW_SHADER_LIST))
+	@mkdir -p $(dir $@)
+	(if [ -n "$(EOW_SHADER_LIST)" ] && [ -f "$(EOW_SHADER_LIST)" ]; then LC_ALL=C tr -d '\r' < $(EOW_SHADER_LIST) | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$$/\\n"/'; fi; echo '""') > $@
+$(B)/rt/nvn/shader_prep.o: $(B)/inc/shader_variants_other.inc
 $(B)/rt/nvn/shader_prep.o: RTFLAGS += -I$(B)/inc
 # the shader translator's id: part of the shader caches' tag (shader_cache_tag), so a changed translator rebuilds them
 TRANSLATOR_SRCS := runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h
