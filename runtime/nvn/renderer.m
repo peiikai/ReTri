@@ -388,6 +388,22 @@ static int nctr;
 static pthread_mutex_t ctr_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t ns_to_gpu_ticks(uint64_t ns) { return (uint64_t)((unsigned __int128)ns * 384 / 625); }  // (614.4 MHz)
 
+// Another game on the engine: the GPU's busy time in buffers from..to (seq), within t0..t1 (s); -1 if one is gone or
+// not done. EoW takes its 30 fps mode when its counter pair spans more than a frame, and the span between buffer end
+// times also counts the GPU sitting idle while the render thread translates (a dungeon: 17-22 ms spans, 7 ms of work).
+// (cb_lock held)
+static double gpu_busy_between(uint64_t from, uint64_t to, double t0, double t1) {
+    if (!from || from > to || submit_seq - from >= CB_HIST || to > submit_seq) return -1;
+    double busy = 0, cur = t0;
+    for (uint64_t s = from; s <= to; s++) {
+        id<MTLCommandBuffer> c = cb_hist[s % CB_HIST];
+        if (!c || c.status < MTLCommandBufferStatusCompleted) return -1;
+        double st = c.GPUStartTime > cur ? c.GPUStartTime : cur, en = c.GPUEndTime < t1 ? c.GPUEndTime : t1;
+        if (en > st) busy += en - st, cur = en;
+    }
+    return busy;
+}
+
 static void counters_resolve(void) {
     pthread_mutex_lock(&ctr_lock);
     pthread_mutex_lock(&cb_lock);
@@ -414,11 +430,24 @@ static void counters_resolve(void) {
                 // kept host side: the pair's span becomes the next end counter's reading (the game has read this
                 // pair already, and may have reused the slot for the next frame's counters)
                 static const uint64_t *last_out;
-                static uint64_t last_ticks;
+                static uint64_t last_ticks, last_after;
+                static double last_t;
                 if (ctr_pend[i].start && ctr_pend[i].start == last_out && out - ctr_pend[i].start == 2 && ticks >= last_ticks &&
-                    ticks - last_ticks < 614400000ull)  // (an end counter 16 bytes after its start; under a second)
+                    ticks - last_ticks < 614400000ull) {  // (an end counter 16 bytes after its start; under a second)
                     g_last_gpu_frame_ticks = ticks - last_ticks;
-                last_out = out, last_ticks = ticks;
+                    // (another game: the GPU's busy time in between instead; LARECOMP_CTR_SPAN=1: the span)
+                    static int span_only = -1;
+                    if (span_only < 0) span_only = getenv("LARECOMP_CTR_SPAN") && atoi(getenv("LARECOMP_CTR_SPAN"));
+                    double busy = game_other() && !span_only ? gpu_busy_between(last_after, bs, last_t, t) : -1;
+                    if (busy >= 0) g_last_gpu_frame_ticks = ns_to_gpu_ticks((uint64_t)(busy * 1e9));
+                    static int logo = -1;  // LARECOMP_LOG_COUNTERS=<n> (debug): the first n overlap spans
+                    if (logo < 0) logo = getenv("LARECOMP_LOG_COUNTERS") ? atoi(getenv("LARECOMP_LOG_COUNTERS")) : 0;
+                    if (logo > 0) {
+                        logo--;
+                        LOG("[ctr] overlap span %.2f ms, busy %.2f ms\n", (double)(ticks - last_ticks) * 625 / 384 / 1e6, busy * 1e3);
+                    }
+                }
+                last_out = out, last_ticks = ticks, last_after = as, last_t = t;
             } else {
                 out[1] = pace_end_counter(ctr_pend[i].start, out, ticks);
             }
