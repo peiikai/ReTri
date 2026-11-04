@@ -1760,8 +1760,9 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
             // (Metal: noted as the other paths do - the renderer reads what a store reaches in place, not a copy taken at
             // translation. Unset here, EoW's cascade dispatch wrote the shadow casters' matrices after the casters' copy
             // of them was made: shadows drawn with last frame's - or the default - matrices, flickering)
-            c->uses_gmem_store = true;
-            c->info->uses_gmem_store = true;
+            static int old = -1;  // (debug) LARECOMP_OLD_STORE_FLAG=1: as before (not noted), to compare
+            if (old < 0) old = getenv("LARECOMP_OLD_STORE_FLAG") != NULL;
+            if (!old) c->uses_gmem_store = true, c->info->uses_gmem_store = true;
             if (size == 0 || size == 1) sp(&c->body, "      if (ok) gmem[ga] = uchar(%s);\n", R(d));
             else if (size == 2 || size == 3) sp(&c->body, "      if (ok) *(device ushort *)(gmem + ga) = ushort(%s);\n", R(d));
             else
