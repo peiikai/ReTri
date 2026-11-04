@@ -4431,23 +4431,33 @@ static void snow_cover_check_timed(CmdRec *r, bool indexed, Prog *pr) {
 
 // A frame's draws (vertices, times instances) and those dropped because their program or pipeline was still being
 // built: when the camera brings in a new pipeline the ground and buildings share, every chunk of them was dropped and
-// the frame showed black under the HUD for a frame or two. Past a tenth of the frame, the present shows the previous
-// image instead (renderer_frame_incomplete, metal.m): a held frame rather than a flash; single objects still just
-// appear a few frames late. LARECOMP_NO_HOLD=1: off.
+// the frame showed black under the HUD for a frame or two. When a big draw (300 vertices or more, into a target of half
+// the image's width or more) or a tenth of the frame is missing, the present shows the previous image instead
+// (renderer_frame_incomplete, metal.m): a held frame rather than a flash - at most 8 in a row, then the frame as it is;
+// small objects still just appear a few frames late. LARECOMP_NO_HOLD=1: off.
 static uint64_t g_frame_vtx, g_frame_notready_vtx;
+static bool g_frame_big_skip;
 static uint64_t draw_vtx(CmdRec *r, bool indexed) {
     uint64_t inst = indexed ? r->x[6] : r->x[4];
     return r->x[2] * (inst ? inst : 1);
 }
-static void note_not_ready(CmdRec *r, bool indexed) { g_frame_notready_vtx += draw_vtx(r, indexed); }
+static void note_not_ready(CmdRec *r, bool indexed) {
+    uint64_t v = draw_vtx(r, indexed);
+    g_frame_notready_vtx += v;
+    if (v >= 300 && st.rt.ncolor && st.rt.color[0] && st.rt.color[0]->width >= 640) g_frame_big_skip = true;
+}
 bool renderer_frame_incomplete(void) {
     static int off = -1;
     if (off < 0) off = getenv("LARECOMP_NO_HOLD") != NULL;
-    bool inc = !off && g_frame_vtx && g_frame_notready_vtx * 10 >= g_frame_vtx;
+    static int run;
+    bool want = !off && g_frame_vtx && (g_frame_big_skip || g_frame_notready_vtx * 10 >= g_frame_vtx);
+    run = want ? run + 1 : 0;
+    bool inc = want && run <= 8;
     if (inc && getenv("LARECOMP_LOG_SKIPS"))
-        LOG("[hold] frame %llu: %llu of %llu vertices not ready\n", (unsigned long long)renderer_exec_frame(),
-            (unsigned long long)g_frame_notready_vtx, (unsigned long long)g_frame_vtx);
+        LOG("[hold] frame %llu: %llu of %llu vertices not ready%s\n", (unsigned long long)renderer_exec_frame(),
+            (unsigned long long)g_frame_notready_vtx, (unsigned long long)g_frame_vtx, g_frame_big_skip ? " (a big draw)" : "");
     g_frame_vtx = g_frame_notready_vtx = 0;
+    g_frame_big_skip = false;
     return inc;
 }
 
