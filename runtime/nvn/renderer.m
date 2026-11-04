@@ -2892,6 +2892,62 @@ static uint64_t snap_storage(uint64_t addr, uint64_t size, bool cs_slot) {
     }
 }
 
+// (debug) LARECOMP_LATE_WRITES=1: uniform data the game changes after the draw was translated (the rift's map rows were
+// such a write): each snapshot is compared with the game's memory once the GPU has run the command buffer; the rows
+// that differ are logged once per shader / stage / slot (frame, rows, value before -> after).
+typedef struct { uint64_t addr, size, fs; const uint8_t *copy; int stage, slot; } LateNote;
+static void late_write_flush(void);
+static LateNote *g_late; static int g_nlate; static uint64_t g_late_frame;
+static void late_write_note(uint64_t addr, uint64_t size, const uint8_t *copy, int stage, int slot) {
+    static int on = -1;
+    if (on < 0) on = getenv("LARECOMP_LATE_WRITES") != NULL;
+    if (!on || size > 4096) return;
+    extern uint64_t renderer_exec_frame(void);
+    if (g_nlate && (g_nlate >= 512 || renderer_exec_frame() != g_late_frame)) late_write_flush();
+    if (!g_late) g_late = malloc(sizeof(LateNote) * 512);
+    g_late_frame = renderer_exec_frame();
+    uint8_t *own = malloc(size);  // (its own copy: the ring buffer may be replaced and freed before the check)
+    memcpy(own, copy, size);
+    g_late[g_nlate++] = (LateNote){addr, size, g_cur_fs_hash, own, stage, slot};
+}
+static void late_write_flush(void) {
+    LateNote *list = g_late; int n = g_nlate; uint64_t fr = g_late_frame;
+    { static int nfl; if (nfl++ % 300 == 0) LOG("[late] (flush %d: frame %llu, %d copies)\n", nfl, (unsigned long long)fr, n); }
+    g_late = NULL, g_nlate = 0;
+    static dispatch_queue_t lq;
+    if (!lq) lq = dispatch_queue_create("larecomp.late", DISPATCH_QUEUE_SERIAL);
+    [cb() addCompletedHandler:^(id<MTLCommandBuffer> c) {
+      (void)c;
+      // (6 ms on: the rift's rows came about 2 ms after the GPU had run the draw; the next write of a frame's
+      // constants is a frame or two later)
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 6 * NSEC_PER_MSEC), lq, ^{
+        static uint64_t seen[1024]; static int nseen; static int logged;
+        { static int nf; if (nf++ % 600 == 0) LOG("[late] (check: frame %llu, %d copies compared)\n", (unsigned long long)fr, n); }
+        for (int i = 0; i < n && logged < 300; i++) {
+            const uint8_t *g = (const uint8_t *)(uintptr_t)list[i].addr;
+            if (!memcmp(g, list[i].copy, list[i].size)) continue;
+            uint64_t key = list[i].fs * 131 + list[i].stage * 31 + list[i].slot;
+            int j = 0; for (; j < nseen && seen[j] != key; j++) {}
+            if (j < nseen) continue;
+            if (nseen < 1024) seen[nseen++] = key;
+            char rows[256]; int rl = 0, first = -1;
+            for (uint64_t r = 0; r * 16 < list[i].size && rl < 200; r++)
+                if (memcmp(g + r * 16, list[i].copy + r * 16, 16)) {
+                    if (first < 0) first = (int)r;
+                    rl += snprintf(rows + rl, sizeof rows - rl, " %llu", (unsigned long long)r);
+                }
+            const float *a = (const float *)(list[i].copy + first * 16), *b = (const float *)(g + first * 16);
+            LOG("[late] frame %llu fs %016llx stage %d slot %d %llx+%llu rows%s | row %d %g %g %g %g -> %g %g %g %g\n", (unsigned long long)fr,
+                (unsigned long long)list[i].fs, list[i].stage, list[i].slot, (unsigned long long)list[i].addr, (unsigned long long)list[i].size,
+                rows, first, a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3]);
+            logged++;
+        }
+        for (int i = 0; i < n; i++) free((void *)list[i].copy);
+        free(list);
+      });
+    }];
+}
+
 static void bind_cbufs(int stage, ShaderInfo *si) {
     {   // (debug) LARECOMP_DUMP_DRAW=<fs code addr>,<frame>: that draw's storage buffers and uniform buffer 4 (fragment)
         static uint64_t want_fs = 1; static long want_f; static int done;
@@ -3024,11 +3080,18 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
                               (unsigned long long)size, stage, k, (unsigned long long)renderer_exec_frame());
         }
         if (gpu_written && r.addr >= HEAP_BASE && r.addr + need <= HEAP_BASE + HEAP_MAX && !(r.addr & 15)) {  // (GPU-written: in place, see g_gw)
+            static int lw = -1;
+            if (lw < 0) lw = getenv("LARECOMP_LATE_WRITES") != NULL;
+            if (lw && size <= 4096) {  // (debug: a copy only to compare later - slot + 100: read in place)
+                uint64_t co = ring_alloc((void *)(uintptr_t)r.addr, size);
+                late_write_note(r.addr, size, (uint8_t *)ring.contents + co, stage, k + 100);
+            }
             if (stage == 0) [enc setVertexBuffer:g_guest_buffer offset:r.addr - HEAP_BASE atIndex:k];
             else [enc setFragmentBuffer:g_guest_buffer offset:r.addr - HEAP_BASE atIndex:k];
             continue;
         }
         uint64_t off = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);  // snapshot: later CPU writes must not leak in
+        late_write_note(r.addr, size, (uint8_t *)ring.contents + off, stage, k);
         if (stage == 0) [enc setVertexBuffer:ring offset:off atIndex:k];
         else [enc setFragmentBuffer:ring offset:off atIndex:k];
     }
