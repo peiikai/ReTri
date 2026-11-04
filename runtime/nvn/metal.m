@@ -1624,6 +1624,35 @@ void backend_present_now(NvnTexture *t, uint64_t frame) {
             static int n;
             if (n++ < 20) LOG("[metal] present of frame %llu without an image (texture %p backend %p)\n", (unsigned long long)frame, t, b);
         }
+        {   // (debug) LARECOMP_WATCH_ROWS=<addr>:<row>:<rows>,...: those 16-byte rows of guest memory, logged once the GPU
+            // has run the frame ("[watch]"; a row starting with "i" is shown as integers too)
+            static int nw = -1; static uint64_t wa[8]; static int wr[8], wn[8];
+            if (nw < 0) {
+                nw = 0;
+                for (const char *p = getenv("LARECOMP_WATCH_ROWS"); p && *p && nw < 8;) {
+                    wa[nw] = strtoull(p, (char **)&p, 16); wr[nw] = 0; wn[nw] = 1;
+                    if (*p == ':') wr[nw] = (int)strtol(p + 1, (char **)&p, 10);
+                    if (*p == ':') wn[nw] = (int)strtol(p + 1, (char **)&p, 10);
+                    nw++;
+                    while (*p == ',') p++;
+                }
+            }
+            if (nw > 0) {
+                uint64_t fno = frame;
+                [cb addCompletedHandler:^(id<MTLCommandBuffer> done) {
+                    (void)done;
+                    for (int i = 0; i < nw; i++) {
+                        char line[1024]; int l = 0;
+                        for (int r = 0; r < wn[i] && l < 900; r++) {
+                            const float *f = (const float *)(uintptr_t)(wa[i] + (uint64_t)(wr[i] + r) * 16);
+                            const int32_t *n = (const int32_t *)f;
+                            l += snprintf(line + l, sizeof line - l, " | r%d %.4g %.4g %.4g %.4g (i %d %d)", wr[i] + r, f[0], f[1], f[2], f[3], n[0], n[1]);
+                        }
+                        LOG("[watch] frame %llu %llx%s\n", (unsigned long long)fno, (unsigned long long)wa[i], line);
+                    }
+                }];
+            }
+        }
         [cb addCompletedHandler:^(id<MTLCommandBuffer> done) { (void)done; __atomic_sub_fetch(&g_presents_inflight, 1, __ATOMIC_RELAXED); }];
         if (deadline) [cb presentDrawable:drawable atTime:CACurrentMediaTime() + 1.0 / 60.0];
         else [cb presentDrawable:drawable];

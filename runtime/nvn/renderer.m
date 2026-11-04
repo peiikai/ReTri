@@ -4510,11 +4510,15 @@ static void snow_cover_check_timed(CmdRec *r, bool indexed, Prog *pr) {
 
 // A frame's draws (vertices, times instances) and those dropped because their program or pipeline was still being
 // built: when the camera brings in a new pipeline the ground and buildings share, every chunk of them was dropped and
-// the frame showed black under the HUD for a frame or two. When a big draw (300 vertices or more, or a few large
-// quads - 64 or fewer, the water's surface - into a target of half the image's width or more) or a tenth of the frame is missing, the present shows the previous image instead
-// (renderer_frame_incomplete, metal.m): a held frame rather than a flash - at most 8 in a row, then the frame as it is;
-// small objects still just appear a few frames late. LARECOMP_NO_HOLD=1: off.
+// the frame showed black under the HUD for a frame or two. When the scene misses a lot - 4 or more draws into a target
+// of half the image's width or more (the ground's chunks share a pipeline), a few large quads there (128 vertices or
+// fewer: the water's surface, 60-75) or a tenth of the frame's vertices - the present shows the previous image instead
+// (renderer_frame_incomplete, metal.m): a held frame rather than a flash - at most 20 in a row, then the frame as it
+// is. A single object still just appears a few frames late (counting it too - by its vertices - held frames for half
+// a second while one character's shader built, used up the run and the ground then went black unheld).
+// LARECOMP_NO_HOLD=1: off.
 static uint64_t g_frame_vtx, g_frame_notready_vtx;
+static int g_frame_scene_skips;  // (dropped draws into targets half the image's width or more)
 static bool g_frame_big_skip;
 static uint64_t draw_vtx(CmdRec *r, bool indexed) {
     uint64_t inst = indexed ? r->x[6] : r->x[4];
@@ -4523,7 +4527,7 @@ static uint64_t draw_vtx(CmdRec *r, bool indexed) {
 static void note_not_ready(CmdRec *r, bool indexed) {
     uint64_t v = draw_vtx(r, indexed);
     g_frame_notready_vtx += v;
-    if ((v >= 300 || v <= 64) && st.rt.ncolor && st.rt.color[0] && st.rt.color[0]->width >= 640) g_frame_big_skip = true;
+    if (st.rt.ncolor && st.rt.color[0] && st.rt.color[0]->width >= 640 && (v <= 128 || ++g_frame_scene_skips >= 4)) g_frame_big_skip = true;
 }
 bool renderer_frame_incomplete(void) {
     static int off = -1;
@@ -4531,12 +4535,16 @@ bool renderer_frame_incomplete(void) {
     static int run;
     bool want = !off && g_frame_vtx && (g_frame_big_skip || g_frame_notready_vtx * 10 >= g_frame_vtx);
     run = want ? run + 1 : 0;
-    bool inc = want && run <= 8;
+    bool inc = want && run <= 20;
+    if (getenv("LARECOMP_LOG_SKIPS") && (g_frame_notready_vtx || g_frame_big_skip) && !inc)
+        LOG("[hold] frame %llu not held: %llu of %llu vertices not ready%s, %d in a row\n", (unsigned long long)renderer_exec_frame(),
+            (unsigned long long)g_frame_notready_vtx, (unsigned long long)g_frame_vtx, g_frame_big_skip ? " (a big draw)" : "", run);
     if (inc && getenv("LARECOMP_LOG_SKIPS"))
         LOG("[hold] frame %llu: %llu of %llu vertices not ready%s\n", (unsigned long long)renderer_exec_frame(),
             (unsigned long long)g_frame_notready_vtx, (unsigned long long)g_frame_vtx, g_frame_big_skip ? " (a big draw)" : "");
     g_frame_vtx = g_frame_notready_vtx = 0;
     g_frame_big_skip = false;
+    g_frame_scene_skips = 0;
     return inc;
 }
 
