@@ -2733,8 +2733,13 @@ static void snap_note_vertex_bind(uint64_t addr, uint64_t size) {  // (LARECOMP_
 // (another game) Ranges compute programs that store were bound to (their storage slots): what the GPU writes. A draw
 // or dispatch that reads one later - as storage or as a uniform buffer - reads it in place, not from a copy taken at
 // translation, when the GPU hasn't run the dispatch yet (EoW: its culling dispatches write the shadow cascades'
-// matrices and the instance lists, which later draws read as uniforms / storage). Most recent first; 64 kept.
-static struct { uint64_t addr, size; bool always; } g_gw[64];
+// matrices and the instance lists, which later draws read as uniforms / storage). Most recently noted first, 128 kept:
+// a range noted again moves to the front. (It used to stay where it was first put, so the ranges noted every frame -
+// the scene's view constants, the shadow cascades' block - aged out among the per-frame ones and were copied at the
+// draw for a while: the shadow casters drew with a matrix the cascade dispatch hadn't written yet, the receivers read
+// the new one - shadows flickering, on the water by the boat most of all.)
+#define GW_N 128
+static struct { uint64_t addr, size; bool always; } g_gw[GW_N];
 static uint64_t g_gw_min = 0x480;  // (debug: LARECOMP_GW_MIN=<hex>)
 static int g_ngw;
 static void gw_note_kind(uint64_t addr, uint64_t size, bool always);
@@ -2746,9 +2751,20 @@ static void gw_note(uint64_t addr, uint64_t size) { gw_note_kind(addr, size, fal
 static void gw_note_kind(uint64_t addr, uint64_t size, bool always) {
     { static int once; if (!once++ && ENV("LARECOMP_GW_MIN")) g_gw_min = strtoull(ENV("LARECOMP_GW_MIN"), NULL, 16); }
     for (int i = 0; i < g_ngw; i++)
-        if (g_gw[i].addr == addr && g_gw[i].size == size) { g_gw[i].always |= always; return; }
+        if (g_gw[i].addr == addr && g_gw[i].size == size) {
+            bool al = g_gw[i].always | always;
+            memmove(&g_gw[1], &g_gw[0], sizeof g_gw[0] * (size_t)i);
+            g_gw[0].addr = addr, g_gw[0].size = size, g_gw[0].always = al;
+            return;
+        }
     if (ENV("LARECOMP_LOG_GW")) { static int n; if (n++ < 60) LOG("[gw] compute writes %llx+%llu\n", (unsigned long long)addr, (unsigned long long)size); }
-    if (g_ngw < 64) g_ngw++;
+    if (g_ngw == GW_N && ENV("LARECOMP_LOG_GW")) {
+        static int n;
+        if (n++ < 40) LOG("[gw] table full: %llx+%llu%s dropped for %llx+%llu (frame %llu)\n", (unsigned long long)g_gw[GW_N - 1].addr,
+                          (unsigned long long)g_gw[GW_N - 1].size, g_gw[GW_N - 1].always ? " (always)" : "", (unsigned long long)addr, (unsigned long long)size,
+                          (unsigned long long)renderer_exec_frame());
+    }
+    if (g_ngw < GW_N) g_ngw++;
     memmove(&g_gw[1], &g_gw[0], sizeof g_gw[0] * (size_t)(g_ngw - 1));
     g_gw[0].addr = addr, g_gw[0].size = size, g_gw[0].always = always;
 }
@@ -4667,7 +4683,9 @@ static void draw_one(CmdRec *r, bool indexed) {
                 static uint64_t want = 1; static long from = -1; static int n;
                 if (want == 1) want = getenv("LARECOMP_LOG_VSROWS") ? strtoull(getenv("LARECOMP_LOG_VSROWS"), NULL, 16) : 0;
                 if (from < 0) from = getenv("LARECOMP_DUMP_FROM") ? atol(getenv("LARECOMP_DUMP_FROM")) : 0;
-                if (want && last_hash == want && (long)renderer_exec_frame() >= from && n < 12) {
+                static uint64_t dep = 1;  // (LARECOMP_VSROWS_DEPTH=<addr>: only draws into that depth target)
+                if (dep == 1) dep = getenv("LARECOMP_VSROWS_DEPTH") ? strtoull(getenv("LARECOMP_VSROWS_DEPTH"), NULL, 16) : 0;
+                if (want && last_hash == want && (long)renderer_exec_frame() >= from && n < 12 && (!dep || (st.rt.depth && st.rt.depth->addr == dep))) {
                     n++;
                     for (int c = 4; c <= 5; c++) {
                         Range u = st.ubuf[0][c - cbuf_base];
