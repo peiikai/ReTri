@@ -446,7 +446,8 @@ void warp_other_file_read(const char *path) {
 // (a request object registered, past frame LARECOMP_WARP_TOUR_START, default 1700). Each place: the warp, its
 // level's file read (or 30 s: "no load"), then 6 s there - frame times measured, a screenshot into
 // build/tour/eow_<n>.png. "[tour]" lines: start / result per place; a crash ends the process (the driver script
-// starts again after it).
+// starts again after it). LARECOMP_WARP_TOUR_WALK=1: Link walks a loop there too (right, down, left, up and back, 12 s
+// in all, from 1 s after the load) so the camera scrolls - what only shows while it moves.
 static double now_s(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -505,7 +506,23 @@ static void tour_frame(uint64_t frame) {
             fflush(stderr);
             _exit(3);
         }
-    } else if (state == 2 && t - t0 - t_load > 6.0) {
+    }
+    static int walk = -1;
+    if (walk < 0) walk = getenv("LARECOMP_WARP_TOUR_WALK") != NULL;
+    if (walk && state == 2) {  // (the loop: seconds after the load -> stick direction)
+        extern volatile int32_t g_tour_lx, g_tour_ly;
+        static const struct { double until; int dx, dy; } loop[] = {
+            {1, 0, 0}, {2.5, 1, 0}, {4, 0, -1}, {7, -1, 0}, {10, 0, 1}, {11.5, 1, 0}, {13, 0, -1}};
+        double w = t - t0 - t_load;
+        int dx = 0, dy = 0;
+        for (size_t i = 0; i < sizeof loop / sizeof loop[0]; i++) if (w < loop[i].until) { dx = loop[i].dx, dy = loop[i].dy; break; }
+        g_tour_lx = dx * 26000, g_tour_ly = dy * 26000;
+    } else if (walk) {
+        extern volatile int32_t g_tour_lx, g_tour_ly;
+        g_tour_lx = g_tour_ly = 0;
+    }
+    if (0) {
+    } else if (state == 2 && t - t0 - t_load > (walk ? 14.0 : 6.0)) {
         extern char g_window_shot_request[256];
         snprintf(g_window_shot_request, sizeof g_window_shot_request, "build/tour/eow_%03d.png", cur);
         LOG("[tour] result %d %s %s: loaded in %.1f s, %.1f fps, worst frame %.0f ms, %d slow frames\n", cur,

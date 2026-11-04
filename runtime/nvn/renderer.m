@@ -4431,8 +4431,8 @@ static void snow_cover_check_timed(CmdRec *r, bool indexed, Prog *pr) {
 
 // A frame's draws (vertices, times instances) and those dropped because their program or pipeline was still being
 // built: when the camera brings in a new pipeline the ground and buildings share, every chunk of them was dropped and
-// the frame showed black under the HUD for a frame or two. When a big draw (300 vertices or more, into a target of half
-// the image's width or more) or a tenth of the frame is missing, the present shows the previous image instead
+// the frame showed black under the HUD for a frame or two. When a big draw (300 vertices or more, or a few large
+// quads - 64 or fewer, the water's surface - into a target of half the image's width or more) or a tenth of the frame is missing, the present shows the previous image instead
 // (renderer_frame_incomplete, metal.m): a held frame rather than a flash - at most 8 in a row, then the frame as it is;
 // small objects still just appear a few frames late. LARECOMP_NO_HOLD=1: off.
 static uint64_t g_frame_vtx, g_frame_notready_vtx;
@@ -4444,7 +4444,7 @@ static uint64_t draw_vtx(CmdRec *r, bool indexed) {
 static void note_not_ready(CmdRec *r, bool indexed) {
     uint64_t v = draw_vtx(r, indexed);
     g_frame_notready_vtx += v;
-    if (v >= 300 && st.rt.ncolor && st.rt.color[0] && st.rt.color[0]->width >= 640) g_frame_big_skip = true;
+    if ((v >= 300 || v <= 64) && st.rt.ncolor && st.rt.color[0] && st.rt.color[0]->width >= 640) g_frame_big_skip = true;
 }
 bool renderer_frame_incomplete(void) {
     static int off = -1;

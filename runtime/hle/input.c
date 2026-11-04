@@ -683,6 +683,7 @@ static void host_test_frame(uint64_t frame) {
 }
 
 static uint64_t g_pad_obj;
+volatile int32_t g_tour_lx, g_tour_ly;  // (test) the warp tour's walk (warp_other.c LARECOMP_WARP_TOUR_WALK): added to the stick
 volatile int g_inject_plus;  // frames to hold Plus for the game (movie.c: A/B skip the opening on rando seeds)
 RT_ON_RESET(input_reboot_reset) { g_pad_obj = 0; g_inject_plus = 0; }  // (reboot: the controller object was guest memory)
 void input_frame(uint64_t frame) {
@@ -810,7 +811,7 @@ static void fill_state(Cpu *c) {
         if (g_inject_plus > 0) { until = renderer_present_count() + 10; g_inject_plus = 0; }
         if (renderer_present_count() < until) b |= 1ull << BTN_PLUS;
     }
-    int32_t lx = clamp_axis((menu ? 0 : key_lx + pad_lx) + script_lx), ly = clamp_axis((menu ? 0 : key_ly + pad_ly) + script_ly);
+    int32_t lx = clamp_axis((menu ? 0 : key_lx + pad_lx) + script_lx + g_tour_lx), ly = clamp_axis((menu ? 0 : key_ly + pad_ly) + script_ly + g_tour_ly);
     int32_t rx = clamp_axis((menu ? 0 : key_rx + pad_rx) + script_rx), ry = clamp_axis((menu ? 0 : key_ry + pad_ry) + script_ry);
     bool la = !game_other();  // (another game on the engine: none of LA's input features, they read LA's state)
     if (!menu && la) {  // d-pad items (setting): the Items page assigns, play uses (runtime/hle/dpad_items.c; before mirroring:
