@@ -850,6 +850,23 @@ NVN(nvnWindowSetPresentInterval) {  // (the game's 60 / 30 fps mode: 1 / 2; LARE
 }
 NVN(nvnWindowSetCrop) { int *cr = WIN->crop; cr[0] = (int)A(1); cr[1] = (int)A(2); cr[2] = (int)A(3); cr[3] = (int)A(4); }
 NVN(nvnWindowGetCrop) { memcpy(AP(1), WIN->crop, 16); }
+// Another game on the engine: the GPU at most one frame behind the game. EoW resets some blocks its GPU work writes
+// (the shadow cascades, from a compute) on the CPU early in the frame after next, before it takes its window image.
+// The Switch's GPU is always done with a frame by then; ours, with the render thread and the overlap, sometimes still
+// ran its shadow draws, which then read the reset block - the whole lit picture in shadow for a frame (places 0-20
+// walking: 7-13 empty cascades, 0 with this). So at each present the game waits for the frame before's GPU work: the
+// items up to its present. LARECOMP_NO_LAG_CAP=1: off.
+static uint64_t present_q[2];
+static unsigned present_n;
+static void other_lag_cap(void) {
+    static int off = -1;
+    if (off < 0) off = getenv("LARECOMP_NO_LAG_CAP") != NULL;
+    present_q[present_n++ & 1] = rq_on() ? rq_fence_seq() : renderer_fence_seq();
+    uint64_t q = present_n >= 2 ? present_q[present_n & 1] : 0;  // (the present before this one)
+    if (off || !q) return;
+    extern void renderer_wait_seq_now(uint64_t seq);
+    renderer_wait_seq_now(rq_on() ? rq_wait_item(q) : q);
+}
 NVN(nvnWindowAcquireTexture) {
     NvnWindow *w = WIN;
     if (game_other()) { extern void pace_other_cadence(void); pace_other_cadence(); }  // (pace.c)
@@ -869,6 +886,7 @@ NVN(nvnQueuePresentTexture) {
     NvnWindow *w = HOST(NvnWindow, A(1));
     int i = (int)A(2);
     if (i >= 0 && i < w->num) backend_present(HOST(NvnTexture, w->textures[i]));
+    if (game_other()) other_lag_cap();
 }
 
 // ================================================================== small state objects

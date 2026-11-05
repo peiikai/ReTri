@@ -725,6 +725,7 @@ uint64_t renderer_fence_seq(void) {
     return q;
 }
 
+void renderer_wait_seq_now(uint64_t seq);
 // Wait until submission `seq` has completed (0 = nothing to wait for).
 void renderer_wait_seq(uint64_t seq) {
     if (!seq) return;
@@ -770,6 +771,12 @@ void renderer_wait_seq(uint64_t seq) {
             pthread_mutex_unlock(&cb_lock);
         }
     }
+    renderer_wait_seq_now(seq);
+}
+
+// Wait until submission `seq` has completed, now (no overlap deferral; 0 = nothing to wait for).
+void renderer_wait_seq_now(uint64_t seq) {
+    if (!seq) return;
     pthread_mutex_lock(&cb_lock);
     id<MTLCommandBuffer> c = nil;
     if (seq > submit_seq) c = last_cb;  // not committed yet (other thread): wait for everything committed so far
