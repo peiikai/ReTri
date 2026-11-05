@@ -388,18 +388,26 @@ static int nctr;
 static pthread_mutex_t ctr_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t ns_to_gpu_ticks(uint64_t ns) { return (uint64_t)((unsigned __int128)ns * 384 / 625); }  // (614.4 MHz)
 
+// A command buffer's GPU time s..e not counted yet: from where the latest end so far (*end) left off. Buffers on one
+// queue start in order, but the next one starts while the one before it still runs, so their spans overlap; this
+// counts their union (renderer_gpu_busy, gpu_busy_between).
+static double span_new(double s, double e, double *end) {
+    double from = s > *end ? s : *end;
+    if (e > *end) *end = e;
+    return e > from ? e - from : 0;
+}
+
 // Another game on the engine: the GPU's busy time in buffers from..to (seq), within t0..t1 (s); -1 if one is gone or
 // not done. EoW takes its 30 fps mode when its counter pair spans more than a frame, and the span between buffer end
 // times also counts the GPU sitting idle while the render thread translates (a dungeon: 17-22 ms spans, 7 ms of work).
 // (cb_lock held)
 static double gpu_busy_between(uint64_t from, uint64_t to, double t0, double t1) {
     if (!from || from > to || submit_seq - from >= CB_HIST || to > submit_seq) return -1;
-    double busy = 0, cur = t0;
+    double busy = 0, end = t0;
     for (uint64_t s = from; s <= to; s++) {
         id<MTLCommandBuffer> c = cb_hist[s % CB_HIST];
         if (!c || c.status < MTLCommandBufferStatusCompleted) return -1;
-        double st = c.GPUStartTime > cur ? c.GPUStartTime : cur, en = c.GPUEndTime < t1 ? c.GPUEndTime : t1;
-        if (en > st) busy += en - st, cur = en;
+        busy += span_new(c.GPUStartTime, c.GPUEndTime < t1 ? c.GPUEndTime : t1, &end);
     }
     return busy;
 }
@@ -603,10 +611,8 @@ uint64_t renderer_gpu_busy(id<MTLCommandBuffer> done, bool win) {
     if (!(e > s) || e - s > 1.0) return 0;  // (not run, or nonsense)
     pthread_mutex_lock(&busy_lock);
     if (busy_end > e + 1.0) busy_end = 0;  // (clock base changed)
-    double from = s > busy_end ? s : busy_end;
-    if (e > busy_end) busy_end = e;
+    uint64_t ns = (uint64_t)(span_new(s, e, &busy_end) * 1e9);
     pthread_mutex_unlock(&busy_lock);
-    uint64_t ns = e > from ? (uint64_t)((e - from) * 1e9) : 0;
     __atomic_add_fetch(win ? &g_gpu_win_ns : &g_gpu_total_ns, ns, __ATOMIC_RELAXED);
     __atomic_add_fetch(&g_gpu_sum_ns, (uint64_t)((e - s) * 1e9), __ATOMIC_RELAXED);
     return ns;
