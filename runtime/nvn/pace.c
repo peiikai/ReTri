@@ -243,6 +243,10 @@ void pace_frame(void) {
             sb = mb = sc = mc = sr = 0, nb = 0;
         }
     }
+    // Another game picks its 30 / 60 fps mode itself (pace_other_cadence waits out its present interval). LA's hold
+    // below would also make its timing counters read 20 ms a frame (pace_end_counter), and its way back to 60 needs
+    // LA's scenes: EoW was held at 30 from one heavy moment until the next restart (Zora Sea Village: 33 fps).
+    if (game_other()) return;
     // GPU time per frame (pace_gpu_ns: the backend's GPU timer, cumulative; -1 without one), moving average (~20 frames).
     // (A frame's GPU time is read a few frames late and in bursts: the average smooths that.)
     extern int64_t pace_gpu_ns(void);
