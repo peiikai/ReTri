@@ -2810,13 +2810,13 @@ static void gw_note_kind(uint64_t addr, uint64_t size, bool always) {
     memmove(&g_gw[1], &g_gw[0], sizeof g_gw[0] * (size_t)(g_ngw - 1));
     g_gw[0].addr = addr, g_gw[0].size = size, g_gw[0].always = always;
 }
-// LARECOMP_INDIRECT_GPU=1 (experimental, other games): indirect draws on the GPU with its own counts, no flush, and
-// GPU-written ranges read in place (g_gw). 60 fps where the flushes cost half the frame rate, but the shadows are
-// missing: the cascade matrices lie further from the dispatch's slot than g_gw_min, and a wider window (4 KB) took in
-// data the CPU rewrites each frame (black frames). Off: the flush path (correct, a CPU wait per batch).
+// Another game's indirect draws on the GPU with its own counts, no flush, and GPU-written ranges read in place (g_gw).
+// It lost the shadows at first (the cascade matrices weren't known as GPU-written: the store flag and the table's
+// order, a79b8059); now the same pictures as the flush path without its CPU waits (EoW's town walk: 500-650 ms of
+// waits per 2 s -> none). LARECOMP_INDIRECT_GPU=0: the flush path (a CPU wait per batch).
 static bool indirect_gpu(void) {
     static int on = -1;
-    if (on < 0) on = ENV("LARECOMP_INDIRECT_GPU") && atoi(ENV("LARECOMP_INDIRECT_GPU")) ? 1 : 0;
+    if (on < 0) { const char *e = ENV("LARECOMP_INDIRECT_GPU"); on = e ? atoi(e) != 0 : game_other() != NULL; }
     return on;
 }
 static bool gw_on(void) {  // (the in-place reads: with the GPU path, or LARECOMP_GW=1)
