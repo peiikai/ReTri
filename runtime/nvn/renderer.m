@@ -3160,6 +3160,7 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
             if (!off && game_other() && stage == 0 && k == 4 && g_cur_fs_hash == 0xd6c58a42e55a9f9eull && r.size >= 32) {
                 memcpy(map_rows, (const void *)(uintptr_t)r.addr, 32);
                 map_frame = renderer_exec_frame();
+                gpu_written = false;  // (the map is drawn with these rows too, not the later ones in place: the two agree)
             }
             if (!off && game_other() && stage == 1 && k == 4 && g_cur_fs_hash == 0x44b584f0d922d49dull && size >= 35 * 16 &&
                 map_frame == renderer_exec_frame()) {
