@@ -1778,6 +1778,7 @@ static void compile_program(Prog *pr) {
     double dt = now_ms() - t0;
     @synchronized(cache) { stat_compile_ms += dt; }
     slow_note_build("program", (uint64_t)(dt * 1e6));
+    if (getenv("LARECOMP_LOG_BUILDS")) LOG("[build] program %.0f ms (vs %zu fs %zu bytes)\n", dt, strlen(pr->vi->msl), strlen(pr->fi->msl));
     pr->ready = true;
 }
 
@@ -1955,12 +1956,18 @@ static dispatch_queue_t compile_queue(const char *name) {
 // GCD runs a concurrent queue's work only while the CPU isn't busy with other threads of at least its priority, and
 // EoW's own threads keep every core busy once Link moves: no build was started any more, every new pipeline stayed
 // pending and its draws were skipped - the screen went black for good (a sample showed no build running at all).
-// Each pool's threads run at utility priority, so the game still comes first, but they always run.
+// Each pool's threads run at the default priority: below every game thread (user-initiated or more, macos.c), so the game
+// still comes first, but not utility - with the game's threads busy, utility builds went to the efficiency cores and the
+// big underwater shaders took 10-30 s each (S_Dungeon002 black for a minute); now at most ~5 s, still 60 fps.
+// (User-initiated: faster builds, but the compiler then took the game's cores - 20-27 fps.)
 typedef struct BuildJob { void (^job)(void); struct BuildJob *next; } BuildJob;
 typedef struct { dispatch_queue_t q; pthread_mutex_t m; pthread_cond_t cv; BuildJob *head, *tail; } BuildPool;
 static void *build_worker(void *arg) {
     BuildPool *bp = arg;
-    pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+    // LARECOMP_BUILD_QOS: 0 utility, 1 default (the default), 2 user-initiated (tests)
+    static int qos = -1;
+    if (qos < 0) { const char *e = getenv("LARECOMP_BUILD_QOS"); qos = e ? atoi(e) : 1; }
+    pthread_set_qos_class_self_np(qos == 2 ? QOS_CLASS_USER_INITIATED : qos == 1 ? QOS_CLASS_DEFAULT : QOS_CLASS_UTILITY, 0);
     for (;;) {
         pthread_mutex_lock(&bp->m);
         while (!bp->head) pthread_cond_wait(&bp->cv, &bp->m);
@@ -5041,7 +5048,9 @@ static void draw_one(CmdRec *r, bool indexed) {
             if (!pq) pq = compile_queue("larecomp.pipelines");
             compile_async(pq, ^{
                 NSError *e = nil;
+                double tb = now_ms();  // (LARECOMP_LOG_BUILDS: queue wait vs build, debug)
                 id<MTLRenderPipelineState> ps = archive_render_pipeline(pd, &e);
+                if (getenv("LARECOMP_LOG_BUILDS")) LOG("[build] pipeline wait %.0f ms build %.0f ms\n", tb - t0, now_ms() - tb);
                 if (!ps) { static int n; if (n++ < 10) LOG("[metal] pipeline failed: %s\n", e.localizedDescription.UTF8String); }
                 @synchronized(ready_pipes) { ready_pipes[k] = ps ? (id)ps : (id)[NSNull null]; }
                 @synchronized(cache) { stat_compile_ms += now_ms() - t0; }
