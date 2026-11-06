@@ -488,10 +488,10 @@ static void tab_display(void) {
     opt_section("Display");
     bool la = !game_other();  // (another game on the engine: only the settings that aren't LA's own features)
     const char *aspects[] = {LN("Unlocked"), LN("Original 16:9")};
-    if (la)
-        opt_choice("Aspect ratio", &g_settings.aspect, aspects, 2, ASPECT_UNLOCKED,
-                   "Unlocked fills the window and shows more of the island on wide screens, up to ultrawide. Original keeps "
-                   "the game's 16:9 view with bars.");
+    opt_choice("Aspect ratio", &g_settings.aspect, aspects, 2, ASPECT_UNLOCKED,
+               la ? "Unlocked fills the window and shows more of the island on wide screens, up to ultrawide. Original keeps "
+                    "the game's 16:9 view with bars."
+                  : "Unlocked fills the window and shows more on wide screens. Original keeps the game's 16:9 view with bars.");
     bool fs = g_settings.fullscreen;
     if (opt_toggle("Fullscreen", &fs, false, "Fills the screen. You can also press F11, Alt+Enter or Cmd+Ctrl+F.")) {
         g_settings.fullscreen = fs;

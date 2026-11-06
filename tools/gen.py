@@ -563,6 +563,21 @@ def main():
                 return ('{ extern void rt_other_request_holder(uint64_t); rt_other_request_holder(c->x[0]); c->x[20] = c->x[0]; }'
                         f'  /* {a:#x}: mov x20, x0 (level-jump request processor) */')
             PATCHES[0x700160f804] = _eow_request
+            # (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
+            # `movz wD, #0x8e39; movk wD, #0x3fe3, lsl #16`: the movk gets the runtime's aspect instead
+            eow_aspect = [0x700033d32c, 0x700033e6f8, 0x7000348b70, 0x7000351e20, 0x7000c2bd3c, 0x7000c2c8b4,
+                          0x7000c3268c, 0x7000c409bc, 0x7000c41084, 0x7000c42784, 0x7000c4597c, 0x7000c46da8,
+                          0x7001583b40, 0x7001584390, 0x70015866d0, 0x70015879dc, 0x70015ec260, 0x7001628908,
+                          0x7001645218, 0x7001646d58, 0x70020ebc34, 0x700231dfe8, 0x700231e050, 0x7002703a30,
+                          0x7002722884, 0x700279adcc]
+            def _eow_aspect(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert (w & 0xFFFFFFE0) == 0x72A7FC60, hex(w)  # movk wD, #0x3fe3, lsl #16
+                d = w & 31
+                return (f'{{ extern uint32_t rt_aspect_other(int); c->x[{d}] = rt_aspect_other({eow_aspect.index(a)}); }}'
+                        f'  /* {a:#x}: movk w{d}, #0x3fe3, lsl #16 (16:9) */')
+            for a in eow_aspect:
+                PATCHES[a] = _eow_aspect
         if args.name == 'main' and os.environ.get('GEN_TRACE_STORE_OFF'):  # (debug) every `str xT, [xN, #off]` and
             # `stp` whose either slot is at one of these offsets (comma-separated): the runtime hears of it
             # (rt_trace_store: site, base, value) - finding where an object is registered

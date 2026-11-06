@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "../hle.h"
 #include "../settings.h"
@@ -71,7 +72,8 @@ static int g_indoor_streak, g_outdoor_streak;
 RT_ON_RESET(widescreen_reset) { g_indoor = false; g_indoor_streak = g_outdoor_streak = 0; }
 
 void widescreen_frame_end(uint64_t frame) {
-    bool saw = g_site0_frame == frame;
+    // (another game: its camera runs a frame ahead of the one presented - the GPU at most one frame behind)
+    bool saw = g_site0_frame == frame || (game_other() && g_site0_frame == frame + 1);
     if (saw) { g_outdoor_streak++; g_indoor_streak = 0; }
     else { g_indoor_streak++; g_outdoor_streak = 0; }
     bool was = g_indoor;
@@ -88,6 +90,36 @@ float rt_aspect_site(int site) {
     float base = 16.0f / 9.0f;
     if (mask != -1 && !(mask & (1L << site))) return base;
     return base * g_wide;  // the output's aspect (wider or narrower than 16:9)
+}
+
+// Another game (tools/gen.py eow_aspect): the places its code builds 16:9 get the output's aspect instead.
+// Only site 2 is the camera's projection (EoW, 2026-11-05: each site alone at 32:9 in the town; site 3, also every
+// frame, stretches the picture, the rest run once at a level load). LARECOMP_ASPECT_OTHER=mask picks other sites;
+// LARECOMP_LOG_ASPECT counts each site's uses.
+#define OTHER_SITES 0x4ull
+uint32_t rt_aspect_other(int site) {
+    static long long mask = -2;
+    if (mask == -2) mask = getenv("LARECOMP_ASPECT_OTHER") ? strtoll(getenv("LARECOMP_ASPECT_OTHER"), NULL, 0) : (long long)OTHER_SITES;
+    float f = 16.0f / 9.0f;
+    if (mask & (1LL << site)) f *= g_wide;
+    // (the camera ran this frame: frames without it - title, file select, loading - are boxed, as LA's site 0)
+    if (site == 2) { extern uint64_t renderer_present_count(void); g_site0_frame = renderer_present_count(); }
+    static uint64_t n[32], last;
+    if (ENV("LARECOMP_LOG_ASPECT")) {
+        n[site & 31]++;
+        extern uint64_t renderer_present_count(void);
+        uint64_t fr = renderer_present_count();
+        if (fr / 300 != last / 300) {
+            char s[400]; int k = 0;
+            for (int i = 0; i < 26 && k < 380; i++) if (n[i]) k += snprintf(s + k, sizeof s - k, " %d:%llu", i, (unsigned long long)n[i]);
+            LOG("[aspect] frame %llu sites%s\n", (unsigned long long)fr, s);
+            memset(n, 0, sizeof n);
+            last = fr;
+        }
+    }
+    uint32_t b;
+    memcpy(&b, &f, 4);
+    return b;
 }
 
 // Culling aspect: the game's own value (camera field), widened like the camera.
@@ -133,8 +165,12 @@ static uint64_t g_backdrop_hash = 0;  // set below once known
 static uint64_t g_backdrop_frame = ~0ull;
 void widescreen_backdrop_seen(uint64_t hash) {
     static const uint64_t known[] = {BACKDROP_HASHES};
-    for (unsigned i = 0; i < sizeof known / sizeof known[0]; i++)
-        if (known[i] && hash == known[i]) { extern uint64_t renderer_exec_frame(void); g_backdrop_frame = renderer_exec_frame(); }
+    // another game (EoW): the blurred picture behind the pause menu, a 16:9 copy (the sides would show it zoomed)
+    static const uint64_t other[] = {0x78e8be3f9e103151ull};
+    const uint64_t *k = game_other() ? other : known;
+    unsigned n = game_other() ? sizeof other / sizeof other[0] : sizeof known / sizeof known[0];
+    for (unsigned i = 0; i < n; i++)
+        if (k[i] && hash == k[i]) { extern uint64_t renderer_exec_frame(void); g_backdrop_frame = renderer_exec_frame(); }
     (void)g_backdrop_hash;
 }
 // Interiors and dungeons only render their 16:9 centre. Besides the backdrop detection, the game's current level
@@ -152,6 +188,8 @@ static bool level_is_interior(void) {
 bool widescreen_frame_boxed(uint64_t frame) {
     static bool last;
     static uint64_t interior_until;  // keep boxing briefly after leaving: the first (dark) frames still show stale sides
+    if (game_other()) return g_indoor || g_backdrop_frame == frame;  // (another game: frames its camera doesn't draw,
+                                                                    // rt_aspect_other, and the pause menu's backdrop)
     bool in = level_is_interior();
     if (in) interior_until = frame + 8;
     // title / file select (not in play): 16:9 screens; the title's logo glow is drawn too large in the wide image
