@@ -3,8 +3,9 @@
 
     tools/shader_list_merge.py OUT IN [IN ...]
 
-Each IN is a list in the shipped format or a player's cache/shader_seen.txt (its "# shader_seen" header and any other
-comment lines are dropped). OUT gets every record once, sorted, so a re-run after more tours changes only what's new.
+Each IN is a list in the shipped format, a player's cache/shader_seen.txt (its "# shader_seen" header and any other
+comment lines are dropped) or a log: its "[shader] record G ..." / "... C ..." lines (another game logs each record the
+shipped list lacks). OUT gets every record once, sorted, so a re-run after more tours changes only what's new.
 OUT is read too when it exists: records are only ever added.
 """
 import os
@@ -15,6 +16,9 @@ def records(path):
     with open(path, encoding='utf-8', errors='replace') as f:
         for line in f:
             line = line.strip()
+            k = line.find('[shader] record ')
+            if k >= 0:
+                line = line[k + len('[shader] record '):]
             if line and line[0] in 'GC' and line[1:2] == ' ':
                 yield line
 
