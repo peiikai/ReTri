@@ -1633,6 +1633,11 @@ static bool launcher_pad_event(const SDL_Event &e) {
     }
     case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
         float v = e.gaxis.value / 32767.0f;
+        {   // a ReTri Menu action on a trigger (pad_nav.h)
+            ImGuiKey tk;
+            bool tdown;
+            if (ui_pad_trigger(e.gaxis.which, e.gaxis.axis, e.gaxis.value, &tk, &tdown)) io.AddKeyEvent(tk, tdown);
+        }
         // the left stick also works as the d-pad (ImGui moves between items with the d-pad only; the stick scrolls):
         // pressed past half way, released under 0.3
         if (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX || e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY) {
