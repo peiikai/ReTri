@@ -244,8 +244,8 @@ static void ui_assign(int act, int host) {
     for (int j = 0; j < BIND_UI_COUNT; j++)
         if (j != i && t[j] == host) other = j, t[j] = t[i];
     t[i] = (int8_t)host;
-    LOG("[input] ReTri Menu %s -> %s%s%s\n", k_ui_ini[i], k_pad_ini[host], other >= 0 ? " (swapped with " : "",
-        other >= 0 ? k_ui_ini[other] : "");
+    LOG("[input] ReTri Menu %s -> %s%s%s%s\n", k_ui_ini[i], k_pad_ini[host], other >= 0 ? " (swapped with " : "",
+        other >= 0 ? k_ui_ini[other] : "", other >= 0 ? ")" : "");
     result(other >= 0 ? 2 : 1, BIND_DEV_PAD, act, other >= 0 ? BIND_UI_CONFIRM + other : -1);
 }
 
