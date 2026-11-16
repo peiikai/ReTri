@@ -17,4 +17,5 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - LA's 30 fps hold is off for EoW.
 
 ### Fixed
+- A cold first start is much faster on Mac (shader preparation 19.5 min -> about 1 min on an M3 Max).
 - The underwater area is no longer black (shader builds run at the default priority).
