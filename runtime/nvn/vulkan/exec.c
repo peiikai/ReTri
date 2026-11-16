@@ -1062,6 +1062,7 @@ static struct {
     bool prim_restart;
     uint32_t restart_index;
     uint64_t copy_row_stride, copy_image_stride;
+    bool depth_clamp;  // nvnCommandBufferSetDepthClamp: depth is clamped, not clipped (EoW; as renderer.m's)
 } st;
 
 uint32_t nvn_window_origin(void);
@@ -2455,6 +2456,7 @@ typedef struct {
     uint8_t blend[8][8];
     uint8_t blend_on, a2c, topo_class, poly_fill;
     uint8_t recol;  // (maxwell_glsl_tint_branch) built with the HSV recolour (RECOLOUR = true)
+    uint8_t depth_clamp;  // nvnCommandBufferSetDepthClamp (EoW): depth clamped, not clipped
     uint32_t write_mask[8];
 } PipeKey;
 
@@ -2477,7 +2479,7 @@ struct PipeMemo {
     int nattrib, nstream;
     VkFormat color[8], depth, stencil;
     uint32_t attrib[16], stream[16][2], rt_fmt[8];
-    uint8_t blend[8][8], blend_on, a2c, cls, poly_fill;
+    uint8_t blend[8][8], blend_on, a2c, cls, poly_fill, depth_clamp;
     Pipe *pp;
     VtxLayout vl;  // the layout pipe_key_fill made from these inputs (dynamic vertex input leaves it out of pp's key)
 };
@@ -2513,6 +2515,7 @@ typedef struct {
     uint8_t blend_on;               // color state blend enables
     const uint8_t (*blend)[8];
     uint8_t a2c, topo_class, poly_fill;
+    uint8_t depth_clamp;            // (not in variant records: 0 for prepared pipelines)
 } PipeIn;
 
 // vl (optional): the vertex layout, also when the key leaves it out (dynamic vertex input)
@@ -2573,6 +2576,7 @@ static void pipe_key_fill(PipeKey *k, Prog *pr, const PipeIn *in, const VkFormat
     k->a2c = in->a2c;
     k->topo_class = in->topo_class;
     k->poly_fill = in->poly_fill;
+    k->depth_clamp = in->depth_clamp;
 }
 
 // A pipeline's create info from its key (the structures point into each other and into the key: filled in place)
@@ -2629,6 +2633,7 @@ static void pipe_ci_fill(PipeCI *c, const PipeKey *k) {
                                                      .topology = topo_class_base(k->topo_class)};
     c->vs = (VkPipelineViewportStateCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
     c->rs = (VkPipelineRasterizationStateCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+                                                     .depthClampEnable = k->depth_clamp && g_vk.depth_clamp,
                                                      .polygonMode = k->poly_fill ? VK_POLYGON_MODE_FILL : VK_POLYGON_MODE_LINE, .lineWidth = 1};
     c->ms = (VkPipelineMultisampleStateCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
                                                    .rasterizationSamples = (VkSampleCountFlagBits)k->samples, .alphaToCoverageEnable = k->a2c};
@@ -6576,6 +6581,7 @@ static int pk_diff(const PipeKey *a, const PipeKey *b, char *out, size_t n) {
     PKD(a->a2c != b->a2c, " a2c %u/%u;", a->a2c, b->a2c);
     PKD(a->topo_class != b->topo_class, " topo %u/%u;", a->topo_class, b->topo_class);
     PKD(a->poly_fill != b->poly_fill, " fill %u/%u;", a->poly_fill, b->poly_fill);
+    PKD(a->depth_clamp != b->depth_clamp, " depth clamp %u/%u;", a->depth_clamp, b->depth_clamp);
     if (!d && memcmp(a, b, sizeof *a)) {  // (no field differs: other bytes - padding)
         const uint8_t *x = (const uint8_t *)a, *y = (const uint8_t *)b;
         for (size_t i = 0; i < sizeof *a; i++) PKD(x[i] != y[i], " byte %zu %02x/%02x;", i, x[i], y[i]);
@@ -7038,7 +7044,7 @@ static void draw_(CmdRec *r, bool indexed) {
     uint32_t rt_fmt[8] = {0};
     for (int i = 0; i < st.rt.ncolor && i < 8; i++) rt_fmt[i] = st.rt.color[i] ? st.rt.color[i]->format : 0;
     const PipeIn in = {st.attrib, st.nattrib, (const uint32_t (*)[2])st.stream, st.nstream, rt_fmt, st.channel_mask,
-                       st.color_state[0], (const uint8_t (*)[8])st.blend, st.ms[0xC] != 0, cls, st.poly[2] != 1};
+                       st.color_state[0], (const uint8_t (*)[8])st.blend, st.ms[0xC] != 0, cls, st.poly[2] != 1, st.depth_clamp};
     bool memo_on = key_memo_on();
     if (memo_on && !pr->pmemo) pr->pmemo = calloc(1, sizeof *pr->pmemo);
     struct PipeMemo *pm = memo_on ? pr->pmemo : NULL;
@@ -7051,6 +7057,7 @@ static void draw_(CmdRec *r, bool indexed) {
     if (pm && pm->pp && pm->gen == key_gen && pm->ncolor == pass_ncolor && pm->samples == pass_samples && pm->depth == pass_depth &&
         pm->stencil == pass_stencil && pm->nattrib == st.nattrib && pm->nstream == st.nstream && pm->channel_mask == in.channel_mask &&
         pm->blend_on == in.blend_on && pm->a2c == in.a2c && pm->cls == in.topo_class && pm->poly_fill == in.poly_fill &&
+        pm->depth_clamp == in.depth_clamp &&
         !memcmp(pm->color, pass_color, npc * sizeof pass_color[0]) && !memcmp(pm->rt_fmt, rt_fmt, sizeof rt_fmt) &&
         !memcmp(pm->attrib, st.attrib, (size_t)nat * 4) && !memcmp(pm->stream, st.stream, (size_t)nst * 8) &&
         !memcmp(pm->blend, st.blend, sizeof pm->blend)) {
@@ -7090,7 +7097,7 @@ static void draw_(CmdRec *r, bool indexed) {
         if (pm) {
             pm->gen = key_gen; pm->ncolor = pass_ncolor; pm->samples = pass_samples; pm->depth = pass_depth; pm->stencil = pass_stencil;
             pm->nattrib = st.nattrib; pm->nstream = st.nstream; pm->channel_mask = in.channel_mask; pm->blend_on = in.blend_on;
-            pm->a2c = in.a2c; pm->cls = in.topo_class; pm->poly_fill = in.poly_fill;
+            pm->a2c = in.a2c; pm->cls = in.topo_class; pm->poly_fill = in.poly_fill; pm->depth_clamp = in.depth_clamp;
             memcpy(pm->color, pass_color, sizeof pm->color); memcpy(pm->rt_fmt, rt_fmt, sizeof pm->rt_fmt);
             memcpy(pm->attrib, st.attrib, sizeof pm->attrib); memcpy(pm->stream, st.stream, sizeof pm->stream);
             memcpy(pm->blend, st.blend, sizeof pm->blend);
@@ -8673,6 +8680,7 @@ static void exec_list(uint64_t handle, int depth) {
         }
         case CMD_SET_POLYGON_OFFSET: memcpy(st.poly_offset, r->f, sizeof st.poly_offset); break;
         case CMD_SET_PRIMITIVE_RESTART: st.prim_restart = r->x[0] != 0; st.restart_index = (uint32_t)r->x[1]; break;
+        case CMD_SET_DEPTH_CLAMP: st.depth_clamp = r->x[0] != 0; break;
         case CMD_SET_COPY_STRIDES: st.copy_row_stride = r->x[0]; st.copy_image_stride = r->x[1]; break;
         case CMD_CLEAR_COLOR: {
             snap_reason = "clear-color"; snapshots_invalidate(NULL);
