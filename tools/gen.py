@@ -356,7 +356,7 @@ class Module:
         raise Unsupported(k)
 
     def emit_function(self, entry, end, labels, tables, hle):
-        out = [f'void {fname(entry)}(Cpu *c) {{']
+        out = [f'{"__attribute__((optnone)) " if entry in OPTNONE else ""}void {fname(entry)}(Cpu *c) {{']
         if entry in hle:
             out.append(f'    {sanitize(hle[entry])}(c);')
             out.append('}')
@@ -515,6 +515,10 @@ def rebase_patch(code):
 import json as _json
 import os as _os
 _rv = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'rando', 'patch_variants.json')
+# Functions built without optimisation: guest address -> its first instruction word (checked, as patches are).
+# Workaround: LLVM's loop passes (LICM, then loop-load elimination) run for over half an hour and 7 GB on these at
+# -O1, a cost no flag of theirs caps (-disable-licm-promotion below doesn't), and they don't run in normal play.
+OPTNONE = {}
 RANDO_CODE = {}
 if _os.path.exists(_rv):
     for _a, _ws in _json.load(open(_rv))['code'].items():
@@ -583,6 +587,12 @@ def main():
             sys.exit(f'{args.name}: main build ID {m.nso.build_id[:16].upper()} is not {args.game}')
         print(f'{args.name}: game {game_addresses.GAMES[args.game][0]} (no LA patches)', file=sys.stderr)
         if args.name == 'main' and args.game == 'eow':
+            # (OPTNONE) a 25 500-line function behind a data table at main+0x3d85e90, never entered in 4 200 frames of
+            # start, file load and play (LARECOMP_FNPROF); at -O1 it took 30+ minutes to compile
+            OPTNONE[0x7001390b70] = 0xa9ba7bfd  # stp x29, x30, [sp, #-0x60]!
+            for _a, _w in OPTNONE.items():
+                _got = struct.unpack_from('<I', m.nso.image, _a - m.base)[0]
+                assert _got == _w, f'OPTNONE {_a:#x}: {_got:#x}, not {_w:#x}'
             # (warp, runtime/hle/warp_other.c) the level-jump request processor (main+0x160f7e0, x0 = its object,
             # the request at +0x10): its `mov x20, x0` tells us where the request is
             def _eow_request(gen, a):
