@@ -41,7 +41,7 @@ static ZipReader *kit_open(const char *kit, char *why, size_t why_size) {
     char *v = i >= 0 ? zip_read(z, i, &size) : NULL;
     if (v) v[strcspn(v, "\r\n")] = 0;
     bool same = v && !strcmp(v, larecomp_version());
-    if (!same) snprintf(why, why_size, "this iOS kit is from %s, and this is LAS Recomp %s: choose the kit of the same release",
+    if (!same) snprintf(why, why_size, "this iOS kit is from %s, and this is EoW Recomp %s: choose the kit of the same release",
                         v && *v ? v : "another release", larecomp_version());
     free(v);
     if (!same) { zip_close(z); return NULL; }
@@ -127,11 +127,11 @@ static void cli_progress(double f, const char *step) {
     int pct = (int)(f * 100);
     if (pct != last) { last = pct; cli_say(true, "[gamebuild] %3d%% %s", pct, step); }
 }
-// `lasrecomp --build-ios <kit.laskit> [game files]` (runtime/main.c): the export as the start screen does it, to
+// `eowrecomp --build-ios <kit.laskit> [game files]` (runtime/main.c): the export as the start screen does it, to
 // ~/Downloads or LARECOMP_IOS_OUT=<path>. Exit status 0 when the .ipa was written.
 bool iosexport_run_cli(const char *kit, const char *game_dir) {
     if (!*kit) {
-        cli_say(false, "usage: lasrecomp --build-ios <kit.laskit> [game files folder]");
+        cli_say(false, "usage: eowrecomp --build-ios <kit.laskit> [game files folder]");
         return false;
     }
     char why[512], out[1100];
@@ -154,7 +154,7 @@ void iosexport_default_path(char *out, size_t n) {
 #else
     const char *home = getenv("HOME");
 #endif
-    snprintf(out, n, "%s" SEP "Downloads" SEP "LAS Recomp-%s-iOS.ipa", home && *home ? home : ".", larecomp_version());
+    snprintf(out, n, "%s" SEP "Downloads" SEP "EoW Recomp-%s-iOS.ipa", home && *home ? home : ".", larecomp_version());
 }
 
 // One 0-1 across the whole export: the game code build (its own 0-1) fills the first BUILD_SHARE, the .ipa the rest.
@@ -169,7 +169,7 @@ bool iosexport_run(const char *game_dir, const IosExportOpts *o, char *why, size
     ZipReader *kit = kit_open(o->kit, why, why_size);
     if (!kit) return false;
 
-    // 1. the game code library for iOS (<data root>/cache/ios-build/lasgame-ios.dylib; its own build cache)
+    // 1. the game code library for iOS (<data root>/cache/ios-build/eowgame-ios.dylib; its own build cache)
     char dir[1100];
     g_outer_progress = o->progress;
     GameBuildOpts b = {o->progress ? build_progress : NULL, o->jobs, o->cancelled, GAMEBUILD_IOS, kit};
@@ -181,11 +181,11 @@ bool iosexport_run(const char *game_dir, const IosExportOpts *o, char *why, size
     }
 
     // 2. the .ipa: the kit's Payload/ entries as they are (no recompression) +
-    //    Payload/LAS Recomp.app/Frameworks/LASGame.framework/{LASGame,LASGame.id}
+    //    Payload/EoW Recomp.app/Frameworks/LASGame.framework/{LASGame,LASGame.id}
     if (o->progress) o->progress(BUILD_SHARE, "Writing the .ipa...");
     char tmp[1200], lib[1100], id[1100], zwhy[256];
     snprintf(tmp, sizeof tmp, "%s.tmp", o->out_ipa);
-    snprintf(lib, sizeof lib, "%s" SEP "lasgame-ios.dylib", dir);
+    snprintf(lib, sizeof lib, "%s" SEP "eowgame-ios.dylib", dir);
     snprintf(id, sizeof id, "%s.id", lib);
     ZipWriter *w = zip_create(tmp, zwhy, sizeof zwhy);
     if (!w) { zip_close(kit); snprintf(why, why_size, "can't write %s: %s", tmp, zwhy); return false; }
@@ -201,7 +201,7 @@ bool iosexport_run(const char *game_dir, const IosExportOpts *o, char *why, size
         if (o->progress) o->progress(BUILD_SHARE + (1 - BUILD_SHARE) * 0.9 * (i + 1) / n, "Writing the .ipa...");
     }
     // (the framework's folder and Info.plist are in the kit already: tools/bundle_ios.sh SKELETON=1)
-    const char *fw = "Payload/LAS Recomp.app/Frameworks/LASGame.framework";
+    const char *fw = "Payload/EoW Recomp.app/Frameworks/LASGame.framework";
     char name[1200];
     snprintf(name, sizeof name, "%s/LASGame", fw);
     if (ok) ok = zip_add_file(w, name, lib, true);

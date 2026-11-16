@@ -1,6 +1,6 @@
 # Debug and test hooks
 
-LAS Recomp reads a set of `LARECOMP_*` environment variables. They are for development and testing, not for players:
+EoW Recomp reads a set of `LARECOMP_*` environment variables. They are for development and testing, not for players:
 scripted test runs, screenshots, warps, logging, and A/B switches for renderer and timing code. Most are read once, at
 startup or at first use, so set them before launching. Hooks that take a frame number act at that presented frame
 (the count starts at 0 when the app starts and goes on across in-game reboots).
@@ -20,7 +20,7 @@ LARECOMP_WARP_AT="2700:Field:Field_11C" tools/shot.sh 3200
 ```
 
 Put a copy of a save in `build/testsave/save_0/` first (`savedata0.bin`), so the run never touches real saves.
-`tools/shot.sh <frame> [max seconds]` runs `./build/lasrecomp extracted` with your `LARECOMP_*` variables, saves the
+`tools/shot.sh <frame> [max seconds]` runs `./build/eowrecomp extracted` with your `LARECOMP_*` variables, saves the
 window at that frame to `build/window.png` and exits.
 
 ## Running and test runs
@@ -158,7 +158,7 @@ Use it with `LARECOMP_INPUT` (to get into a save) and `LARECOMP_SAVE_DIR` (so th
 
 ## Logging and diagnostics
 
-All of these write to the log (`lasrecomp.log` in the data folder, or the run's redirected output).
+All of these write to the log (`eowrecomp.log` in the data folder, or the run's redirected output).
 
 | Variable | Values | What it does |
 |---|---|---|

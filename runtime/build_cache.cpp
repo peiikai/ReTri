@@ -161,8 +161,9 @@ std::unique_ptr<BuildCache> acquire(const char *game_dir) {
     return c;
 }
 bool library_name(const std::string &s) {
-    return s == "lasgame.dll" || s == "lasgame.so" || s == "lasgame.dylib" ||
-           s == "lasgame-ios.dylib";  // (the iOS library built on any desktop, runtime/gamebuild.c GAMEBUILD_IOS)
+    return s == "eowgame.dll" || s == "eowgame.so" || s == "eowgame.dylib" ||
+           s == "eowgame-ios.dylib" ||  // (the iOS library built on any desktop, runtime/gamebuild.c GAMEBUILD_IOS)
+           s == "lasgame.dll" || s == "lasgame.so" || s == "lasgame.dylib" || s == "lasgame-ios.dylib";  // (old names)
 }
 void recover(BuildCache *c) {
     // The library and its ID cannot be replaced together. A remaining journal means restore the old pair
