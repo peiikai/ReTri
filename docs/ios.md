@@ -6,16 +6,16 @@
 
 - iOS or iPadOS 16.4 or newer.
 - iPhone 15 Pro or newer, iPad Pro (2021) or newer, iPad Air (2022) or newer, or iPad mini (2024) or newer.
-- A Mac, Windows or Linux computer with EoW Recomp set up and your extracted game files.
+- A Mac, Windows or Linux computer with TriCompiled set up and your extracted game files.
 
 A device whose graphics chip lacks the game's texture formats stops at start with "This iPhone or iPad can't run
-EoW Recomp: its graphics chip has no support for the game's texture formats (BC)."
+TriCompiled: its graphics chip has no support for the game's texture formats (BC)."
 
 ### Making the app
 
-1. On your computer, download `EoW Recomp-<version>-iOS.laskit` from the same release as your EoW Recomp.
+1. On your computer, download `TriCompiled-<version>-iOS.laskit` from the same release as your TriCompiled.
 2. On the start screen, open Settings > System > Recomp for iOS..., choose the kit, then Export iOS app.
-3. The app is saved to your Downloads folder as `EoW Recomp-<version>-iOS.ipa`.
+3. The app is saved to your Downloads folder as `TriCompiled-<version>-iOS.ipa`.
 
 The .ipa holds the game code built from your own files. Don't share it.
 
@@ -26,7 +26,7 @@ can't help with the tools themselves, since they're made by others.
 
 #### Increased Memory Limit
 
-EoW Recomp asks iOS for more memory than a normal app gets. iOS only grants it when the tool that signs the app also
+TriCompiled asks iOS for more memory than a normal app gets. iOS only grants it when the tool that signs the app also
 turns on Increased Memory Limit for the app's App ID. Not every tool does. Without it, iOS may close the game when it
 needs more memory.
 
@@ -43,11 +43,11 @@ in `eowrecomp.log` also shows `increased-memory-limit yes` or `NO`.
 
 **If your sideloader didn't add Increased Memory Limit:** you can add it to the app's App ID once with GetMoreRam.
 SideStore with a free Apple account is one known case ([SideStore#1616](https://github.com/SideStore/SideStore/issues/1616)).
-1. Install EoW Recomp with your sideloader as usual, so its App ID exists.
+1. Install TriCompiled with your sideloader as usual, so its App ID exists.
 2. Sideload [GetMoreRam](https://github.com/hugeBlack/GetMoreRam) and sign in with the same Apple ID that your
    sideloader uses.
-3. In GetMoreRam, go to App IDs, tap Refresh, tap EoW Recomp's App ID, then Add Increased Memory Limit.
-4. Install EoW Recomp again with your sideloader. It updates in place, so your saves stay.
+3. In GetMoreRam, go to App IDs, tap Refresh, tap TriCompiled's App ID, then Add Increased Memory Limit.
+4. Install TriCompiled again with your sideloader. It updates in place, so your saves stay.
 
 The limit stays on the App ID, so it survives the weekly refresh. If the start-screen warning comes back, repeat
 steps 3 and 4. GetMoreRam takes one of a free account's three app slots, so delete it afterwards.
@@ -55,17 +55,17 @@ steps 3 and 4. GetMoreRam takes one of a free account's three app slots, so dele
 ### Your game files
 
 Copy your game files folder (with `exefs` and `romfs` in it) to the device:
-- Mac: connect it with a cable, select it in Finder's sidebar, open the Files tab and drag the folder onto EoW Recomp.
-- Windows: the same in the Apple Devices app (or iTunes), under Files > EoW Recomp.
+- Mac: connect it with a cable, select it in Finder's sidebar, open the Files tab and drag the folder onto TriCompiled.
+- Windows: the same in the Apple Devices app (or iTunes), under Files > TriCompiled.
 - USB-C drive: put the folder on the drive and plug it in.
-- iCloud Drive: upload the folder, then in the Files app move it to On My iPhone (or On My iPad). EoW Recomp won't
+- iCloud Drive: upload the folder, then in the Files app move it to On My iPhone (or On My iPad). TriCompiled won't
   use game files that are still on iCloud Drive.
 
 Open the app and choose that folder when it asks. Use the same game version as on your computer.
 
 ### Where things are
 
-Saves, seeds, settings and `eowrecomp.log` are in the app's folder in Files (On My iPhone / On My iPad > EoW Recomp).
+Saves, seeds, settings and `eowrecomp.log` are in the app's folder in Files (On My iPhone / On My iPad > TriCompiled).
 You can move them to another folder or a drive in Settings > System > Data folder. For a bug report, attach
 `eowrecomp.log` from that folder.
 
@@ -78,6 +78,33 @@ resolution to keep 60 fps and raises it again when the phone cools down. Frame G
 works on 120 Hz displays.
 
 ## For developers
+
+### Building for your own device (Mac)
+
+```bash
+make deps-ios
+```
+
+Then generate the game code for the moving guest window (`generated-dyn/`, from your own extracted files; gen.py needs
+the `unicorn` module) and build:
+
+```bash
+cd tools && X="<extracted>/exefs" && \
+python gen.py sdk "$X/sdk" 0x7008000000 ../generated-dyn/sdk --hle ../runtime/hle/hle_symbols.txt --simd asm --dyn-base --game eow && \
+python gen.py main "$X/main" 0x7000000000 ../generated-dyn/main --simd asm --dyn-base --game eow
+```
+
+```bash
+make PLATFORM=ios -j8 && PROFILE=<.mobileprovision> IOS_MIN=16.4 PYV=3.13 tools/bundle_ios.sh build/ios/eowrecomp build/ios/eowgame.dylib
+```
+
+The profile is an Xcode team profile for the app's bundle ID (`com.peiikai.tricompiled.ios`) with Increased Memory
+Limit. `xcrun devicectl device install app` installs it and keeps the app's Documents. Copy `exefs` and `romfs` to
+`Documents/extracted` with `devicectl device copy to` (never with `--remove-existing-content`: it empties the whole
+Documents folder).
+
+Measured (iPad Pro 11" M4, 8 GB, iOS 27.0.1, Increased Memory Limit): an 8192 MB limit, shader preparation 83 s on the
+first start, the overworld at 60 fps with a 2.3-3.0 GB footprint.
 
 What is still open or worth knowing. Fixed items are in git history.
 
@@ -110,7 +137,8 @@ What is still open or worth knowing. Fixed items are in git history.
 
 ### Address space
 
-- **The window is one 5.25 GB piece, placed where the process has room.** Free address space differs by device and
+- **The window is one 5.28 GB piece, placed where the process has room.** EoW's main is 64 MB, so its sdk loads at
+  +0x8000000 and the HLE region follows it at +0xA000000 ([runtime/rt.h](../runtime/rt.h)). Free address space differs by device and
   iOS version. On iOS 26 there is a gap above `0x3_0000_0000`. On iOS 27.0.1 (iPhone 15 Pro) the dyld shared cache
   spans `0x2_EA00_0000..0xF_C000_0000`, the gaps under it are under 4 GB, and the only room is above it. So the iOS
   build is a `DYN_BASE=1` build (`generated-dyn/`, the window laid out from `GUEST_LO`), and `plat_place_guest`
