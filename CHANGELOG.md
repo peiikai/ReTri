@@ -28,6 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 - The start screen accepts EoW's game files (it said "Wrong version of the game").
+- Before any game files are chosen, the start screen has EoW's look and names Echoes of Wisdom (it showed LA's).
 - The Shadows setting changes EoW's shadows (it only knew LA's shadow map).
 - The 3D image is sharp at Match display: EoW draws its 3D at 792 lines, not LA's 1080, and the resolution settings now scale by that (Match display: your screen's pixels; 1x to 4x: 1080 to 4320 lines).
 - The app shows its version as v0.1.0 and looks for updates on EoW Recomp's own releases, not LAS Recomp's.
