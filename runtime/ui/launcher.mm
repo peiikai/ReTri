@@ -1,7 +1,7 @@
 // Start screen, shown before the game boots (user 2026-10-08, styled after Dusklight's launcher): PLAY (the vanilla
 // game), RANDOMIZER (‹ New Seed / a seed ›: user 2026-11-09), SETTINGS, QUIT, game-files status at the lower left.
 // Nothing of the game ships with EoW Recomp: on first launch the user picks the folder with their own game files (1.0.0, 1.0.1 or 1.1.0), we check
-// the main module's build id (runtime/game_addresses/versions.h), copy the files and build the game's data image; PLAY stays disabled until that worked. The background is a frame of the game's own title movie (from the user's files) once extracted.
+// the main module's build id (runtime/game_addresses/versions.h), copy the files and build the game's data image; PLAY stays disabled until that worked. The background is the game's own title movie (from the user's files) once extracted: a frame of it, or for EoW on Metal the movie playing.
 //
 // Skipped with --play, LARECOMP_NO_LAUNCHER=1, or any scripted test run (LARECOMP_INPUT): tests boot straight in
 // (with LARECOMP_NO_LAUNCHER, set by tools/game_slot.sh, the app exits rather than show it: runtime/main.c).
@@ -570,7 +570,9 @@ static void start_background_prep(void) {
     pthread_detach(th);
 }
 // Before the game files change (setup, delete): the background preparation stops reading them
+static void bg_movie_stop(void);
 static void stop_background_prep(void) {
+    bg_movie_stop();  // (the title movie behind the start screen reads them too)
     if (!g_bg_prep) return;
     g_prep_skip = 1;
     while (g_bg_prep) SDL_Delay(5);
@@ -914,7 +916,8 @@ static void remove_fonts() {
     g_font_msg = L("Imported fonts removed. You're back on the substitute fonts.");
 }
 
-// ------------------------------------------------------------------ background: a title movie frame
+// ------------------------------------------------------------------ background: the title movie (a frame of it;
+// EoW's plays on Metal, below)
 #ifdef __APPLE__
 static id<MTLTexture> g_bg;
 #define BG_TEXID ((ImTextureID)(__bridge void *)g_bg)
@@ -926,8 +929,13 @@ typedef void *GpuDevice;
 #endif
 static int g_bg_w, g_bg_h;
 
+static void bg_movie_start(GpuDevice dev, const std::string &path, double from);
+// EoW's title screen is this movie with the logo drawn over it (LA's is title.webm)
+static std::string bg_movie_path(void) {
+    return g_root + (game_other() ? "/romfs/region_common/movie/rd000_Title.webm" : "/romfs/region_common/movie/title.webm");
+}
 static void load_background(GpuDevice dev) {
-    std::string path = g_root + "/romfs/region_common/movie/title.webm";
+    std::string path = bg_movie_path();
     AVFormatContext *fmt = NULL;
     if (avformat_open_input(&fmt, path.c_str(), NULL, NULL) < 0) return;
     int si = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
@@ -967,12 +975,127 @@ static void load_background(GpuDevice dev) {
 #endif
                 g_bg_w = w, g_bg_h = h;
             }
+            if (got && game_other()) bg_movie_start(dev, path, 6.0);  // (on from the still)
             av_frame_free(&fr);
             av_packet_free(&pkt);
         }
         avcodec_free_context(&cc);
     }
     avformat_close_input(&fmt);
+}
+
+// EoW: the title movie plays behind the start screen, as on the game's own title screen. A thread decodes it in a
+// loop, on the clock, and keeps the newest frame (30 a second, 1280x720: the movie is 1080p60, and the start screen
+// is a backdrop); the start screen puts it in one of three textures in turn, never the one the GPU may still read.
+// Metal only: Vulkan keeps the still frame (an image updated each frame needs its own upload there).
+static struct {
+    pthread_t th;
+    bool running;
+    std::atomic<bool> stop{false};
+    pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    std::vector<uint8_t> frame;  // (lock) the newest frame, RGBA
+    bool fresh;                  // (lock) not shown yet
+    std::string path;
+    double from;
+    int w = 1280, h = 720;
+#ifdef __APPLE__
+    id<MTLTexture> tex[3];
+    int next;
+#endif
+} g_mv;
+
+static void *bg_movie_thread(void *) {
+    AVFormatContext *fmt = NULL;
+    if (avformat_open_input(&fmt, g_mv.path.c_str(), NULL, NULL) < 0) return NULL;
+    int si = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+    AVCodecContext *cc = NULL;
+    const AVCodec *codec = si >= 0 && avformat_find_stream_info(fmt, NULL) >= 0
+                               ? avcodec_find_decoder(fmt->streams[si]->codecpar->codec_id) : NULL;
+    if (codec && (cc = avcodec_alloc_context3(codec))) {
+        avcodec_parameters_to_context(cc, fmt->streams[si]->codecpar);
+        cc->thread_count = 2;  // (VP9 1080p60 in real time, leaving the cores to the shader preparation)
+        if (avcodec_open2(cc, codec, NULL) != 0) avcodec_free_context(&cc);
+    }
+    if (!cc) { avformat_close_input(&fmt); return NULL; }
+    double tb = av_q2d(fmt->streams[si]->time_base);
+    AVPacket *pkt = av_packet_alloc();
+    AVFrame *fr = av_frame_alloc();
+    SwsContext *sws = NULL;
+    std::vector<uint8_t> rgba((size_t)g_mv.w * g_mv.h * 4);
+    double start = g_mv.from, due = start, t0 = SDL_GetTicksNS() / 1e9 - start;  // (movie time t: shown at t0 + t)
+    av_seek_frame(fmt, si, (int64_t)(start / tb), AVSEEK_FLAG_BACKWARD);
+    while (!g_mv.stop) {
+        int r = av_read_frame(fmt, pkt);
+        if (r < 0) {  // the end: again from the start, as the game loops it
+            av_seek_frame(fmt, si, 0, AVSEEK_FLAG_BACKWARD);
+            avcodec_flush_buffers(cc);
+            t0 = SDL_GetTicksNS() / 1e9, due = 0;
+            continue;
+        }
+        if (pkt->stream_index == si && avcodec_send_packet(cc, pkt) == 0)
+            while (!g_mv.stop && avcodec_receive_frame(cc, fr) == 0) {
+                double t = fr->best_effort_timestamp * tb;
+                if (t + 1e-3 < due) continue;  // (before the seek point, or between the 30 a second)
+                due = t + 1.0 / 30;
+                for (double wait; !g_mv.stop && (wait = t0 + t - SDL_GetTicksNS() / 1e9) > 0;)
+                    SDL_Delay((Uint32)fmin(wait * 1000 + 1, 50));
+                sws = sws_getCachedContext(sws, fr->width, fr->height, (AVPixelFormat)fr->format, g_mv.w, g_mv.h,
+                                           AV_PIX_FMT_RGBA, SWS_BILINEAR, NULL, NULL, NULL);
+                uint8_t *dst[1] = {rgba.data()};
+                int dst_ls[1] = {g_mv.w * 4};
+                if (sws) sws_scale(sws, fr->data, fr->linesize, 0, fr->height, dst, dst_ls);
+                pthread_mutex_lock(&g_mv.lock);
+                g_mv.frame.swap(rgba), g_mv.fresh = true;
+                pthread_mutex_unlock(&g_mv.lock);
+                if (rgba.size() != g_mv.frame.size()) rgba.resize(g_mv.frame.size());
+            }
+        av_packet_unref(pkt);
+    }
+    sws_freeContext(sws);
+    av_frame_free(&fr);
+    av_packet_free(&pkt);
+    avcodec_free_context(&cc);
+    avformat_close_input(&fmt);
+    return NULL;
+}
+
+static void bg_movie_start(GpuDevice dev, const std::string &path, double from) {
+#ifdef __APPLE__
+    if (g_mv.running) return;
+    MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                                  width:g_mv.w height:g_mv.h mipmapped:NO];
+    for (auto &t : g_mv.tex) if (!(t = [dev newTextureWithDescriptor:td])) return;
+    g_mv.path = path, g_mv.from = from, g_mv.stop = false, g_mv.fresh = false;
+    g_mv.running = pthread_create(&g_mv.th, NULL, bg_movie_thread, NULL) == 0;
+#else
+    (void)dev, (void)path, (void)from;
+#endif
+}
+
+static void bg_movie_stop(void) {
+    if (!g_mv.running) return;
+    g_mv.stop = true;
+    pthread_join(g_mv.th, NULL);
+    g_mv.running = false;
+#ifdef __APPLE__
+    for (auto &t : g_mv.tex) t = nil;
+#endif
+}
+
+// (each frame, before the background is drawn) the newest movie frame, if there's one, becomes the background
+static void bg_movie_update(void) {
+#ifdef __APPLE__
+    if (!g_mv.running || !g_bg) return;
+    pthread_mutex_lock(&g_mv.lock);
+    if (g_mv.fresh) {
+        id<MTLTexture> t = g_mv.tex[g_mv.next];
+        g_mv.next = (g_mv.next + 1) % 3;
+        [t replaceRegion:MTLRegionMake2D(0, 0, g_mv.w, g_mv.h) mipmapLevel:0 withBytes:g_mv.frame.data()
+             bytesPerRow:g_mv.w * 4];
+        g_bg = t, g_bg_w = g_mv.w, g_bg_h = g_mv.h, g_mv.fresh = false;
+    }
+    pthread_mutex_unlock(&g_mv.lock);
+#endif
 }
 
 // ------------------------------------------------------------------ seeds
@@ -2349,7 +2472,7 @@ extern "C" void launcher_run(const char *root) {
         game_files_changed();
         status = check_game_files(g_root);
         fprintf(stderr, "[launcher] delete %.1f GB: %s -> %s\n", gb, ok ? "ok" : "refused", status.c_str());
-        if (!status.empty()) { g_bg = 0; page = SETUP; }
+        if (!status.empty()) { bg_movie_stop(); g_bg = 0; page = SETUP; }
     }
     if (g_onedrive < 0) {  // (once per launch: a "Title screen" reboot keeps it)
         if (PLAT_IOS) fprintf(stderr, "[launcher] data folder shown as: %s\n", data_root_shown().c_str());
@@ -2404,7 +2527,7 @@ extern "C" void launcher_run(const char *root) {
         if (g_files_deleted) {  // (Settings > Prelaunch deleted them)
             g_files_deleted = false;
             status = check_game_files(g_root);
-            if (!status.empty()) { g_bg = 0; bind_capture_cancel(); settings_save(); page = SETUP; }
+            if (!status.empty()) { bg_movie_stop(); g_bg = 0; bind_capture_cancel(); settings_save(); page = SETUP; }
         }
 #if PLAT_TOUCH
         if (char qs[128]; plat_touch_play_request(qs, sizeof qs)) launcher_play_seed(qs);
@@ -2560,6 +2683,7 @@ extern "C" void launcher_run(const char *root) {
             // an update by itself: only its bar, on the start screen's background (gray without it; a failure or
             // Cancel then shows the System page)
             const bool update_only = g_auto_update && busy;
+            bg_movie_update();
             if (g_bg && (status.empty() || update_only)) {  // cover the window, keep the aspect
                 float ia = (float)g_bg_w / g_bg_h, wa = ds.x / ds.y;
                 ImVec2 uv0(0, 0), uv1(1, 1);
@@ -2980,7 +3104,7 @@ extern "C" void launcher_run(const char *root) {
                             status = check_game_files(g_root);
                             if (ok) set_job(LN("Game files deleted."));
                             else set_job(LN("Couldn't delete the game files. They aren't in EoW Recomp's data folder."), true);
-                            if (!status.empty()) g_bg = 0;
+                            if (!status.empty()) bg_movie_stop(), g_bg = 0;
                             g_confirm_delete = false, files_gb = -1;
                         }
                         if (opt_action("Cancel", "", "Keeps the game files.", true)) g_confirm_delete = false;
@@ -3251,6 +3375,7 @@ extern "C" void launcher_run(const char *root) {
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext(ctx);
     ImGui::SetCurrentContext(prev_ctx);
+    bg_movie_stop();
     g_bg = 0;
     g_start_screen = 0;
 }

@@ -15,8 +15,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   menus, window titles and docs. Env vars stay `LARECOMP_*`.
 - Indirect draws run on the GPU by default (no CPU waits, shadows kept).
 - LA's 30 fps hold is off for EoW.
-- The start screen has EoW's own look: the title "TriCompiled", a plum and bronze background with slow echoes,
-  and text in the settings menu's colours.
+- The start screen has EoW's own look: the title "TriCompiled", the game's title movie playing behind it (a still
+  of it on Vulkan; a plum and bronze background before the game files are set up), and text in the settings menu's
+  colours.
 
 ### Fixed
 - The start screen accepts EoW's game files (it said "Wrong version of the game").
