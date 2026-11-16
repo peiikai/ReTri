@@ -1,160 +1,71 @@
 # Contributing to EoW Recomp
 
-Thanks for wanting to help! Bug reports, randomizer logic fixes, testing on different hardware and code
-contributions are all welcome.
-
-> [!NOTE]
-> This project is developed mostly with AI (see the README). Contributions written by hand, with AI assistance or
-> anything in between are equally welcome - what matters is that a change works, is tested, and follows the rules
-> below.
-
-If you work with a coding agent, point it at [AGENTS.md](AGENTS.md) too.
+EoW Recomp is a private project for now. This file sets out how work is organised, so that every change follows the
+same path from the start.
 
 ## The one hard rule: no Nintendo files
 
-Nothing owned by Nintendo may ever be committed or attached to an issue or pull request:
+Nothing owned by Nintendo is ever committed or attached to an issue or pull request. That means:
+- no game files, extracted or otherwise
+- no generated code (`generated-eow/`)
+- no fonts
+- no textures, models, music, text or level files
 
-- no copies of the game in any form
-- no extracted game files (`extracted/`), no generated code (`generated/`), no fonts (`.bfttf` / Switch `.ttf`)
-- no game assets of any kind: textures, models, music, text, level files - also not "just one file for testing"
-- no randomizer seed folders (`rando/`) - they contain modified game files; share the **seed ID** instead
+Screenshots and short clips in bug reports are fine.
 
-Pull requests that include Nintendo files can't be merged. Screenshots and short clips of the game in bug reports are fine.
+## Versions
 
-## Reporting bugs
+EoW Recomp uses [Semantic Versioning](https://semver.org): `MAJOR.MINOR.PATCH`.
 
-Report bugs as a [GitHub issue](https://github.com/peiikai/LASRecomp/issues). Please include:
+- The version lives in `VERSION`. On `develop` it is the next version being worked on.
+- Before 1.0, a MINOR release (0.2.0) carries new features and may change behaviour or settings. A PATCH release
+  (0.1.1) carries fixes only.
+- Releases are tagged `vX.Y.Z` on `main`. Only release tags go on `main`.
+- Every user-facing change gets a line under `Unreleased` in `CHANGELOG.md` in the same PR.
 
-- your platform (macOS / Windows / Linux / Android / iPhone / iPad), hardware (CPU, GPU) and window size / aspect ratio
-- what you did, what happened, and what you expected
-- for randomizer problems: the **seed ID** (Randomizer, the seed's Copy seed ID), the settings, and where you got stuck
-  (area / room, which items you had). A seed ID reproduces the exact seed on the same EoW Recomp version.
-- a screenshot or short clip if it's visual
-- the log: `eowrecomp.log` in the data folder (see "Where files live" in the README), always the latest run - or if
-  the problem was in an earlier run, that run's `eowrecomp-backup-*.log` (by date modified)
+## Branches
 
-## Branches and versions
+| Branch | What it holds | Branches from | Merges into |
+| --- | --- | --- | --- |
+| `main` | released code only, one tag per release | | |
+| `develop` | the next minor version | | `release/X.Y` |
+| `release/X.Y` | one release line: its last bug fixes, then patch releases | `develop` | `main` (tagged), then back into `develop` |
+| `feature/<name>` | new features | `develop` | `develop` |
+| `fix/<issue>-<name>` | bug fixes for the next version | `develop` | `develop` |
+| `hotfix/<issue>-<name>` | fixes for a released version | `release/X.Y` | `release/X.Y`, then into `develop` |
+| `docs/<name>`, `ci/<name>`, `chore/<name>` | docs, CI, upkeep | `develop` | `develop` |
 
-`main` holds the last release and isn't where development happens, so don't base your work on it.
+Rules:
+- Branch names are lower case with dashes, for example `fix/12-text-box-flicker`. Never `claude/...`.
+- `main`, `develop` and `release/*` only change through pull requests. A local pre-push hook refuses direct pushes
+  to them (see below).
+- Merge pull requests with a merge commit, so each branch's history stays readable. Delete the branch after it is
+  merged.
 
-- `develop`: where new work lands, for the next version. Base your branch on it and open your pull request against it.
-- `release/<major>.<minor>` (for example `release/0.6`): fixes for a released version only. Base a fix on it when it
-  should ship in the next hotfix of that version; maintainers carry it forward into `develop`.
+## Making a release
 
-Name your branch `type/short-name`, with the issue number when there is one:
+1. Cut `release/X.Y` from `develop` when the version's features are in.
+2. On the release branch, set `VERSION` to `X.Y.0` and move the `Unreleased` lines in `CHANGELOG.md` under
+   `## [X.Y.0] - <date>`. Only fixes land on the release branch from here on.
+3. Open a PR from `release/X.Y` into `main`. Once it's merged, tag the merge commit `vX.Y.0`.
+4. Merge `release/X.Y` back into `develop`, then set `VERSION` on `develop` to the next minor version.
+5. For a patch release, merge hotfixes into `release/X.Y`, then repeat steps 2 to 4 with `X.Y.Z`.
 
-- `fix/784-swamp-rock` for a bug fix
-- `feature/weather-hazards` for something new
-- `docs/...`, `ci/...` or `chore/...` for documentation, CI and housekeeping
+## Commits and pull requests
 
-Releases are tagged with [semantic versions](https://semver.org): `v0.6.0` is Beta 6 and `v0.6.1` its first hotfix
-(the start screen shows them as Beta 6 and Beta 6.1). `v1.0.0` will be the first full release.
+- Commit messages are plain English: a short first line saying what changed and why.
+- Each PR does one thing. It names its issue (`Fixes #12`), says how it was tested and updates `CHANGELOG.md`.
+- PRs target `develop`, except hotfixes, which target their `release/X.Y` branch.
+- The game is play-tested before any PR touching rendering, timing or audio is merged.
 
-Before you start, and again before opening the pull request, compare your change with what's already on your base
-branch: it moves quickly, and the fix or feature you have in mind may already be there or in progress. Rebase onto it
-if it has moved since you branched.
+## Pre-push guard
+
+`git config core.hooksPath ~/.config/eowrecomp-hooks` installs the hooks. They refuse:
+- pushes to `main`, `develop` and `release/*` (they change only through PRs)
+- any commit not authored as Peiikai
+
+To bootstrap a release branch, the maintainer can allow a single push with `EOW_ALLOW_PROTECTED_PUSH=1`.
 
 ## Building
 
-See the README's "Building from source" for macOS, [docs/BUILD-windows.md](docs/BUILD-windows.md) for Windows,
-[docs/linux.md](docs/linux.md) for Linux and [docs/android.md](docs/android.md) for Android.
-In short: set up your own game files (v1.0.0, v1.0.1 or v1.1.0) on the start screen, `make gen` once to recompile the game code from
-them, then `make -j10`. The randomizer needs its Python environment in
-`third_party/LAS-Randomizer/venv`.
-
-## More documentation
-
-- [docs/architecture.md](docs/architecture.md): how the parts fit together, from the game files to the renderer
-- [docs/debug-hooks.md](docs/debug-hooks.md): the `LARECOMP_*` environment variables for testing and debugging
-- [docs/vulkan-gpu-defaults.md](docs/vulkan-gpu-defaults.md): Vulkan settings that differ per GPU, and their switches
-- [docs/save-format.md](docs/save-format.md): the save file layout and checksums
-
-## Project layout
-
-- `tools/gen.py` - the recompiler: translates the game's executables into C (`generated/`, never committed).
-  `tools/patches.py` holds code patches applied during generation; every patch site checks the original instruction
-  word, so a wrong address fails loudly instead of silently. `tools/chunk_bounds.py` holds where the C is split into
-  files (made with `gen.py --new-chunk-bounds`; new cuts make every file compile once).
-- `runtime/game_addresses/` - the game's addresses, one table per game version: `versions.h` lists the versions
-  by the main program's build ID (1.0.1 and 1.1.0 share one), `patches_<version>.h` holds the addresses used by the
-  patch generator (read by `tools/game_addresses.py`, part of the game-library identity) and `runtime_<version>.h`
-  the runtime-only ones (adding one does not invalidate generated code). Every version has the same names. The
-  generator and the runtime pick the table by build ID (unknown IDs are refused); runtime code reads an address as
-  `GA(NAME)`. Add a name to `*_v1_0_0.h`, then regenerate the others with `tools/version_map.py` (it maps code
-  addresses through identical functions and refuses anything it can't map). Guest memory layout constants and
-  object field offsets are separate. Instruction checks still guard patch sites.
-- `runtime/` - the host side:
-  - `kernel.c`, `loader.c`, `services/` - the Switch OS replacement
-  - `hle/` - replacements and features (door jumps, keysanity, pots / bushes, souls, warps, input, ...)
-  - `nvn/` - the graphics layer: command recording (`cmdbuf.c`), Metal (`renderer.m`, `metal.m`) and Vulkan
-    (`vulkan/`) backends, the shader translator (`maxwell/translate.c`)
-  - `ui/` - the ImGui overlay menu and the start screen
-- `tools/rando/` - randomizer tooling around LAS-Randomizer: the headless driver (`las_headless.py`), dungeon room
-  shuffle (`dungeon_gen.py`, `room_logic.py`), entrances, pots / bushes / digs, shop, souls, pets.
-- `third_party/LAS-Randomizer` - the vendored randomizer (MIT, with local changes marked "LAS Recomp" in comments).
-
-## Testing your change
-
-- Build cleanly on your platform (`make -j10`). If you touch shared rendering code, say which backend you tested -
-  a Metal change usually needs a Vulkan counterpart and the other way round.
-- Test in game, and look at the result: a fix isn't verified until you've seen it work.
-- Scripted test runs: `tools/shot.sh <frame> [seconds]` runs the game with `LARECOMP_*` environment hooks (scripted
-  input, warps, seeds, scratch saves via `tools/fresh_save.sh`) and saves a screenshot. Many debug hooks are
-  documented where they're defined - grep for `getenv("LARECOMP_`. Test runs use a scratch copy of the settings
-  file; give them a scratch save folder too (`LARECOMP_SAVE_DIR`) so your own saves stay untouched.
-- Randomizer changes: generate several seeds with different settings and check they complete (every location
-  reachable). For dungeon room shuffle, `tools/doorjump_test.sh <seed>` walks every mismatched doorway.
-- State that belongs to a seed must be reset when the player switches seeds in place: use an `RT_ON_RESET` hook
-  (see `runtime/hle.h`).
-- For an automated Vulkan validation run, set `LARECOMP_VK_VALIDATION_STOP=1`. This requires the Khronos validation
-  layer and its debug callback, and exits with a failure status on the first validation error. Warnings continue.
-  `LARECOMP_VK_VALIDATION=1` keeps the existing best-effort, log-only behavior.
-
-For address-table changes, run `python tools/test_game_addresses.py`. It checks native/Python agreement,
-patch-output fingerprints from the pre-refactor `beta_5` build, hook records, that every version has the same names
-and uncentralized addresses without game files. With `--game v1_0_0=<folder> --game v1_0_1=<folder>` (your extracted
-game files) it also checks every patch and hook instruction and the randomizer's patch sites on each version, and
-that the committed tables match `tools/version_map.py`'s output. For full generation equivalence, generate from the same player-provided `exefs/main` and `exefs/sdk`
-with both revisions, then run `python tools/test_game_addresses.py --compare-generated /path/to/before /path/to/after`.
-The comparison checks every generated C file byte-for-byte.
-
-## Tests
-
-New menu text is written in English. Run `python3 tools/menu_strings.py check` to see what each language is missing;
-untranslated text shows in English.
-
-`python tools/test_save.py` exercises the production save handlers against temporary files, without game data.
-
-`python tools/test_powerup_music.py` checks power-up music toggles, guest-state preservation and reboot resets without game data.
-
-`third_party/LAS-Randomizer/venv/bin/python tools/test_keysanity_text.py [<romfs>]` checks that keysanity dungeon
-items picked up anywhere, floor key spots included, get a message naming their dungeon.
-
-`python tools/test_text_speed.py` checks the Text speed hooks (Normal, Fast, Instant) without game data.
-
-Build-cache regression tests use synthetic inputs and the production scheduler:
-`python tools/test_build_cache.py` and `python tools/test_gamebuild_resume.py`.
-On Windows, also run `python tools/test_windows_processes.py` to check independent
-helper process trees, descendant cleanup and crash exit codes. `CC` / `CXX` select
-the native compiler (defaults: `clang` / `clang++`). For a release smoke test,
-cancel a real game-code build after some objects finish, resume it, inspect the
-reused/compiled counts in the log, and launch the resulting game library.
-
-## Code style
-
-- Match the surrounding code: its naming, structure and comment density. Comments explain *why* (what the game does,
-  what an address is, which seed or bug showed the problem), not what the next line does.
-- Keep randomizer and game-facing text in the game's own style: pickup messages go through the game's message box,
-  not custom pop-ups; settings get short labels, not paragraphs.
-- New randomizer options must keep older seed IDs loading (see the seed ID notes in `runtime/ui/rando_tab.mm`).
-
-## Pull requests
-
-- Target `develop` (or `release/<major>.<minor>` for a hotfix; see "Branches and versions"), not `main`.
-- Keep each pull request focused on one change; small is easier to review.
-- Describe what changed, why, and how you tested it (platform, seeds, screenshots).
-- Don't include personal paths or information in code, comments or commit messages.
-
-## License
-
-By contributing, you agree that your contributions are licensed under the project's [MIT License](LICENSE).
+See `CLAUDE.md` for the build and run commands.
