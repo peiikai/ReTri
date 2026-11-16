@@ -111,8 +111,8 @@ with tempfile.TemporaryDirectory() as temporary:
     # the kit's contents (tools/ios_kit.sh): the app's marker, the Darwin headers (any-darwin-any from the zig archive
     # is what the real kit holds; the headers zig keeps for a macOS host are the same set, a Linux / Windows host's
     # zig has none, so the archive is read), the linker, the tbd
-    (skeleton/'Payload/EoW Recomp.app').mkdir(parents=True)
-    (skeleton/'Payload/EoW Recomp.app/Info.plist').write_text('<plist/>\n')
+    (skeleton/'Payload/TriCompiled.app').mkdir(parents=True)
+    (skeleton/'Payload/TriCompiled.app/Info.plist').write_text('<plist/>\n')
     darwin = ZIG.parent/'lib/libc/include/any-darwin-any'
     if not darwin.exists():
         archive = next(p for p in (ROOT/'build/zig-dl').iterdir() if p.name.startswith('zig-') and p.suffix in ('.xz', '.zip'))

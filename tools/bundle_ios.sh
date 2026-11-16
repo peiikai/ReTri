@@ -1,5 +1,5 @@
 #!/bin/bash
-# make ipa: build/ios/EoW Recomp.app and build/dist/EoW Recomp-<version>-iOS.ipa from build/ios/eowrecomp and
+# make ipa: build/ios/TriCompiled.app and build/dist/TriCompiled-<version>-iOS.ipa from build/ios/eowrecomp and
 # build/ios/eowgame.dylib. The app is laid out as on macOS: the executable holds no game code; the game code library
 # (built from your own game files) is the embedded Frameworks/LASGame.framework, signed with the app - iOS runs only
 # code signed inside the bundle, so the .ipa holds the game's code: for your own devices, never shared.
@@ -8,7 +8,7 @@
 #
 #   TEAM_ID=<id>          the Apple Developer team (the entitlement in runtime/platform/ios.entitlements: any team)
 #   PROFILE=<.mobileprovision>  a development profile for BUNDLE_ID with those capabilities and this device
-#   BUNDLE_ID=...         default com.peiikai.eowrecomp.ios
+#   BUNDLE_ID=...         default com.peiikai.tricompiled.ios
 #   SIGN="Apple Development: ..."  the identity (default: the profile's certificate that is in the keychain)
 #   DEVICE=<devicectl id>  install and launch on that device
 #   SKELETON=1            no game library and no signing: the app without Frameworks/LASGame.framework, which the
@@ -24,8 +24,8 @@ cd "$(dirname "$0")/.."
 EXE=${1:-build/ios/eowrecomp}
 LIB=${2:-$(dirname "$EXE")/eowgame.dylib}
 SKELETON=${SKELETON:-}
-APP=${APP:-build/ios/EoW Recomp.app}
-BUNDLE_ID=${BUNDLE_ID:-com.peiikai.eowrecomp.ios}
+APP=${APP:-build/ios/TriCompiled.app}
+BUNDLE_ID=${BUNDLE_ID:-com.peiikai.tricompiled.ios}
 IOS_MIN=${IOS_MIN:?the Makefile sets IOS_MIN - run as make ipa / ios-skeleton}
 if [ -n "${IOS_SIM:-}" ]; then
     [ -n "$SKELETON" ] || { echo "IOS_SIM=1 needs SKELETON=1 (no game code in the simulator)"; exit 1; }
@@ -122,11 +122,11 @@ cat > "$APP/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key><string>en</string>
-	<key>CFBundleDisplayName</key><string>EoW Recomp</string>
+	<key>CFBundleDisplayName</key><string>TriCompiled</string>
 	<key>CFBundleExecutable</key><string>eowrecomp</string>
 	<key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-	<key>CFBundleName</key><string>EoW Recomp</string>
+	<key>CFBundleName</key><string>TriCompiled</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>$SHORT</string>
 	<key>CFBundleVersion</key><string>1</string>
@@ -160,7 +160,7 @@ cat > "$APP/Info.plist" <<EOF
 		<key>UIApplicationShortcutItemTitle</key><string>Play Vanilla</string>
 		<key>UIApplicationShortcutItemIconSymbolName</key><string>play.fill</string>
 	</dict></array>
-	<key>NSLocalNetworkUsageDescription</key><string>LiveSplit: EoW Recomp connects to LiveSplit's Server on your computer to drive the timer.</string>
+	<key>NSLocalNetworkUsageDescription</key><string>LiveSplit: TriCompiled connects to LiveSplit's Server on your computer to drive the timer.</string>
 EOF
 cat >> "$APP/Info.plist" <<'EOF'
 </dict>
@@ -270,7 +270,7 @@ fi
 
 mkdir -p build/dist && rm -rf build/ios/Payload && mkdir build/ios/Payload
 cp -R "$APP" build/ios/Payload/
-IPA="build/dist/EoW Recomp-$VERSION-iOS.ipa"
+IPA="build/dist/TriCompiled-$VERSION-iOS.ipa"
 rm -f "$IPA"
 (cd build/ios && zip -qr "../../$IPA" Payload)
 rm -rf build/ios/Payload
