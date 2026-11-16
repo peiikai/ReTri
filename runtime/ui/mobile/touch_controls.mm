@@ -803,16 +803,25 @@ static bool dpad_disc(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly,
 }
 
 // ---- drawing: Echoes of Wisdom's look
-// The menus' EoW theme (plastic.h, from the game's pause menu): each button a round cell in its grey-brown with a thin
-// lighter rim, drawn by the menus' own plastic pieces, the letter set in it in the menu's cream. Pressed: the
-// selection's colour and the cursor's corner brackets, gold above and green below.
+// The menus' EoW theme (plastic.h, from the game's pause menu): each button a cell drawn by the menus' own plastic
+// pieces, in the plum of the inventory screen's bands (a little lighter, to read over the game) with a lighter plum
+// rim, the letter set in it in the menu's cream. Pressed: lighter, with the cursor's corner brackets (gold above,
+// green below).
 static ImVec4 alpha_of(ImVec4 c, float a) { return ImVec4(c.x, c.y, c.z, c.w * a); }
 static ImU32 u32(ImVec4 c, float a = 1) { return ImGui::ColorConvertFloat4ToU32(alpha_of(c, a)); }
+static ImVec4 rgb(unsigned v, float a = 1) { return ImVec4((v >> 16 & 255) / 255.0f, (v >> 8 & 255) / 255.0f, (v & 255) / 255.0f, a); }
+static const unsigned kPlum = 0x4A2C3E, kPlumOn = 0x6A3F58, kPlumRim = 0x8A5E76, kPlumRimOn = 0xB58AA0, kPlumWell = 0x2A1822;
+static void eow_cell(ImDrawList *dl, ImVec2 p0, ImVec2 p1, float radius, ImVec4 col, ImVec4 rim, float th) {
+    const PlasticTheme &t = plastic_theme();  // (as plastic_pill: the theme's flat cells, its rim width)
+    float w = fminf(t.ring_w * th * 1.5f, (p1.y - p0.y) * 0.12f), depth = 6 * th;
+    if (t.corner > 0) radius = fminf(radius, t.corner * th), depth = fminf(depth, 3 * th);
+    rim.w = col.w;
+    plastic_add(dl, p0, p1, radius, col, PK_PILL, depth, 0, rim, w, t.edge);
+}
 static bool eow_disc(ImDrawList *dl, ImVec2 c, float r, bool on, float a, float th, bool sel) {
-    const PlasticTheme &t = plastic_theme();
     a = fminf(1, 0.55f + 0.5f * a);  // (mostly solid: 0.85 at the opacity setting's default)
     ImVec2 p0(c.x - r, c.y - r), p1(c.x + r, c.y + r);
-    plastic_pill(dl, p0, p1, r, alpha_of(on ? t.row_sel : t.row, a), 6 * th, 1.0f, th, false);
+    eow_cell(dl, p0, p1, r, rgb(on ? kPlumOn : kPlum, a), rgb(on ? kPlumRimOn : kPlumRim), th);
     if (on || sel) plastic_brackets(dl, p0, p1, th * (sel ? 1.4f : 1.0f));
     return true;
 }
@@ -828,12 +837,12 @@ static bool eow_compass(ImDrawList *dl, ImVec2 c, float r, ImVec2 knob, float a,
         ImVec2 tip(c.x + cosf(ang) * r * len, c.y + sinf(ang) * r * len);
         ImVec2 s1(c.x + cosf(ang + 1.5708f) * r * wd, c.y + sinf(ang + 1.5708f) * r * wd);
         ImVec2 s2(c.x - cosf(ang + 1.5708f) * r * wd, c.y - sinf(ang + 1.5708f) * r * wd);
-        dl->AddTriangleFilled(tip, s1, s2, u32(t.ring_sel, (k % 2 ? 0.55f : 0.85f) * ea));
+        dl->AddTriangleFilled(tip, s1, s2, u32(rgb(kPlumRim), (k % 2 ? 0.55f : 0.85f) * ea));
     }
     bool held = hypotf(knob.x - c.x, knob.y - c.y) > r * 0.04f;
     float kr = r * 0.42f;
     ImVec2 k0(knob.x - kr, knob.y - kr), k1(knob.x + kr, knob.y + kr);
-    plastic_pill(dl, k0, k1, kr, t.button, 5 * th, 1.0f, th, false);
+    eow_cell(dl, k0, k1, kr, t.button, rgb(0xF0D8A8), th);
     if (held) plastic_brackets(dl, k0, k1, th * 0.8f);
     float d = kr * 0.30f;
     dl->AddQuadFilled(ImVec2(knob.x, knob.y - d), ImVec2(knob.x + d, knob.y), ImVec2(knob.x, knob.y + d), ImVec2(knob.x - d, knob.y),
@@ -845,7 +854,7 @@ static bool eow_dpad(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly, 
     const PlasticTheme &t = plastic_theme();
     eow_disc(dl, c, r, false, a, th, sel);
     float ea = fminf(1, 0.55f + 0.5f * a), len = r * 0.80f, w = r * 0.27f, rnd = r * 0.08f;
-    ImU32 well = u32(t.inset, 0.9f * ea / fmaxf(t.inset.w, 0.01f)), lit = u32(t.bar, ea), edge = u32(t.ring_sel, ea);
+    ImU32 well = u32(rgb(kPlumWell), 0.9f * ea), lit = u32(t.bar, ea), edge = u32(rgb(kPlumRim), ea);
     dl->AddRectFilled(ImVec2(c.x - w, c.y - len), ImVec2(c.x + w, c.y + len), well, rnd);
     dl->AddRectFilled(ImVec2(c.x - len, c.y - w), ImVec2(c.x + len, c.y + w), well, rnd);
     float in = 2.5f * th;  // (the held arm inside the edge)
