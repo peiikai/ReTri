@@ -103,14 +103,15 @@ with tempfile.TemporaryDirectory() as directory:
                  'walls = Gray', 'sand = Black']:
         assert line + '\n' in saved, (line, saved)
     count += 1
-    # the Randomizer tab's New seed options: an older file without the key stays without it (the defaults)
-    for lines, value in [(['rando_options = 50000-00004-20000-40G20-04000-0G11R', 'rando_seed = X'],
-                          '50000-00004-20000-40G20-04000-0G11R'), (['rando_seed = X'], '')]:
-        ini = directory / 'test.ini'
-        ini.write_text('\n'.join(lines) + '\n')
-        subprocess.run([str(exe), 'rando-options', value], env=dict(os.environ, LARECOMP_SETTINGS=str(ini)), check=True,
-                       capture_output=True)
-        saved = ini.read_text()
-        assert (f'rando_options = {value}\n' in saved) if value else 'rando_options' not in saved, saved
-        count += 1
+    # a file with the keys of LA's randomizer (removed): it loads, the other settings stay, those keys are dropped
+    old = ['inv_keys = 1', 'tracker = 1', 'tracker_filters = 5', 'chaos_letters = map', 'cosmetics_seed = rando/X',
+           'rando_options = 50000-00004-20000-40G20-04000-0G11R', 'rando_preset = Mine|50000|11']
+    ini = directory / 'test.ini'
+    ini.write_text('\n'.join(['aspect = original', *old, 'rando_seed = X']) + '\n')
+    subprocess.run([str(exe), 'old-keys'], env=dict(os.environ, LARECOMP_SETTINGS=str(ini)), check=True, capture_output=True)
+    saved = ini.read_text()
+    assert 'aspect = original\n' in saved and 'rando_seed = X\n' in saved, saved
+    for line in old:
+        assert line.split(' = ')[0] + ' =' not in saved, (line, saved)
+    count += 1
     print(f'{count} parser, locale, upscaler / resolution default and roundtrip cases passed (LF/CRLF, empty/nonempty seeds)')

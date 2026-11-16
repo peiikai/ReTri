@@ -17,7 +17,7 @@ int i18n_lang(void);
 bool i18n_english(void);
 // English text -> the menu language's (the same pointer when there is none)
 const char *L(const char *en);
-// a line put together from pieces (the spoiler log, warp spots, the tracker's places): the whole line if it has a
+// a line put together from pieces (warp spots): the whole line if it has a
 // translation, else its parts - "a  ->  b", "%s" patterns ("Outside %s"), a bracketed end "x (y)", "a: b", "a, b"
 const std::string &L_line(const std::string &en);
 // UTF-8 capitals (Latin and Cyrillic: the option rows' labels)

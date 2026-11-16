@@ -57,15 +57,10 @@ void col_format(const CosColour *c, char *out, size_t n) {
     else snprintf(out, n, "%s", g_col_names[c->pick >= 0 && c->pick < N_COL ? c->pick : 0]);
 }
 
-void (*g_col_seed_check)(void);
-
 bool col_target(const CosColour *c, int slot, uint32_t *rgb) {
     static int picks[COL_SLOTS];
     static unsigned seed;
-    static time_t checked;
     if (slot < 0 || slot >= COL_SLOTS) return false;
-    time_t now = time(NULL);
-    if (g_col_seed_check && now != checked) checked = now, g_col_seed_check();  // (a new seed's own set: once a second)
     if (c->pick != COL_RANDOM) picks[slot] = 0;
     if (c->pick == COL_CUSTOM) { *rgb = c->rgb & 0xFFFFFF; return true; }
     if (c->pick == COL_RANDOM) {

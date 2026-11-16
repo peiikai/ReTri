@@ -7,9 +7,9 @@
 //   newly pressed with the item on Y, PlayerStatus +0xa2, or X with it on X, +0xa3) that runs only while Link may use
 //   items. tools/patches.py EQUIP_Y_*_SITES make a newly pressed direction count there too, for its own item: one press
 //   uses it, and with Y or X pressed at the same time both items are used (bomb arrows). X / Y keep their items.
-//   An item no longer owned (a bottle traded, a seed's take-back) leaves its direction.
+//   An item no longer owned (a bottle traded) leaves its direction.
 // Saved with each save slot: savedataN.bin -> savedataN.bin.dpad, written with the save and matched to it by the
-// save's body CRC (as the weather cycle, runtime/nvn/weather_cycle.c); a save without one starts empty.
+// save's body CRC; a save without one starts empty.
 // The HUD's small cross: runtime/ui/dpad_overlay.mm. Test: LARECOMP_DPAD_ITEMS=<frame>:<up>,<down>,<left>,<right> (item
 // slots in hex, - for none) sets the directions of the save in play at that presented frame.
 #include <stdio.h>
@@ -26,7 +26,7 @@
 #include "../settings.h"
 
 extern int game_in_play(void);              // runtime/hle/warp.c
-extern int inventory_items_cursor(void);    // runtime/ui/inventory_overlay.mm (-1: not on the Items page)
+extern int inventory_items_cursor(void);    // runtime/ui/pause_pages.mm (-1: not on the Items page)
 extern uint64_t inventory_items_obj(void);  // (its page object)
 extern uint64_t renderer_present_count(void);
 

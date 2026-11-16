@@ -48,12 +48,9 @@ const char *rando_seed_dir(void) { return NULL; }
 bool romfs_layout(const char *p, RomfsLayout *l, char *why, size_t n) { abort(); }
 bool rando_romfs_override(const char *p, char *out, size_t n) { abort(); }
 void romfs_file_read_hook(const char *p) { abort(); }
-void enemy_random_filter(const char *p, uint64_t off, uint8_t *d, uint64_t n) {}
 void rt_fatal_msg(const char *fmt, ...) { abort(); }
 void rt_fatal_trace(void) { abort(); }
 void save_editor_file_read(const char *p, uint64_t a, int64_t o, int64_t n) {}
-void weather_cycle_save_read(const char *p, uint64_t a, int64_t o, int64_t n) {}  // (runtime/nvn/weather_cycle.c)
-void weather_cycle_save_written(const char *p, uint64_t a, int64_t o, int64_t n) {}
 void dpad_items_save_read(const char *p, uint64_t a, int64_t o, int64_t n) {}  // (runtime/hle/dpad_items.c)
 void dpad_items_save_written(const char *p, uint64_t a, int64_t o, int64_t n) {}
 void pace_hitch(const char *why) {}  // (runtime/nvn/pace.c: a save commit is a stall)
@@ -81,7 +78,6 @@ bool game_romfs_check_file(GameRomfsCheck *c, const char *rel, uint64_t size, ui
 int game_romfs_check_end(GameRomfsCheck *c) { return 0; }
 bool game_romfs_exefs_copy(const char *game_dir, const char *rel, uint64_t size) { return false; }
 __attribute__((constructor)) static void test_ga_init(void) { test_ga.LIVE_SAVE = (uintptr_t)live_save; }
-#include "../runtime/hle/flags_ext.c"
 Service *service_new(const char *name, ServiceHandler handler, void *state) {
     Service *s = calloc(1, sizeof *s); s->name = name; s->handler = handler; s->state = state; return s;
 }

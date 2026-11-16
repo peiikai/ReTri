@@ -15,8 +15,6 @@ extern "C" {
 #include "../hle.h"
 #include "../settings.h"
 int game_in_play(void);
-int rt_hookshot_seed_forced(void);  // hle/hookshot.c
-int rt_no_buff_seed_forced(void);   // hle/qol.c
 #include "../livesplit.h"
 }
 
@@ -166,20 +164,10 @@ extern "C" void difficulty_draw(float scale) {
     if (opt_toggle("Mirror mode", &g_settings.mirror_mode, false,
                    "Mirrors the game world."))
         settings_save();
-    if (rt_hookshot_seed_forced()) {  // (the seed's logic counts on it: always on, the toggle greyed out)
-        bool on = true;
-        opt_disable_next();
-        opt_toggle("Hookshot anything", &on, false,
-                   "This seed was made with Hookshot Anything, so it stays on.");
-    } else if (opt_toggle("Hookshot anything", &g_settings.cheat_hookshot, false,
+    if (opt_toggle("Hookshot anything", &g_settings.cheat_hookshot, false,
                           "The Hookshot latches onto any wall or object, not just Hookshot targets."))
         settings_save();
-    if (rt_no_buff_seed_forced()) {
-        bool on = true;
-        opt_disable_next();
-        opt_toggle("Disable Guardian Acorns / Pieces of Power", &on, false,
-                   "This seed was made with it, so it stays on.");
-    } else if (opt_toggle("Disable Guardian Acorns / Pieces of Power", &g_settings.no_buff_drops, false,
+    if (opt_toggle("Disable Guardian Acorns / Pieces of Power", &g_settings.no_buff_drops, false,
                           "Disables Guardian Acorns and Pieces of Power from spawning."))
         settings_save();
     opt_section("Difficulty");
