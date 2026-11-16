@@ -82,6 +82,8 @@ EOF
 cp docs/icon/icon_ios_1024.png "$APP/icon.png"
 cp third_party/fonts/Baloo2/Baloo2-SemiBold.ttf "$APP/"
 cp third_party/fonts/Baloo2/OFL.txt "$APP/Baloo2-OFL.txt"
+cp third_party/fonts/HyliaSerif/HyliaSerifBeta-Regular.otf "$APP/"
+cp third_party/fonts/HyliaSerif/README.md "$APP/HyliaSerif-README.md"
 # the game text's fonts (runtime/hle/pl.c: no readable system fonts on iOS, so BIZ UDPGothic serves first) and the
 # last-resort ones, as the desktop packages ship them
 cp third_party/fonts/BIZUDPGothic/BIZUDPGothic-Regular.ttf "$APP/"

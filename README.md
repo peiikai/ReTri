@@ -280,6 +280,7 @@ none of their files are used):
 - [SDL 3](https://libsdl.org) - windowing, input, audio (zlib license)
 - [FFmpeg](https://ffmpeg.org) - movie playback (LGPL)
 - [Dear ImGui](https://github.com/ocornut/imgui) - overlay menu and start screen (MIT)
+- [Hylia Serif](https://artsyomni.com/hyliaserif) by Omni Jacala - the start screen's title (free, not for profit; `third_party/fonts/HyliaSerif/README.md`)
 - [Baloo 2](https://github.com/EkType/Baloo2) by Ek Type - the start screen's font (SIL Open Font License 1.1, `third_party/fonts/Baloo2/OFL.txt`)
 - [BIZ UDPGothic](https://github.com/googlefonts/morisawa-biz-ud-gothic) by Morisawa - the game's text on Linux when you haven't imported the Switch fonts: a free font from the same universal-design gothic family as the Switch's UD Shin Go (SIL Open Font License 1.1, `third_party/fonts/BIZUDPGothic/OFL.txt`)
 - [DejaVu Sans](https://dejavu-fonts.github.io) - the in-game menu and button letters when no system font fits, and the game text's last resort (Bitstream Vera / DejaVu license, `third_party/fonts/DejaVu/LICENSE`)
@@ -327,7 +328,7 @@ this repository and not in release builds. You must provide your own legally obt
 
 EoW Recomp's own code (the recompiler tools, the runtime) is open source under the
 [MIT License](LICENSE). Third-party components keep their own licenses: ported audio renderer code (MIT, see `third_party/`), Dear ImGui (MIT),
-Vulkan Memory Allocator (MIT), SMAA (MIT), AMD FSR 1 (MIT), the Baloo 2 and BIZ UDPGothic fonts (SIL OFL 1.1), the DejaVu Sans font (Bitstream Vera / DejaVu license), SDL 3 (zlib), FFmpeg (LGPL 2.1+, linked dynamically, and statically in the iOS app), the
+Vulkan Memory Allocator (MIT), SMAA (MIT), AMD FSR 1 (MIT), the Baloo 2 and BIZ UDPGothic fonts (SIL OFL 1.1), the Hylia Serif font (free, not for profit), the DejaVu Sans font (Bitstream Vera / DejaVu license), SDL 3 (zlib), FFmpeg (LGPL 2.1+, linked dynamically, and statically in the iOS app), the
 Zig compiler (MIT; its LLVM / Clang / LLD: Apache 2.0 with LLVM exceptions; its C library headers keep their own
 licenses), the iOS kit's Mach-O linker (LLD as built by the Rust project: Apache 2.0 with LLVM exceptions), miniz
 (MIT: the iOS kit and the .ipa it makes), and the generator helper's bundled libraries listed under Credits (Unicorn
@@ -358,6 +359,7 @@ Release builds include these components; their source code for the exact version
 | libiconv (Windows: used by SDL 3) | 1.19 | LGPL 2.1+ | https://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.19.tar.gz |
 | GCC runtime: libgcc, libstdc++ (Windows) | 16.2.0 | GPL 3.0 with the GCC Runtime Library Exception | https://gcc.gnu.org/ |
 | winpthreads (Windows, mingw-w64) | 14.0.0 | MIT / BSD | https://www.mingw-w64.org/ |
+| Hylia Serif font (Beta) | 0.009 | Free, not for profit (no license file) | https://artsyomni.com/hyliaserif |
 | Baloo 2 font (SemiBold) | 1.640 | SIL OFL 1.1 | https://github.com/EkType/Baloo2 |
 | BIZ UDPGothic font (Regular, Linux) | 1.05 (Google Fonts) | SIL OFL 1.1 | https://github.com/googlefonts/morisawa-biz-ud-gothic, https://github.com/google/fonts/tree/main/ofl/bizudpgothic |
 | DejaVu Sans font (Book, Bold) | 2.37 | Bitstream Vera license (DejaVu changes public domain) | https://github.com/dejavu-fonts/dejavu-fonts/releases/tag/version_2_37 |

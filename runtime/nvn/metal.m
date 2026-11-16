@@ -2629,7 +2629,7 @@ void ui_window_init(void) {
     if (getenv("LARECOMP_HIDDEN")) wflags |= SDL_WINDOW_HIDDEN;
     // (tests) LARECOMP_NO_ACTIVATE=1: a visible window that doesn't take the focus; LARECOMP_WINDOW_POS=<x>,<y>
     if (getenv("LARECOMP_NO_ACTIVATE")) SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
-    window = SDL_CreateWindow("TriCompiled", win_w, win_h, wflags);
+    window = SDL_CreateWindow("ReTri", win_w, win_h, wflags);
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
     if (getenv("LARECOMP_WINDOW_POS")) {
         int x = 0, y = 0;
@@ -2652,7 +2652,7 @@ void ui_window_init(void) {
         static const char msg[] = "This iPhone or iPad can't run EoW Recomp: its graphics chip has no support for the "
                                   "game's texture formats (BC).";
         fprintf(stderr, "FATAL: %s (the GPU has no BC texture formats)\n", msg);
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "TriCompiled", msg, window);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ReTri", msg, window);
         exit(1);
     }
     settings_resolve_defaults(false);  // (Apple GPUs keep MetalFX as the default upscaler)
