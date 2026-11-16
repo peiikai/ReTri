@@ -1,9 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Android 13 themed icon, monochrome layer (only the alpha counts): the rift and the staff down to the near hill,
+  <!-- Android 13 themed icon, monochrome layer (only the alpha counts): the staff down to the near hill,
        as placed in ic_launcher_foreground.svg. -->
   <defs><clipPath id="above-hill"><rect x="0" y="0" width="1024" height="690"/></clipPath></defs>
   <g transform="translate(512 512) scale(0.79) translate(-512 -512)" fill="#000000">
-    <path d="M60 180 L150 214 L176 196 L196 232 L250 226 L262 204 L298 258 L344 250 L356 230 L384 282 L430 288 L446 270 L470 306 L536 334 L466 346 L452 368 L414 352 L370 378 L352 356 L310 364 L282 344 L250 372 L232 336 L188 330 L170 304 L126 300 Z"/>
     <g clip-path="url(#above-hill)">
       <g transform="translate(620 420) rotate(-6)">
         <path d="M-20 44 L20 44 L16 430 L-16 430 Z"/>

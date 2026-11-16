@@ -45,9 +45,9 @@
     <rect x="-200" y="-200" width="1450" height="1450" fill="url(#sky)"/>
     <!-- stars -->
     <g fill="#f0e8dc">
-      <circle cx="40" cy="120" r="4"/><circle cx="1000" cy="420" r="3"/><circle cx="-40" cy="520" r="3"/><circle cx="1060" cy="120" r="3"/>
+      <circle cx="40" cy="120" r="4"/><circle cx="1000" cy="420" r="3"/><circle cx="-40" cy="380" r="3"/><circle cx="1060" cy="120" r="3"/>
       <circle cx="180" cy="420" r="4"/><circle cx="260" cy="500" r="3"/><circle cx="820" cy="170" r="4"/>
-      <circle cx="880" cy="250" r="3"/><circle cx="560" cy="170" r="3"/><circle cx="160" cy="560" r="3"/>
+      <circle cx="880" cy="250" r="3"/><circle cx="560" cy="170" r="3"/><circle cx="160" cy="300" r="3"/><circle cx="300" cy="200" r="4"/><circle cx="400" cy="300" r="3"/><circle cx="220" cy="160" r="3"/>
     </g>
     <!-- the glow of the staff's orb, echoes rippling out of it -->
     <circle cx="620" cy="420" r="330" fill="url(#glow)"/>
@@ -57,13 +57,14 @@
       <circle cx="620" cy="420" r="265" stroke-width="4" opacity="0.2"/>
       <circle cx="620" cy="420" r="350" stroke-width="3" opacity="0.1"/>
     </g>
-    <!-- the rift: a tear in the sky, glowing at the edges -->
-    <path d="M-180 100 L-120 140 L-90 124 L-40 168 L60 180 L150 214 L176 196 L196 232 L250 226 L262 204 L298 258 L344 250 L356 230 L384 282 L430 288 L446 270 L470 306 L536 334 L466 346 L452 368 L414 352 L370 378 L352 356 L310 364 L282 344 L250 372 L232 336 L188 330 L170 304 L126 300 L80 316 L20 292 L-40 300 L-90 252 L-180 196 Z"
-          fill="url(#riftin)" stroke="url(#riftedge)" stroke-width="10" stroke-linejoin="round"/>
-    <g fill="#1a0c22" stroke="#d07aa8" stroke-width="4" stroke-linejoin="round">
-      <path d="M262 420 L290 404 L300 432 Z"/>
-      <path d="M380 410 L398 402 L404 420 Z"/>
-      <path d="M196 382 L214 376 L212 394 Z"/>
+    <!-- a far ridge, and a rift torn into it, glowing at the edges -->
+    <path d="M-200 650 Q-50 610 100 570 Q200 500 320 520 Q460 546 580 610 Q660 652 740 700 L740 1250 L-200 1250 Z" fill="#5a3c3e"/>
+    <path d="M168 602 L196 586 L208 596 L232 578 L252 592 L276 576 L292 590 L322 582 L344 598 L320 610 L300 606 L280 622 L258 612 L236 628 L216 616 L194 624 L184 612 Z"
+          fill="url(#riftin)" stroke="url(#riftedge)" stroke-width="7" stroke-linejoin="round"/>
+    <g fill="#1a0c22" stroke="#d07aa8" stroke-width="3" stroke-linejoin="round">
+      <path d="M232 540 L250 530 L256 548 Z"/>
+      <path d="M290 524 L302 518 L306 530 Z"/>
+      <path d="M204 554 L214 550 L214 562 Z"/>
     </g>
     <!-- hills at dusk -->
     <path d="M-200 760 Q-60 700 100 690 Q260 610 440 650 Q640 700 924 600 Q1100 540 1250 580 L1250 1250 L-200 1250 Z" fill="url(#hill)"/>
