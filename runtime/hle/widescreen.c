@@ -165,7 +165,8 @@ static uint64_t g_backdrop_hash = 0;  // set below once known
 static uint64_t g_backdrop_frame = ~0ull;
 void widescreen_backdrop_seen(uint64_t hash) {
     static const uint64_t known[] = {BACKDROP_HASHES};
-    // another game (EoW): the blurred picture behind the pause menu, a 16:9 copy (the sides would show it zoomed)
+    // another game (EoW): the blurred picture behind its menus (pause screen, echo list): boxed when it isn't drawn over the
+    // whole window (Aspect ratio not Unlocked; runtime/hle/pause_fill.c)
     static const uint64_t other[] = {0x78e8be3f9e103151ull};
     const uint64_t *k = game_other() ? other : known;
     unsigned n = game_other() ? sizeof other / sizeof other[0] : sizeof known / sizeof known[0];
@@ -188,8 +189,10 @@ static bool level_is_interior(void) {
 bool widescreen_frame_boxed(uint64_t frame) {
     static bool last;
     static uint64_t interior_until;  // keep boxing briefly after leaving: the first (dark) frames still show stale sides
-    if (game_other()) return g_indoor || g_backdrop_frame == frame;  // (another game: frames its camera doesn't draw,
-                                                                    // rt_aspect_other, and the pause menu's backdrop)
+    // (another game: frames its camera doesn't draw, rt_aspect_other, and the menus' blurred backdrop - unless that
+    // backdrop was drawn over the whole window, runtime/hle/pause_fill.c: then the menu fills the window too)
+    extern bool pause_fill_frame(uint64_t frame);
+    if (game_other()) return (g_indoor || g_backdrop_frame == frame) && !pause_fill_frame(frame);
     bool in = level_is_interior();
     if (in) interior_until = frame + 8;
     // title / file select (not in play): 16:9 screens; the title's logo glow is drawn too large in the wide image
