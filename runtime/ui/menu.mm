@@ -753,8 +753,9 @@ static void tab_display(void) {
             if (res_mode[i] == g_settings.res_mode) ri = i;
             if (res_mode[i] == g_default_res_mode) rdef = i;
         }
-        float sx, sy;
-        renderer_get_scale(&sx, &sy);
+        int rw = 0, rh = 0;  // (the 3D's size: another game's 2D may be drawn larger - output_scale.c game_3d)
+        output_scale_render_size(&rw, &rh);
+        float sx = rw / 1920.0f, sy = rh / 1080.0f;
         char d[1024];  // (in the menus' language already: the row leaves it as it is)
         snprintf(d, sizeof d,
                  g_gpu_integrated
