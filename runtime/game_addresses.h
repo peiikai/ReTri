@@ -45,6 +45,8 @@ const GameVersion *game_version_of_main(const char *main_path);
 const GameVersion *game_version_of(const char *game_dir);
 // Another game on the same engine (game_addresses/games.h) in game_dir, or NULL (LA, missing or unknown).
 const GameVersion *game_other_of(const char *game_dir);
+// Where that game's sdk module is loaded (SDK_BASE for NULL): the generator needs it before the game is selected.
+uint64_t game_other_sdk_base_of(const GameVersion *v);
 // The release label of the exefs folder exefs_dir: "1.0.1" or "1.1.0" when its main.npdm tells releases that share one
 // main program apart (by its SHA-256), else the version's label. Display and the log only. NULL: unknown version.
 const char *game_release_label(const char *exefs_dir, char *buf, size_t size);
