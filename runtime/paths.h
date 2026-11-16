@@ -8,9 +8,9 @@
 //      extracted`, the test scripts) - used as is
 //   3. the folder named in data_root.txt in the platform's folder (4), chosen on the start screen (never inside the
 //      app); asks to try again / use the default when it's missing (a drive not connected)
-//   4. macOS: ~/Library/Application Support/com.peiikai.lasrecomp (the .app bundle itself is never written to)
+//   4. macOS: ~/Library/Application Support/com.peiikai.eowrecomp (the .app bundle itself is never written to)
 //      Windows: the folder of the .exe (portable, no installer); refuses to start, with a message, if not writable
-//      Linux: $XDG_DATA_HOME/lasrecomp (~/.local/share/lasrecomp)
+//      Linux: $XDG_DATA_HOME/eowrecomp (~/.local/share/eowrecomp)
 //      LARECOMP_DATA_HOME (tests) stands in for it.
 //
 // Resources: files that ship with the app (helper programs, the window icon) - next to the executable (the
@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-#define RT_BUNDLE_ID "com.peiikai.lasrecomp"
+#define RT_BUNDLE_ID "com.peiikai.eowrecomp"
 
 void rt_paths_init(void);         // first thing in main(), after plat_init
 const char *rt_data_root(void);   // absolute

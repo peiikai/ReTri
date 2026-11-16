@@ -17,9 +17,9 @@ its vertex cache, and textures re-checked only where the game wrote. Older kerne
 `[plat] no page write tracking: ...`); `LARECOMP_WRITE_TRACKING=0` turns it off.
 The start screen asks for the folder with your own game files and sets them up.
 
-Everything the app writes lives in `~/.local/share/lasrecomp` (`$XDG_DATA_HOME/lasrecomp`): game files (`extracted/`),
+Everything the app writes lives in `~/.local/share/eowrecomp` (`$XDG_DATA_HOME/eowrecomp`): game files (`extracted/`),
 saves, seeds, settings (`larecomp.ini`), shader caches, imported fonts. Started without a terminal the log is
-`~/.local/share/lasrecomp/eowrecomp.log`, always the latest run; up to five recent runs are kept as
+`~/.local/share/eowrecomp/eowrecomp.log`, always the latest run; up to five recent runs are kept as
 `eowrecomp-backup-*.log` (from a terminal it prints there instead). `LARECOMP_DATA_ROOT=<dir>` uses
 another folder.
 
@@ -56,7 +56,7 @@ Then from the repo root:
     make -j         # -> build/eowrecomp and the game code library build/eowgame.so
 
 Run `./build/eowrecomp` from the repo root: with `extracted/` in the starting folder it uses that folder for
-everything (dev mode) instead of `~/.local/share/lasrecomp`.
+everything (dev mode) instead of `~/.local/share/eowrecomp`.
 
 `ARCH` picks the target, separately from the OS: the generated code differs per arch (aarch64 runs the guest's
 FP/SIMD as inline asm, like Apple Silicon; x86-64 lowers it to C with `-march=x86-64-v3`, like Windows). `make gen`
@@ -93,7 +93,7 @@ three launches of the AppImage itself - the start screen; a session from a test 
 and every dungeon's entrance; and a seed generated from the in-game Randomizer tab, switched to live, the save loaded
 on it, then deleted. Each step is checked in the log and by a screenshot. `build/smoke/report.txt` ends with READY FOR
 RELEASE or NOT READY; `build/smoke/sheet.png` shows every screenshot. It needs `extracted/` in the checkout and a test
-save outside git (`~/.local/share/lasrecomp-smoketest/save`, or `LARECOMP_SMOKE_SAVE`): copy `save/` from any build
+save outside git (`~/.local/share/eowrecomp-smoketest/save`, or `LARECOMP_SMOKE_SAVE`): copy `save/` from any build
 after starting a new game once.
 
 The AppImage holds `eowrecomp`, `rando-gen/`, the start screen font and the bundled libraries (SDL3,
@@ -121,13 +121,13 @@ page. It has been tested on a few ARM boards (RK3588 with a Mali GPU), so report
    `deviceName`, `driverName` and `driverInfo`.
 3. **What happened**: start screen? extraction? in game? where it stopped, any visual problems (screenshots help).
    With a controller: its model, and whether it works (the log names it: `[input] gamepad: ...`).
-4. **The log**: `~/.local/share/lasrecomp/eowrecomp.log` (or the terminal output when started from a terminal).
+4. **The log**: `~/.local/share/eowrecomp/eowrecomp.log` (or the terminal output when started from a terminal).
    A crash writes `*** signal ...` and a backtrace there; attach the whole file (or if the problem was in
    an earlier run, that run's `eowrecomp-backup-*.log`, by date modified).
 5. **A crash backtrace with gdb** when the log's isn't enough:
 
        ./LAS.Recomp-<version>-linux-aarch64.AppImage --appimage-extract    # -> squashfs-root/
-       cd ~/.local/share/lasrecomp
+       cd ~/.local/share/eowrecomp
        gdb -batch -ex 'handle SIGSEGV nostop noprint pass' -ex run -ex 'thread apply all bt 20' \
            --args ~/squashfs-root/usr/bin/eowrecomp > gdb.txt 2>&1
 

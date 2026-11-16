@@ -11,14 +11,14 @@
 # Result: build/smoke/report.txt (PASS / FAIL per check), build/smoke/sheet.png (every screenshot, labelled) and the
 # screenshots in build/smoke/shots/. Exit status 0 = ready for release.
 # Uses this checkout's extracted/ (as the folder a player picks) and a test save that is never in git: $LARECOMP_SMOKE_SAVE (a save folder with
-# save_0/, default ~/.local/share/lasrecomp-smoketest/save). Make one by starting a new game once (any build, data
-# folder's save/) and copying that save/ there. Nothing in ~/.local/share/lasrecomp is used or changed.
+# save_0/, default ~/.local/share/eowrecomp-smoketest/save). Make one by starting a new game once (any build, data
+# folder's save/) and copying that save/ there. Nothing in ~/.local/share/eowrecomp is used or changed.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 REPO=$PWD
 VERSION=$(sed -n 's/^#define LARECOMP_VERSION "\(.*\)"/\1/p' runtime/ui/launcher.mm)
 APP=$(realpath "${1:-build/dist/EoW Recomp-$VERSION-linux-x86_64.AppImage}")
-SAVE=${LARECOMP_SMOKE_SAVE:-$HOME/.local/share/lasrecomp-smoketest/save}
+SAVE=${LARECOMP_SMOKE_SAVE:-$HOME/.local/share/eowrecomp-smoketest/save}
 O=$REPO/build/smoke
 [ -x "$APP" ] || { echo "smoketest: no AppImage at $APP (make appimage)"; exit 2; }
 [ -d "$SAVE/save_0" ] || { echo "smoketest: no test save in $SAVE (see the top of this script)"; exit 2; }

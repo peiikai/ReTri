@@ -134,10 +134,10 @@ static void default_home(char *root, size_t n) {
     const char *ext = SDL_GetAndroidExternalStoragePath();
     snprintf(root, n, "%s", ext ? ext : SDL_GetAndroidInternalStoragePath());
 #elif defined(__linux__)
-    // (the AppImage is read-only): $XDG_DATA_HOME/lasrecomp, ~/.local/share/lasrecomp by default
+    // (the AppImage is read-only): $XDG_DATA_HOME/eowrecomp, ~/.local/share/eowrecomp by default
     const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME");
-    if (xdg && *xdg == '/') snprintf(root, n, "%s/lasrecomp", xdg);
-    else snprintf(root, n, "%s/.local/share/lasrecomp", home && *home ? home : "/tmp");
+    if (xdg && *xdg == '/') snprintf(root, n, "%s/eowrecomp", xdg);
+    else snprintf(root, n, "%s/.local/share/eowrecomp", home && *home ? home : "/tmp");
 #elif PLAT_IOS
     snprintf(root, n, "%s", plat_ios_documents());  // (the app's folder in Files; the pointer file lives there too)
 #else

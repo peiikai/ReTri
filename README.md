@@ -205,9 +205,9 @@ Vulkan Memory Allocator from your distribution, Python 3.12. Packages, cross bui
    checks the x86-64 AppImage before a release.
 
 Where files live (game files, saves, seeds, settings and logs):
-- macOS: `~/Library/Application Support/com.peiikai.lasrecomp/`
+- macOS: `~/Library/Application Support/com.peiikai.eowrecomp/`
 - Windows: next to `eowrecomp.exe`, so keep the `EoW Recomp` folder somewhere writable (not Program Files).
-- Linux: `~/.local/share/lasrecomp/`
+- Linux: `~/.local/share/eowrecomp/`
 - Android: `Android/data/com.lasrecomp.android/files` in the phone's storage.
 - iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > EoW Recomp).
 - You can move it to another folder or drive in Settings > System > Data folder.
