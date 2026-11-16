@@ -1988,6 +1988,23 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
             set_reg(c, d, t);
         } else if (c->glsl && maxwell_glsl_quad_deriv && c->stage == STAGE_FRAGMENT) {
             set_reg(c, d, R(a));  // (no subgroups in fragment shaders here) any other shuffle: the lane's own value
+        } else if (c->glsl && c->stage == STAGE_COMPUTE) {
+            // (as the Metal compute branch below: C's clamp and segment mask; a source lane out of range reads the
+            // lane's own value and clears Pd - EoW's reductions test Pd before adding.) Lanes are counted within a
+            // 32-lane warp, so a 64-wide subgroup (AMD) shuffles within its own half. Subgroups narrower than 32
+            // (some Intel compute) can't hold a warp: not handled.
+            char cb2[32];
+            const char *cv = bits(w, 29, 1) ? (sprintf(cb2, "%uu", (unsigned)bits(w, 34, 13)), cb2) : R((int)bits(w, 39, 8));
+            c->uses_lane = true;
+            sp(&c->body, "    { uint wl_ = lane & 31u, sb_ = %s & 31u, sc_ = %s, sg_ = (sc_ >> 8u) & 31u, mn_ = wl_ & sg_, "
+                         "mx_ = mn_ | (sc_ & 31u & ~sg_);\n", bv, cv);
+            static const char *const jx[] = {"mn_ | (sb_ & ~sg_)", "wl_ - sb_", "wl_ + sb_", "wl_ ^ sb_"};
+            sp(&c->body, "      uint j_ = %s; bool ok_ = %s;\n", jx[mode], mode == 1 ? "int(j_) >= int(mx_)" : "j_ <= mx_");
+            sp(&c->body, "      uint v_ = subgroupShuffle(%s, (lane & ~31u) | (ok_ ? j_ : wl_));\n", R(a));
+            set_reg(c, d, "v_");
+            if (pd != PT) { c->pred_used[pd] = 1; sp(&c->body, "    p%d = ok_;\n", pd); }
+            sp(&c->body, "    }\n");
+            pd = PT;
         } else if (c->glsl) {  // a quad xor (lane mask < 4) is the subgroup xor within the quad
             static const char *const fn[] = {"subgroupShuffle", "subgroupShuffleUp", "subgroupShuffleDown", "subgroupShuffleXor"};
             sprintf(t, "%s(%s, uint(%s))", fn[mode], R(a), bv);
