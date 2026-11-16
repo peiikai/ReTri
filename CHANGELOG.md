@@ -16,6 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   control movable and resizable in the layout editor. A controller hides them, a touch brings them back.
 
 ### Changed
+- Button layout "Xbox / PlayStation" swaps the bottom and right buttons on every controller, Nintendo-style ones too.
 - The window and error dialogs are titled "TriCompiled", the project's new name.
 - The app is named EoW Recomp: binaries `eowrecomp` and `eowgame.dylib`, logs `eowrecomp.log`, and the name in
   menus, window titles and docs. Env vars stay `LARECOMP_*`.
