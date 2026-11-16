@@ -17,9 +17,10 @@
 #include "../renderer.h"
 #include "../texpatch.h"
 #include "../output_scale.h"
+#include "../../game_addresses.h"
 
 // ================================================================== formats
-typedef struct { VkFormat vf; uint8_t expand_rgb, alpha_one; } VkFmt;
+typedef struct { VkFormat vf; uint8_t expand_rgb, alpha_one, swap_rb; } VkFmt;
 
 // DEPTH24_STENCIL8 as itself where the GPU has it for everything the game does with depth (NVIDIA, Intel): half the
 // bytes of D32_SFLOAT_S8_UINT (4 instead of 8 per pixel) for every depth test, clear and copy - the game copies its
@@ -90,7 +91,8 @@ static VkFmt fmt_of(uint32_t f) {
     case 0x39: return (VkFmt){VK_FORMAT_R4G4B4A4_UNORM_PACK16};   // Metal ABGR4Unorm
     case 0x3A: return (VkFmt){VK_FORMAT_R5G6B5_UNORM_PACK16};     // Metal B5G6R5Unorm
     case 0x3B: return (VkFmt){VK_FORMAT_R5G5B5A1_UNORM_PACK16};   // Metal A1BGR5Unorm
-    case 0x3C: return (VkFmt){VK_FORMAT_R5G6B5_UNORM_PACK16};
+    case 0x3C: return (VkFmt){VK_FORMAT_R5G6B5_UNORM_PACK16, .swap_rb = 1};  // (as metal.m: NVN packs R / B the other way
+    // round; an EoW HUD mask, the hearts, has its fill in the channel read as blue. Swapped in the view's swizzle, other games)
     case 0x3D: return (VkFmt){VK_FORMAT_A2B10G10R10_UNORM_PACK32};
     case 0x3E: return (VkFmt){VK_FORMAT_A2B10G10R10_UINT_PACK32};
     case 0x3F: return (VkFmt){VK_FORMAT_B10G11R11_UFLOAT_PACK32};
@@ -1024,6 +1026,8 @@ VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool 
         if (c[0] || c[1] || c[2] || c[3]) {  // never set: identity
             if (fmt_of(t->format).alpha_one)
                 for (int i = 0; i < 4; i++) if (c[i] == 5) c[i] = 1;
+            if (game_other() && fmt_of(t->format).swap_rb)  // (as renderer.m apply_swizzle)
+                for (int i = 0; i < 4; i++) c[i] = c[i] == 2 ? 4 : c[i] == 4 ? 2 : c[i];
             // NVN swizzle 0 zero, 1 one, 2..5 r,g,b,a == VkComponentSwizzle - 1
             sw = (VkComponentMapping){(VkComponentSwizzle)(c[0] + 1), (VkComponentSwizzle)(c[1] + 1), (VkComponentSwizzle)(c[2] + 1),
                                       (VkComponentSwizzle)(c[3] + 1)};
