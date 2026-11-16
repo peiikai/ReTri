@@ -339,9 +339,17 @@ $(B)/rt/zipfile.o: RTFLAGS += -I$(MINIZ)
 # Python: tools/venv (macOS, Linux: bin/python, Windows: Scripts/python.exe)
 PY := $(firstword $(wildcard tools/venv/bin/python) $(wildcard tools/venv/Scripts/python.exe))
 
+# GAME=eow (the default when GEN names it, as GEN=generated-eow): EoW's sdk loads higher than LA's
+# (runtime/game_addresses/games.h). EXTRACTED: the folder with exefs/ (default ./extracted; an absolute path such as
+# C:/games/eow works on Windows too, as the generator's Python reads it).
+GAME      ?= $(if $(findstring eow,$(GEN)),eow,la)
+EXTRACTED ?= extracted
+GEN_XD   := $(if $(or $(filter /%,$(EXTRACTED)),$(findstring :,$(EXTRACTED))),$(EXTRACTED),../$(EXTRACTED))
+GEN_SDK_BASE := $(if $(filter eow,$(GAME)),0x7008000000,0x7004000000)
+GENGAME  := $(if $(filter la,$(GAME)),,--game $(GAME))
 gen:
-	cd tools && ../$(PY) gen.py sdk ../extracted/exefs/sdk 0x7004000000 ../$(GEN)/sdk --hle ../runtime/hle/hle_symbols.txt $(GENSIMD)
-	cd tools && ../$(PY) gen.py main ../extracted/exefs/main 0x7000000000 ../$(GEN)/main $(GENSIMD)
+	cd tools && ../$(PY) gen.py sdk "$(GEN_XD)/exefs/sdk" $(GEN_SDK_BASE) ../$(GEN)/sdk --hle ../runtime/hle/hle_symbols.txt $(GENSIMD) $(GENGAME)
+	cd tools && ../$(PY) gen.py main "$(GEN_XD)/exefs/main" 0x7000000000 ../$(GEN)/main $(GENSIMD) $(GENGAME)
 
 gen-objs: $(GEN_OBJ)
 
