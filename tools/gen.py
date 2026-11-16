@@ -591,6 +591,15 @@ def main():
                 return ('{ extern void rt_other_request_holder(uint64_t); rt_other_request_holder(c->x[0]); c->x[20] = c->x[0]; }'
                         f'  /* {a:#x}: mov x20, x0 (level-jump request processor) */')
             PATCHES[0x700160f804] = _eow_request
+            # (blur removal, runtime/hle/qol.c) the renderer's per-frame set-up makes the tilt-shift object
+            # (renderer +0x600) once, the first time it's reached, as LA's main+0x1071220 does: name copy at +0x58,
+            # uniform buffer at +0x50. Its `add x19, x23, #0x600` hands qol.c the object.
+            def _eow_tilt(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0x911802f3, hex(w)  # add x19, x23, #0x600
+                return ('{ extern void rt_tilt_obj(uint64_t); c->x[19] = c->x[23] + 0x600; rt_tilt_obj(c->x[19]); }'
+                        f'  /* {a:#x}: add x19, x23, #0x600 (tilt-shift set-up: blur removal) */')
+            PATCHES[0x70027802e8] = _eow_tilt
             # (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
             # `movz wD, #0x8e39; movk wD, #0x3fe3, lsl #16`: the movk gets the runtime's aspect instead
             eow_aspect = [0x700033d32c, 0x700033e6f8, 0x7000348b70, 0x7000351e20, 0x7000c2bd3c, 0x7000c2c8b4,

@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 - Unlocked aspect ratio: the camera fills wide windows.
 - Logging of shader records the shipped list lacks, once per run.
+- "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
 
 ### Changed
 - The app is named EoW Recomp: binaries `eowrecomp` and `eowgame.dylib`, logs `eowrecomp.log`, and the name in

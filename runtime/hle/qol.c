@@ -202,7 +202,8 @@ bool rt_no_buff_actor(uint32_t type) {
 // of that name each frame; under any other name the shader gets no parameters and draws no blur (LAS-Randomizer
 // 'blur-removal', patch by theboy181, renames the string in the module - which only took effect at the next start,
 // the copy being made once). tools/patches.py TILT_INIT_SITE hands us the object; its copy's first letter is
-// switched P <-> X as the setting changes, live.
+// switched P <-> X as the setting changes, live. EoW has the same object (renderer +0x600, hooked in tools/gen.py),
+// but its buffer keeps the name pointer at +0x68.
 static uint64_t g_tilt_obj;
 static int g_tilt_applied = -1;  // blur removal as last applied (-1: not yet)
 RT_ON_RESET(qol_reset) { g_tilt_obj = 0; g_tilt_applied = -1; }  // (reboot: a new post-process)
@@ -211,7 +212,7 @@ void rt_tilt_obj(uint64_t obj) { g_tilt_obj = obj; g_tilt_applied = -1; }
 
 static bool apply_tilt(int removed) {  // false: not set up yet (or not the name we know)
     uint64_t buf = g_tilt_obj ? LD64(g_tilt_obj + 0x50) : 0;
-    char *name = buf ? (char *)(uintptr_t)LD64(buf + 0x60) : NULL;
+    char *name = buf ? (char *)(uintptr_t)LD64(buf + (game_other() ? 0x68 : 0x60)) : NULL;
     if (!name || memcmp(name + 1, "FXTiltShiftParam", 17) || (name[0] != 'P' && name[0] != 'X')) return false;
     name[0] = removed ? 'X' : 'P';
     return true;
