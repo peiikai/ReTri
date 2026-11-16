@@ -352,14 +352,20 @@ static std::string version_hint(const std::string &exefs) {
 // The copied game files alone ("" = there), without the game code built from them
 static std::string check_copied_files(const std::string &root) {
     if (!file_exists(root + "/exefs/main")) return LN("No game files yet");
-    if (!game_version_of(root.c_str())) {
+    // another game on the engine (EoW): selected now, so the start screen and its Settings know it (game_other)
+    const GameVersion *other = game_version_of(root.c_str()) ? NULL : game_other_of(root.c_str());
+    if (other && !game_other()) {
+        char why[512];
+        game_version_select(root.c_str(), why, sizeof why);
+    }
+    if (!game_version_of(root.c_str()) && !other) {
         refused_main(root + "/exefs");  // (the log line)
         return LN("Wrong version of the game");
     }
     if (!file_exists(root + "/romfs/region_common")) return incomplete(0);
     if (g_romfs_count < 0) {
         g_romfs_bytes = 0;
-        const GameVersion *v = game_version_of(root.c_str());
+        const GameVersion *v = game_version_of(root.c_str());  // (another game: NULL, no file list or totals)
         RomfsCheckWalk check = {game_romfs_check_begin(v), root.size() + strlen("/romfs/"), 0, root.c_str(), 0};
         g_romfs_count = count_files(root + "/romfs", 0, &g_romfs_bytes, &check);
         int missing = game_romfs_check_end(check.check);
@@ -505,9 +511,10 @@ static void find_game(const std::string &dir, std::string &exefs, std::string &r
 static bool build_id_ok(const std::string &exefs) {
     char label[32];
     const char *v = game_release_label(exefs.c_str(), label, sizeof label);
-    if (v) fprintf(stderr, "[launcher] game files: version %s\n", v);
+    const GameVersion *o = v ? NULL : game_other_of(exefs.substr(0, exefs.rfind('/')).c_str());  // (EoW)
+    if (v || o) fprintf(stderr, "[launcher] game files: version %s\n", v ? v : o->label);
     else refused_main(exefs);
-    return v != NULL;
+    return v || o;
 }
 // Wrong version: the failure, its hint with the build ID
 static void set_version_failure(const std::string &exefs) {
@@ -1280,11 +1287,16 @@ static void draw_folder_example(float w) {
 }
 #endif
 
+// Another game on the engine (game_other) gets its own look on the start screen: the settings menu's palette
+// (runtime/ui/plastic.mm theme_eow) - plum-brown shade, cream text, gold to orange highlights
+static ImU32 eow_or(ImU32 la, ImU32 other) { return game_other() ? other : la; }
+
 // Start-screen text: a soft drop shadow, then the text with a top-to-bottom colour gradient (top == bottom: flat)
 static void text_fx(ImDrawList *dl, ImFont *font, float size, ImVec2 p, ImU32 top, ImU32 bottom, const char *t,
                     float shadow) {
     if (shadow > 0)
-        for (float d : {shadow, shadow * 0.5f}) dl->AddText(font, size, ImVec2(p.x + d, p.y + d), IM_COL32(4, 8, 30, 110), t);
+        for (float d : {shadow, shadow * 0.5f})
+            dl->AddText(font, size, ImVec2(p.x + d, p.y + d), eow_or(IM_COL32(4, 8, 30, 110), IM_COL32(20, 12, 16, 130)), t);
     int v0 = dl->VtxBuffer.Size;
     dl->AddText(font, size, p, top, t);
     if (top == bottom) return;
@@ -1324,7 +1336,8 @@ static void menu_band(ImDrawList *dl, ImVec2 at, ImVec2 sz) {
         float half = sz.y * 0.62f;
         y1 = c - half, y2 = c + half, y0 = y1 - f, y3 = y2 + f;
     }
-    ImU32 c = IM_COL32(6, 10, 34, 150), g = IM_COL32(255, 190, 80, 34), n = IM_COL32(6, 10, 34, 0), ng = IM_COL32(255, 190, 80, 0);
+    ImU32 c = eow_or(IM_COL32(6, 10, 34, 150), IM_COL32(26, 18, 22, 150)), g = IM_COL32(255, 190, 80, 34),
+          n = c & ~IM_COL32_A_MASK, ng = IM_COL32(255, 190, 80, 0);
     for (int pass = 0; pass < 2; pass++) {  // dark band, then the glow over it
         ImU32 a = pass ? g : c, z = pass ? ng : n;
         dl->AddRectFilledMultiColor(ImVec2(x0, y1), ImVec2(x1, y2), a, a, a, a);
@@ -1351,10 +1364,12 @@ static bool menu_item(const char *label, bool enabled, bool *hovered = NULL, con
     bool hot = ImGui::IsItemFocused() || ImGui::IsItemHovered();
     ImGui::PopID();
     if (hovered) *hovered = hot;
-    ImU32 col = !enabled ? IM_COL32(170, 175, 200, 140) : hot ? IM_COL32(255, 214, 64, 255) : IM_COL32(250, 250, 255, 255);
+    ImU32 col = !enabled ? eow_or(IM_COL32(170, 175, 200, 140), IM_COL32(158, 146, 134, 140))
+              : hot ? eow_or(IM_COL32(255, 214, 64, 255), IM_COL32(240, 208, 112, 255))
+                    : eow_or(IM_COL32(250, 250, 255, 255), IM_COL32(240, 232, 220, 255));
     ImDrawList *dl = ImGui::GetWindowDrawList();
     if (hot && enabled) menu_band(dl, at, sz);
-    ImU32 col_b = hot && enabled ? IM_COL32(255, 160, 50, 255) : col;
+    ImU32 col_b = hot && enabled ? eow_or(IM_COL32(255, 160, 50, 255), IM_COL32(232, 150, 74, 255)) : col;
     if (split && enabled) {
         std::string head(label, split - label);
         text_fx(dl, ImGui::GetFont(), ImGui::GetFontSize(), at, col, col_b, head.c_str(), sz.y * 0.05f);
@@ -2537,6 +2552,19 @@ extern "C" void launcher_run(const char *root) {
                 bg->AddImage(BG_TEXID, ImVec2(0, 0), ds, uv0, uv1);
             } else if (update_only) {
                 bg->AddRectFilled(ImVec2(0, 0), ds, IM_COL32(40, 40, 40, 255));
+            } else if (game_other()) {  // plum-brown, a bronze glow at the upper right with slow echoes rippling out
+                bg->AddRectFilledMultiColor(ImVec2(0, 0), ds, IM_COL32(58, 42, 48, 255), IM_COL32(90, 66, 50, 255),
+                                            IM_COL32(31, 24, 26, 255), IM_COL32(36, 26, 30, 255));
+                ImVec2 c(ds.x * 0.78f, ds.y * 0.3f);
+                float r = ds.y * 0.75f;
+                for (int i = 0; i < 48; i++)  // (soft: stacked faint discs, thin steps so no bands show)
+                    bg->AddCircleFilled(c, r * (1 - i / 48.0f), IM_COL32(232, 168, 90, 3), 96);
+                float t = (float)ImGui::GetTime();
+                for (int i = 0; i < 5; i++) {
+                    float k = fmodf(t / 9.0f + i / 5.0f, 1.0f);  // 0..1: an echo's life
+                    int a = (int)(46 * sinf(k * 3.14159265f));
+                    bg->AddCircle(c, r * (0.12f + 1.1f * k), IM_COL32(240, 216, 144, a), 128, 1.5f * s);
+                }
             } else {
                 bg->AddRectFilledMultiColor(ImVec2(0, 0), ds, IM_COL32(18, 34, 40, 255), IM_COL32(40, 70, 64, 255),
                                             IM_COL32(12, 20, 24, 255), IM_COL32(8, 12, 16, 255));
@@ -2544,11 +2572,12 @@ extern "C" void launcher_run(const char *root) {
             if (!update_only) {  // a shadow banner fading in from the left behind the menu, and one from the right behind the version
                 const float stops[][2] = {{0.0f, 225}, {0.3f, 215}, {0.44f, 165}, {0.55f, 95}, {0.64f, 35}, {0.74f, 0}};
                 for (int i = 0; i + 1 < (int)(sizeof stops / sizeof stops[0]); i++) {
-                    ImU32 a = IM_COL32(6, 10, 34, (int)stops[i][1]), b = IM_COL32(6, 10, 34, (int)stops[i + 1][1]);
+                    ImU32 sh = eow_or(IM_COL32(6, 10, 34, 0), IM_COL32(26, 18, 22, 0));
+                    ImU32 a = sh | (ImU32)stops[i][1] << IM_COL32_A_SHIFT, b = sh | (ImU32)stops[i + 1][1] << IM_COL32_A_SHIFT;
                     bg->AddRectFilledMultiColor(ImVec2(ds.x * stops[i][0], 0), ImVec2(ds.x * stops[i + 1][0], ds.y), a, b, b, a);
                 }
                 float y0 = ds.y - 190 * s, y1 = ds.y - 135 * s, y2 = ds.y - 40 * s, y3 = ds.y, x0r = ds.x * 0.5f;
-                ImU32 c0 = IM_COL32(6, 10, 34, 0), c1 = IM_COL32(6, 10, 34, 235);
+                ImU32 c0 = eow_or(IM_COL32(6, 10, 34, 0), IM_COL32(26, 18, 22, 0)), c1 = c0 | IM_COL32(0, 0, 0, 235);
                 bg->AddRectFilledMultiColor(ImVec2(x0r, y0), ImVec2(ds.x, y1), c0, c0, c1, c0);  // (feathered top)
                 bg->AddRectFilledMultiColor(ImVec2(x0r, y1), ImVec2(ds.x, y2), c0, c1, c1, c0);
                 bg->AddRectFilledMultiColor(ImVec2(x0r, y2), ImVec2(ds.x, y3), c0, c1, c0, c0);  // (feathered bottom)
@@ -2569,10 +2598,11 @@ extern "C" void launcher_run(const char *root) {
             ImGui::SetCursorPos(ImVec2(x0, 120 * s));
             ImGui::PushFont(g_font_title);
             if (page == MAIN) {  // gold to orange, shadowed (not behind the Settings / System windows)
-                const char *t = "EoW Recompiled";
+                const char *t = game_other() ? "TriCompiled" : "EoW Recompiled";
                 ImVec2 p = ImGui::GetCursorScreenPos();
-                text_fx(ImGui::GetWindowDrawList(), ImGui::GetFont(), ImGui::GetFontSize(), p, IM_COL32(255, 232, 120, 255),
-                        IM_COL32(255, 138, 48, 255), t, 3 * s);
+                text_fx(ImGui::GetWindowDrawList(), ImGui::GetFont(), ImGui::GetFontSize(), p,
+                        eow_or(IM_COL32(255, 232, 120, 255), IM_COL32(240, 216, 144, 255)),
+                        eow_or(IM_COL32(255, 138, 48, 255), IM_COL32(232, 150, 74, 255)), t, 3 * s);
                 ImGui::Dummy(ImGui::CalcTextSize(t));
             }
             ImGui::PopFont();
@@ -2659,7 +2689,8 @@ extern "C" void launcher_run(const char *root) {
                 }
                 const char *name = strstr(label, "\xe2\x80\xb9") + 4, *name_end = strstr(label, " \xe2\x80\xba");
                 rando_pressed = menu_item(label, status.empty(), &hov, name,
-                                          choice ? IM_COL32(250, 250, 255, 255) : IM_COL32(246, 232, 176, 255),
+                                          choice ? eow_or(IM_COL32(250, 250, 255, 255), IM_COL32(240, 232, 220, 255))
+                                                 : eow_or(IM_COL32(246, 232, 176, 255), IM_COL32(216, 178, 124, 255)),
                                           name_end);  // (the choice keeps its colour when hovered: a seed white, "New
                                                       //  Seed" vanilla cream; the arrows stay white)
                 ImGui::SetWindowFontScale(1.0f);
@@ -3051,7 +3082,7 @@ extern "C" void launcher_run(const char *root) {
                     const char *v = game_release_label((g_root + "/exefs").c_str(), label, sizeof label);
                     version_label = v ? v : "?";
                 }
-                ImGui::TextColored(ImVec4(0.66f, 0.76f, 0.98f, 1), L("Nintendo Switch  \xc2\xb7  v%s"), version_label.c_str());
+                ImGui::TextColored(game_other() ? ImVec4(0.85f, 0.70f, 0.49f, 1) : ImVec4(0.66f, 0.76f, 0.98f, 1), L("Nintendo Switch  \xc2\xb7  v%s"), version_label.c_str());
             } else {
                 ImGui::TextColored(ImVec4(1, 0.72f, 0.4f, 1), "!  %s", busy ? L("Setting up the game files...") : shown(status).c_str());
                 ImGui::SetCursorPosX(x0);
@@ -3084,14 +3115,14 @@ extern "C" void launcher_run(const char *root) {
                 ImFont *font = ImGui::GetFont();
                 float fs = ImGui::GetFontSize(), right = ImGui::GetWindowPos().x + ds.x - fmaxf(60 * s, safe_r + 30 * s);
                 auto text = [&](ImVec2 p, float size, ImU32 col, const char *t, bool bold) {
-                    for (float d : {2.5f, 1.5f, 0.8f}) dl->AddText(font, size, ImVec2(p.x + d * s, p.y + d * s), IM_COL32(4, 8, 30, 150), t);
+                    for (float d : {2.5f, 1.5f, 0.8f}) dl->AddText(font, size, ImVec2(p.x + d * s, p.y + d * s), eow_or(IM_COL32(4, 8, 30, 150), IM_COL32(20, 12, 16, 150)), t);
                     dl->AddText(font, size, p, col, t);
                     if (bold) dl->AddText(font, size, ImVec2(p.x + 0.7f * s, p.y), col, t);
                 };
                 std::string ver = tag_label(LARECOMP_VERSION, true);
                 float vs = fs * 1.4f, y = ImGui::GetWindowPos().y + ds.y - 134 * s - safe_b;
                 ImVec2 vsz = font->CalcTextSizeA(vs, FLT_MAX, 0, ver.c_str());
-                text(ImVec2(right - vsz.x, y), vs, IM_COL32(255, 255, 255, 255), ver.c_str(), false);
+                text(ImVec2(right - vsz.x, y), vs, eow_or(IM_COL32(255, 255, 255, 255), IM_COL32(240, 232, 220, 255)), ver.c_str(), false);
                 pthread_mutex_lock(&g_update_lock);
                 std::string upd = g_update_tag;
                 pthread_mutex_unlock(&g_update_lock);
@@ -3103,13 +3134,15 @@ extern "C" void launcher_run(const char *root) {
                     float wp = font->CalcTextSizeA(fs, FLT_MAX, 0, pre.c_str()).x;
                     ImVec2 lsz = font->CalcTextSizeA(fs, FLT_MAX, 0, link.c_str());
                     ImVec2 lp(right - lsz.x, y + vsz.y + 2 * s);
-                    text(ImVec2(lp.x - wp, lp.y), fs, IM_COL32(200, 214, 250, 255), pre.c_str(), false);
+                    text(ImVec2(lp.x - wp, lp.y), fs, eow_or(IM_COL32(200, 214, 250, 255), IM_COL32(216, 178, 124, 255)), pre.c_str(), false);
                     ImGui::SetCursorScreenPos(lp);
                     bool click = ImGui::InvisibleButton("update", lsz);
                     bool hover = ImGui::IsItemHovered();
                     // the menu's hover colours (yellow to orange), lighter while the link itself is hovered
-                    ImU32 col = hover ? IM_COL32(255, 238, 150, 255) : IM_COL32(255, 214, 64, 255);
-                    ImU32 col_b = hover ? IM_COL32(255, 196, 110, 255) : IM_COL32(255, 160, 50, 255);
+                    ImU32 col = hover ? eow_or(IM_COL32(255, 238, 150, 255), IM_COL32(248, 228, 160, 255))
+                                      : eow_or(IM_COL32(255, 214, 64, 255), IM_COL32(240, 208, 112, 255));
+                    ImU32 col_b = hover ? eow_or(IM_COL32(255, 196, 110, 255), IM_COL32(240, 184, 120, 255))
+                                        : eow_or(IM_COL32(255, 160, 50, 255), IM_COL32(232, 150, 74, 255));
                     text_fx(dl, font, fs, lp, col, col_b, link.c_str(), 1.5f * s);
                     text_fx(dl, font, fs, ImVec2(lp.x + 0.7f * s, lp.y), col, col_b, link.c_str(), 0);  // (faux bold)
                     if (hover) {
