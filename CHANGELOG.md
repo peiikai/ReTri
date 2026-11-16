@@ -14,7 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Touch controls for EoW: the whole Switch pad on screen (stick, D-pad, A B X Y, L R ZL ZR, + and -), each
   control movable and resizable in the layout editor. A controller hides them, a touch brings them back.
 - The EoW touch controls look like the inventory screen's background (its felt and colour, the item slots'
-  edges, the cursor's corners when pressed), laid out as in LAS. Y shows the echo or item on the HUD's Y slot.
+  edges, see-through and lit when pressed as in LAS), laid out as in LAS. Y shows the echo or item on the HUD's Y slot.
 
 ### Changed
 - The window and error dialogs are titled "TriCompiled", the project's new name.

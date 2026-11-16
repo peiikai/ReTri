@@ -810,8 +810,9 @@ static bool dpad_disc(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly,
 // the D-pad's cross). The fill: the felt the screen is made of (MatCloth_00^w) with its faint pinwheel facets
 // (MainBGNormal_00+w, a normal map, lit from the top left), both from the player's GameMain.arc, scaled so its average
 // is the background's colour in the running game (45, 35, 30: sampled from a 1280 x 720 screenshot of the Items page,
-// away from the slots). The edge: the item slots' 1-pixel grey line over a darker one. Pressed: the cursor's corner
-// brackets (gold above, green below). 0: the textures aren't there (LA's look's fallback: the blue bubbles).
+// away from the slots). The edge: the item slots' 1-pixel grey line over a darker one. See-through as LA's bubbles
+// (the body at 0.72 of the opacity setting, nearly solid while pressed); pressed, lit: a warm glow and a pale edge.
+// 0: the textures aren't there (LA's look's fallback: the blue bubbles).
 static const int kFill = 512;  // (the fill's size: texels drawn one per 1080p pixel)
 static ImTextureID eow_fill_tex(void) {
     static int state;
@@ -854,22 +855,24 @@ static const ImU32 kSlotIn = IM_COL32(36, 28, 25, 255);  // (inside an item slot
 static bool eow_disc(ImDrawList *dl, ImVec2 c, float r, bool on, float a, float th, bool sel) {
     ImTextureID t = eow_fill_tex();
     if (!t) return false;
-    a = fminf(1, 0.55f + 0.5f * a);  // (mostly solid: 0.85 at the opacity setting's default)
+    a = fmaxf(a, 0.55f);  // (as the bubbles: the opacity setting fades them, never to washed out)
+    float fa = (on ? 0.95f : 0.72f) * a;
     float span = fminf(2 * r / th, (float)kFill) / kFill;  // (one texel per 1080p pixel; each button its own patch)
     float u = fmodf(fabsf(c.x / th) * 0.61f, (1 - span) * kFill) / kFill, v = fmodf(fabsf(c.y / th) * 0.61f, (1 - span) * kFill) / kFill;
-    dl->AddCircleFilled(ImVec2(c.x, c.y + 3 * th), r + 1.5f * th, col(0, 0, 0, 0.35f * a), 64);  // (a soft drop)
+    dl->AddCircleFilled(ImVec2(c.x, c.y + 3 * th), r + 1.5f * th, col(0, 0, 0, 0.30f * a), 64);  // (a soft drop)
     dl->AddImageRounded(t, ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r), ImVec2(u, v), ImVec2(u + span, v + span),
-                        col(255, 255, 255, a), r);
-    ImU32 shade = (kSlotShade & 0x00FFFFFF) | ((ImU32)(255 * a) << 24), edge = (kSlotEdge & 0x00FFFFFF) | ((ImU32)(255 * a) << 24);
-    dl->AddCircle(c, r - 0.5f * th, shade, 64, 2.0f * th);
-    dl->AddCircle(c, r - 2.0f * th, edge, 64, 1.5f * th);
-    ImVec2 p0(c.x - r, c.y - r), p1(c.x + r, c.y + r);
-    if (on || sel) plastic_brackets(dl, p0, p1, th * (sel ? 1.4f : 1.0f));
+                        col(255, 255, 255, fa), r);
+    if (on) {  // lit: a warm glow from the middle and a pale edge
+        dl->AddCircleFilled(c, r * 0.96f, col(255, 236, 190, 0.16f), 64);
+        dl->AddCircleFilled(c, r * 0.62f, col(255, 236, 190, 0.12f), 48);
+    }
+    dl->AddCircle(c, r - 0.5f * th, col(30, 22, 20, 0.80f * a), 64, 2.0f * th);
+    dl->AddCircle(c, r - 2.0f * th, on ? col(240, 222, 176, 1) : col(65, 62, 61, 0.95f * a), 64, (on ? 2.5f : 1.5f) * th);
+    if (sel) dl->AddCircle(c, r * 1.02f, col(236, 194, 84, 1), 64, 5.0f * th);  // (the layout editor's selection, as LA's)
     return true;
 }
 
-// As LA's: the stick's eight compass points pressed into its disc and a small disc for the knob, lit (the brackets)
-// while it's held; the D-pad's cross on the disc, here in the slots' darker inside with their grey edge, the arrows in
+// As LA's: the stick's eight compass points pressed into its disc and a small disc for the knob, lit while it's held; the D-pad's cross on the disc, here in the slots' darker inside with their grey edge, the arrows in
 // the menu's cream and the arms held down in the cursor's gold.
 static bool eow_compass(ImDrawList *dl, ImVec2 c, float r, ImVec2 knob, float a, float th, bool sel) {
     if (!eow_disc(dl, c, r, false, a, th, sel)) return false;
