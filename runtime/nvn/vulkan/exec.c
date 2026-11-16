@@ -646,7 +646,9 @@ static void overlap_clear(void) {  // (a full wait was made: everything queued s
     pthread_mutex_unlock(&seq_lock);
 }
 
+static bool cs_since_flush;  // (exec_list, render thread) a compute dispatch was recorded since the last flush
 void renderer_flush(void) {
+    cs_since_flush = false;
     renderer_submit();
     if (!wait_why) wait_why = "flush";
     vk_wait_seq(submit_seq);
@@ -8742,9 +8744,52 @@ static void exec_list(uint64_t handle, int depth) {
         case CMD_DISPATCH:
             if (g_interp_replaying) break;  // (a replayed frame: the frame's compute results are already there)
             dispatch_compute((uint32_t)r->x[0], (uint32_t)r->x[1], (uint32_t)r->x[2]);
+            cs_since_flush = true;
             break;
         case CMD_DRAW_ARRAYS: draw(r, false); break;
         case CMD_DRAW_ELEMENTS: draw(r, true); break;
+        case CMD_DRAW_ARRAYS_INDIRECT: case CMD_DRAW_ELEMENTS_INDIRECT: case CMD_DISPATCH_INDIRECT: {
+            // (EoW; LA has none) The arguments are in GPU memory, often written by a compute dispatch just before:
+            // ~24 GPU-culled instanced draws a frame, their instance counts added up by its culling dispatches. They
+            // were dropped here, as on Metal before renderer.m's fix (the town's lighting flickered). As renderer.m's
+            // CPU path: once the GPU work before is done (one flush per batch after a dispatch), the arguments are
+            // read and drawn as a plain draw. The flush also gives the plain draws after it the dispatches' results
+            // (their uniforms are copied at record time: cbuf_info). Layouts: elements {count, instances, first
+            // index, base vertex, base instance}, arrays {count, instances, first, base instance}, dispatch {x, y, z}.
+            uint64_t args = r->op == CMD_DRAW_ELEMENTS_INDIRECT ? r->x[3] : r->op == CMD_DRAW_ARRAYS_INDIRECT ? r->x[1] : r->x[0];
+            if (!args) break;
+            if (r->op == CMD_DISPATCH_INDIRECT && g_interp_replaying) break;
+            if (cs_since_flush && !g_interp_replaying) {
+                wait_why = "indirect arguments";
+                renderer_flush();
+                gw_inval_done(vk_completed_seq());  // (non-coherent heap: the dispatches' writes, seen by the CPU)
+            }
+            const uint32_t *a = (const uint32_t *)(uintptr_t)args;
+            if (r->op == CMD_DISPATCH_INDIRECT) {
+                if (a[0] && a[1] && a[2]) dispatch_compute(a[0], a[1], a[2]), cs_since_flush = true;
+                break;
+            }
+            CmdRec d = *r;
+            if (r->op == CMD_DRAW_ELEMENTS_INDIRECT) {
+                uint32_t isz = r->x[1] == 0 ? 1 : r->x[1] == 1 ? 2 : 4;
+                d.op = CMD_DRAW_ELEMENTS;
+                d.x[0] = r->x[0], d.x[1] = r->x[1], d.x[2] = a[0], d.x[3] = r->x[2] + (uint64_t)a[2] * isz;
+                d.x[4] = (uint64_t)(int64_t)(int32_t)a[3], d.x[5] = a[4], d.x[6] = a[1];
+            } else {
+                d.op = CMD_DRAW_ARRAYS;
+                d.x[0] = r->x[0], d.x[1] = a[2], d.x[2] = a[0], d.x[3] = a[3], d.x[4] = a[1];
+            }
+            if (a[0] && a[1]) draw(&d, r->op == CMD_DRAW_ELEMENTS_INDIRECT);
+            break;
+        }
+        case CMD_CLEAR_BUFFER: {  // (address, size, 32-bit value; EoW resets its culling counters with it): in order
+            if (g_interp_replaying || !r->x[0] || r->x[1] > (1ull << 30)) break;  // with the GPU work before, as a copy
+            wait_why = "clear buffer";
+            renderer_flush();
+            uint32_t *d = (uint32_t *)(uintptr_t)r->x[0];
+            for (uint64_t i = 0; i < r->x[1] / 4; i++) d[i] = (uint32_t)r->x[2];
+            break;
+        }
         case CMD_UPDATE_UNIFORM_BUFFER:
             if (g_interp_replaying) break;  // (replay: the draws read their logged uniform copies)
             memcpy((void *)(uintptr_t)(r->x[0] + r->x[2]), x, r->x[3]);
