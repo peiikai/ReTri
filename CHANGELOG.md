@@ -24,6 +24,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   of it on Vulkan; a plum and bronze background before the game files are set up), and text in the settings menu's
   colours.
 
+### Removed
+- LAS Recomp's Link's Awakening randomizer (seed generator, tracker, spoiler log and its game features). The start
+  screen's Randomizer row is hidden until EoW has a randomizer of its own.
+
 ### Fixed
 - The start screen accepts EoW's game files (it said "Wrong version of the game").
 - The Shadows setting changes EoW's shadows (it only knew LA's shadow map).

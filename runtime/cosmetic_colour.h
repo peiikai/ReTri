@@ -28,9 +28,6 @@ extern const uint32_t g_col_rgb[N_COL];  // the named colours' targets (0 for De
 void col_parse(CosColour *c, const char *val);
 // c -> its larecomp.ini value (name, or #RRGGBB for Custom)
 void col_format(const CosColour *c, char *out, size_t n);
-// The randomizer seed's own cosmetics (seed option "Random cosmetics", runtime/cosmetics_seed.c): looks for a newly
-// played seed's set and copies it into the rows once. NULL until set.
-extern void (*g_col_seed_check)(void);
 // Whether row `slot` offers palette entry `pick`: every row but grass and walls, whose Black reads as holes (user
 // 2026-11-11: Gray, added for them, is on every row)
 bool col_offered(int pick, int slot);

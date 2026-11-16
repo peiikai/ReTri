@@ -1,13 +1,11 @@
 #!/bin/bash
-# make smoketest (tools/linux/smoketest.sh [AppImage]): release check of the x86-64 AppImage on this machine, in four
+# make smoketest (tools/linux/smoketest.sh [AppImage]): release check of the x86-64 AppImage on this machine, in three
 # launches of the AppImage itself (default build/dist/EoW Recomp-<version>-linux-x86_64.AppImage):
 #   0. setup, as the start screen's Set up does it: this checkout's extracted/ (exefs, romfs) into an empty data folder,
 #      and the game code built from it with the bundled generator and compiler (runtime/gamebuild.c)
 #   1. start screen: rendered with the game files found ("Game files ready")
 #   2. one game session from a test save: into the game, then warps around the overworld and to every dungeon's
 #      entrance, a screenshot after each; the log must show each level loaded and no crash, the screenshots not black
-#   3. randomizer: in game, generate a seed from the menu (the bundled helper), switch to it live (Play Now), load the
-#      save on it until Link is in a level; then close and delete the seed
 # Result: build/smoke/report.txt (PASS / FAIL per check), build/smoke/sheet.png (every screenshot, labelled) and the
 # screenshots in build/smoke/shots/. Exit status 0 = ready for release.
 # Uses this checkout's extracted/ (as the folder a player picks) and a test save that is never in git: $LARECOMP_SMOKE_SAVE (a save folder with
@@ -138,46 +136,6 @@ elif [ $rc -ne 0 ]; then report FAIL "game session didn't end by itself (stopped
 else report PASS "no crash, clean exit"; fi
 fps=$(grep -oE '[0-9.]+ fps' "$L" | awk '{s += $1; n++; if ($1 < m || !m) m = $1} END {if (n) printf "%.1f avg, %.1f min", s / n, m}')
 echo "frame rate (2 s samples): $fps" | tee -a "$O/report.txt"
-
-# ---- 4. randomizer: in game, the menu's Randomizer tab generates a seed (the shipped rando-gen helper) and Play Now
-# switches to it live (in-place reboot); the save is loaded again on the seed. The session ends once Link is in a
-# level on the seed (log), then the seed is deleted. Input keeps loading the save from whatever title screen shows.
-# (LARECOMP_RANDO_GEN_SHOTS is what presses Play Now; its menu screenshots are Metal-only, so none here.)
-SEED=SmokeSeed
-rm -rf "$O/root/build/frames" "$O/root/build"/frame_*.png
-rm -rf "$O/save" && cp -R "$SAVE" "$O/save"  # (the warps above saved in the dungeons: start from the house again)
-IN=$(for f in $(seq 600 100 40000); do printf '%d:L:12,%d:R:12,%d:A:6,' $f $f $((f + 50)); done)
-start_app LARECOMP_NO_LAUNCHER=1 LARECOMP_INPUT="${IN%,}" LARECOMP_MENU_AT=7000 LARECOMP_MENU_TAB=3 \
-    LARECOMP_RANDO_GEN_TEST=$SEED LARECOMP_RANDO_GEN_SHOTS="$O/shots/17_seed" LARECOMP_SCREENSHOT_EVERY=120
-L=$O/root/eowrecomp.log
-in_seed() {  # after the switch: the seed active, then the renderer reports a level (not the title screen, "-")
-    sed -n "/\[rando\] seed \"$SEED\" active/,\$p" "$L" 2>/dev/null | grep -cE ' level [A-Za-z0-9_]+ \(' >/dev/null
-}
-for i in $(seq 1 300); do  # (10 minutes: generation takes about a minute)
-    app_alive || break
-    if in_seed; then sleep 5; break; fi
-    sleep 2
-done
-last=$(ls "$O/root/build"/frame_*.png 2>/dev/null | tail -1)
-[ -n "$last" ] && cp "$last" "$O/shots/19_seed_in_game.png"
-stop_app  # (before the seed is deleted: the game reads its files whenever a level loads)
-mv "$L" "$O/seed.log" 2>/dev/null
-L=$O/seed.log
-cp "$O/root/rando/$SEED/generate.log" "$O/seed_generate.log" 2>/dev/null
-# generated = the seed's patches load after the switch (a failed generation leaves them missing: "[rando] no ...")
-if grep -qE '\[rando\] [0-9]+ code words' "$L" && ! grep -q '\[rando\] no ' "$L"; then
-    report PASS "seed generated ($(cat "$O/root/rando/$SEED/seed_id.txt" 2>/dev/null): $(grep -m1 -oE '[0-9]+ code words, [0-9]+ data patches' "$L"))"
-else report FAIL "seed generation (see build/smoke/seed_generate.log, seed.log)"; fi
-if grep -q "\[reboot\] requested (boot)" "$L" && grep -q "\[rando\] seed \"$SEED\" active" "$L"; then
-    report PASS "switched to the seed live (in-place reboot)"
-else report FAIL "live switch to the seed (see build/smoke/seed.log)"; fi
-lvl=$(sed -n "/\[rando\] seed \"$SEED\" active/,\$p" "$L" | grep -oE ' level [A-Za-z0-9_]+ \(' | head -1 | awk '{print $2}')
-if [ -n "$lvl" ] && [ -f "$O/shots/19_seed_in_game.png" ] && [ "$(dark "$O/shots/19_seed_in_game.png")" = 0 ]; then
-    report PASS "in game on the seed ($lvl)"
-else report FAIL "in game on the seed (see build/smoke/seed.log)"; fi
-if grep -qE '\*\*\* |FATAL' "$L"; then report FAIL "crash in the seed session: $(grep -m1 -E '\*\*\* |FATAL' "$L")"; fi
-rm -rf "$O/root/rando/$SEED"
-if [ ! -e "$O/root/rando/$SEED" ]; then report PASS "seed deleted"; else report FAIL "seed not deleted"; fi
 
 python3 -I - "$O/sheet.png" "$O"/shots/*.png <<'PY'
 import os, sys

@@ -6,7 +6,8 @@
   - A host stands in for the Switch OS and services (`runtime/kernel.c`, `loader.c`, `services/`).
   - The game's NVN graphics are drawn with Metal on macOS, iPhone and iPad, and Vulkan on Windows, Linux and
     Android (`runtime/nvn/`).
-  - The randomizer and most features live in `runtime/hle/`, `runtime/ui/` and `tools/rando/`.
+  - Most features live in `runtime/hle/` and `runtime/ui/`. LAS's Link's Awakening randomizer was removed; the
+    Randomizer entry is hidden (`RANDO_ON` in `runtime/rando.h`) until EoW has its own.
   - [README.md](README.md) is the player-facing page. [CONTRIBUTING.md](CONTRIBUTING.md) has the layout, building,
     tests and pull request rules.
 
@@ -27,7 +28,6 @@
   | Game behaviour or a new feature | `runtime/hle/` and the hooks in `tools/patches.py` and `runtime/hle/hooks.c` |
   | Saves | [docs/save-format.md](docs/save-format.md), `runtime/services/fs.c` |
   | Game addresses | CONTRIBUTING "Project layout" (`runtime/game_addresses/`, `GA(NAME)`, `tools/version_map.py`) |
-  | Randomizer logic | `tools/rando/` and `third_party/LAS-Randomizer` (local changes marked "LAS Recomp") |
   | Menu text | `python3 tools/menu_strings.py check` |
 
 - **No Nintendo files, ever.**
@@ -77,12 +77,9 @@
     test is about sound.
   - Never close or restart a copy of the game the user is playing. Run one test window at a time (`shot.sh` takes
     a lock).
-  - Randomizer changes: generate several seeds with different settings and check each one completes. For dungeon
-    room shuffle, run `tools/doorjump_test.sh <seed>`.
   - The unit tests are listed in CONTRIBUTING "Tests".
 
-- **Randomizer rules.**
-  - Older seed IDs must keep loading (see `runtime/ui/rando_tab.mm`).
+- **Randomizer rules** (for the EoW randomizer to come).
   - State that belongs to a seed resets on an in-place seed switch through `RT_ON_RESET` (`runtime/hle.h`).
   - Item pickup text goes through the game's own message box, never a custom pop-up.
 
