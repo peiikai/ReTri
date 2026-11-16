@@ -35,7 +35,7 @@ fails (or, worse, Gradle quietly keeps the old library).
 ## How it differs from Linux
 
 - `runtime/platform/linux.c` builds for Android too (`__ANDROID__` parts): the log goes to logcat (tag `LASRecomp`)
-  as well as `lasrecomp.log`, backtraces come from the unwinder, and the process can't restart itself.
+  as well as `eowrecomp.log`, backtraces come from the unwinder, and the process can't restart itself.
 - The guest window moves (`LARECOMP_DYN_BASE`, `runtime/rt.h`): an app process is forked with its libraries already
   mapped, so `runtime/main.c` picks a free spot from `/proc/self/maps`.
 - The data folder is `Android/data/com.lasrecomp.android/files`, in internal storage or on an SD card (Settings >
@@ -111,8 +111,8 @@ adb shell am start -S -n com.lasrecomp.android/com.lasrecomp.LASRecompActivity \
   --es LARECOMP_NO_AUDIO 1 --es LARECOMP_NO_MOVIE_AUDIO 1 --es LARECOMP_NO_LAUNCHER 1
 ```
 
-`adb shell input keyevent` doesn't reach the game. `lasrecomp.log` is in the data folder (on an SD card:
-`/storage/<card>/Android/data/com.lasrecomp.android/files/LAS Recomp`); its `[dynres]` and `[pace]` lines say what
+`adb shell input keyevent` doesn't reach the game. `eowrecomp.log` is in the data folder (on an SD card:
+`/storage/<card>/Android/data/com.lasrecomp.android/files/EoW Recomp`); its `[dynres]` and `[pace]` lines say what
 Dynamic and the frame pacer did and why.
 
 ## Tested devices

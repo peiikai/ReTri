@@ -547,7 +547,7 @@ int main(int argc, char **argv) {
          .secs = 180, .lines = 1080, .clock_slow = 1.2, .stall_at = 20, .stall_until = 21.5, .stall_ms = 17, .pacer = 1, .pace_fit_ms = 10},
         {.name = "the same, pacer first try (13 ms)", .a = 3, .b = 8, .w = 2, .fifo = 1,
          .secs = 180, .lines = 1080, .clock_slow = 1.2, .stall_at = 20, .stall_until = 21.5, .stall_ms = 17, .pacer = 1},
-        // the RP5 on 44e00622 (lasrecomp.log t=40-320, target 60, Minimum 360p): G mostly fixed (game 12.2 at 0.60,
+        // the RP5 on 44e00622 (eowrecomp.log t=40-320, target 60, Minimum 360p): G mostly fixed (game 12.2 at 0.60,
         // 13.7 at 0.80 with the clock at its top), W 4.2 at 0.55 -> 5.0 at 0.80, GPU times over-read the frame (gpu 18.3 ms
         // with frames every 18.2 = 1 in 12 late), a mild clock drop, a 35 ms hitch every few seconds
         {.name = "RP5 on 44e00622: W grows, GPU over-reads 1.14x, clock fills to 77%", .a = 8.8, .b = 5.0, .w = 3.6, .wf = 0.6,

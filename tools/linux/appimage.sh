@@ -1,5 +1,5 @@
 #!/bin/bash
-# make appimage ARCH=<x86_64|aarch64>: build/dist/LAS Recomp-<version>-linux-<arch>.AppImage, built in Ubuntu 22.04
+# make appimage ARCH=<x86_64|aarch64>: build/dist/EoW Recomp-<version>-linux-<arch>.AppImage, built in Ubuntu 22.04
 # containers (podman; tools/linux/Containerfile) so it runs on glibc 2.35+ distributions. On a host of the same arch
 # everything is built natively in that arch's container. An aarch64 AppImage on an x86-64 host: the amd64 container
 # cross-compiles against the arm64 image's root filesystem (build/linux/aarch64/sysroot), only the generator helpers
@@ -13,8 +13,8 @@ case $ARCH in x86_64) PODARCH=amd64 ;; aarch64) PODARCH=arm64 ;;
     *) echo "unknown arch $ARCH"; exit 1 ;; esac
 
 image() {  # arch -> tag (built once, then cached by podman)
-    podman build -q --arch "$1" -t "localhost/lasrecomp-build:$1" -f tools/linux/Containerfile tools/linux >/dev/null || return
-    echo "localhost/lasrecomp-build:$1"
+    podman build -q --arch "$1" -t "localhost/eowrecomp-build:$1" -f tools/linux/Containerfile tools/linux >/dev/null || return
+    echo "localhost/eowrecomp-build:$1"
 }
 run() {  # image, command...: the checkout mounted at /src
     local img=$1; shift

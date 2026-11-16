@@ -389,7 +389,7 @@ bool menu_handle_event(const SDL_Event *e) {
     }
 }
 
-// Remember window size (Video tab): the window opens at the size it had when LAS Recomp last quit. The size is taken
+// Remember window size (Video tab): the window opens at the size it had when EoW Recomp last quit. The size is taken
 // at exit (every quit ends in exit()), not in fullscreen or maximized - those keep the last plain window's size.
 static SDL_Window *g_remember_win;
 static void remember_at_exit(void) {
@@ -979,8 +979,8 @@ static void tab_audio(void) {
     opt_section("Effects");
     opt_toggle("Enable reverb", &g_settings.reverb, true,
                "The game's echo in caves, dungeons and big rooms.");
-    opt_toggle("LAS Recomp menu sounds", &g_settings.menu_sounds, true,
-               "Sounds when you move around and pick things in LAS Recomp's menus.");
+    opt_toggle("EoW Recomp menu sounds", &g_settings.menu_sounds, true,
+               "Sounds when you move around and pick things in EoW Recomp's menus.");
     opt_end();
 }
 

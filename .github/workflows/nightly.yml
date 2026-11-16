@@ -76,14 +76,14 @@ jobs:
               echo
               echo "- macOS: \`macOS.dmg\`  - Windows: \`windows.zip\`  - Windows on ARM: \`windows-arm64.zip\`"
               echo "- Linux: \`linux-x86_64.AppImage\`, \`linux-aarch64.AppImage\`"
-              echo "- Android: \`android.apk\`, installed as its own app, LAS Recomp Nightly, beside the release one"
+              echo "- Android: \`android.apk\`, installed as its own app, EoW Recomp Nightly, beside the release one"
               echo "- iPhone and iPad: \`iOS.laskit\`, made into the app with a nightly desktop build of the same date"
               if [ -n "$RSHA" ]; then
                 MERGES=$(gh api "repos/$GH_REPO/compare/$RSHA...$SHA" --jq '.commits[] | select(.parents | length > 1) | .commit.message | split("\n") | .[0]' 2>/dev/null | sed -n 's/^Merge pull request \(#[0-9]*\).*/\1/p' | tr '\n' ' ' || true)
                 [ -n "$MERGES" ] && { echo; echo "New since the previous nightly: $MERGES"; }
               fi
               echo
-              echo "To report a problem, open an [issue]($URL/issues), say it's a nightly and which date, and attach the log (\`lasrecomp.log\` in the data folder)."
+              echo "To report a problem, open an [issue]($URL/issues), say it's a nightly and which date, and attach the log (\`eowrecomp.log\` in the data folder)."
               echo
               echo "<!-- nightly-round: $STAMP $SHA -->"
             } > notes.md
@@ -154,9 +154,9 @@ jobs:
         run: make -j"$(sysctl -n hw.ncpu)" dmg
       - name: No game code
         run: |
-          A="build/LAS Recomp.app"
+          A="build/EoW Recomp.app"
           bad=$(find "$A" -type d \( -name extracted -o -name 'generated*' -o -name exefs -o -name romfs \);
-                find "$A" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$A" -name 'lasgame*')
+                find "$A" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$A" -name 'eowgame*')
           [ -z "$bad" ] || { echo "::error::must not ship: $bad"; exit 1; }
           find "$A" -type f \( -perm +111 -o -name '*.dylib' -o -name '*.so' \) | while read -r f; do
             if nm "$f" 2>/dev/null | grep ' _\{0,1\}f_70' >/dev/null; then echo "::error::game code in $f"; exit 1; fi
@@ -212,8 +212,8 @@ jobs:
         run: make -j"$(sysctl -n hw.ncpu)" ios-kit
       - name: No game code
         run: |
-          A="build/ios-skeleton/LAS Recomp.app"
-          bad=$(find "$A" -type d \( -name extracted -o -name 'generated*' -o -name exefs -o -name romfs \); find "$A" -name 'lasgame*' -o -name 'LASGame' -type f)
+          A="build/ios-skeleton/EoW Recomp.app"
+          bad=$(find "$A" -type d \( -name extracted -o -name 'generated*' -o -name exefs -o -name romfs \); find "$A" -name 'eowgame*' -o -name 'LASGame' -type f)
           [ -z "$bad" ] || { echo "::error::must not ship: $bad"; exit 1; }
           find "$A" -type f \( -perm +111 -o -name '*.dylib' -o -name '*.so' \) | while read -r f; do
             if nm "$f" 2>/dev/null | grep -E ' _?f_[78]0' >/dev/null; then echo "::error::game code in $f"; exit 1; fi
@@ -279,9 +279,9 @@ jobs:
         run: make -j"$(nproc)" dist
       - name: No game files or generated C
         run: |
-          D="build/dist/LAS Recomp"
+          D="build/dist/EoW Recomp"
           bad=$(find "$D" -type d \( -name extracted -o -name 'generated*' -o -name exefs -o -name romfs \);
-                find "$D" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$D" -name 'lasgame*')
+                find "$D" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$D" -name 'eowgame*')
           [ -z "$bad" ] || { echo "::error::must not ship: $bad"; exit 1; }
       - name: Publish
         shell: bash  # (Git Bash: gh is on its PATH, not MSYS2's)
@@ -345,9 +345,9 @@ jobs:
         run: make -j"$(nproc)" dist
       - name: No game files or generated C
         run: |
-          D="build/dist/LAS Recomp"
+          D="build/dist/EoW Recomp"
           bad=$(find "$D" -type d \( -name extracted -o -name 'generated*' -o -name exefs -o -name romfs \);
-                find "$D" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$D" -name 'lasgame*')
+                find "$D" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$D" -name 'eowgame*')
           [ -z "$bad" ] || { echo "::error::must not ship: $bad"; exit 1; }
       - name: Publish
         shell: bash  # (Git Bash: gh is on its PATH, not MSYS2's)
@@ -399,7 +399,7 @@ jobs:
         run: |
           A=build/linux/${{ matrix.arch }}/AppDir
           bad=$(find "$A" -type d \( -name extracted -o -name 'generated*' -o -name exefs -o -name romfs \);
-                find "$A" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$A" -name 'lasgame*')
+                find "$A" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$A" -name 'eowgame*')
           [ -z "$bad" ] || { echo "::error::must not ship: $bad"; exit 1; }
           find "$A" -type f \( -perm /111 -o -name '*.so*' \) | while read -r f; do
             if readelf -Ws --wide "$f" 2>/dev/null | grep ' f_70' >/dev/null; then echo "::error::game code in $f"; exit 1; fi
@@ -408,7 +408,7 @@ jobs:
         env: { GH_TOKEN: '${{ github.token }}', GH_REPO: '${{ github.repository }}' }
         run: tools/nightly_publish.sh build/dist/*-linux-${{ matrix.arch }}.AppImage linux-${{ matrix.arch }}.AppImage
 
-  # its own app (com.lasrecomp.android.nightly, "LAS Recomp Nightly"): installs beside the release app, with its own
+  # its own app (com.lasrecomp.android.nightly, "EoW Recomp Nightly"): installs beside the release app, with its own
   # data; signed with the published APKs' key
   android:
     needs: plan
@@ -451,7 +451,7 @@ jobs:
           LARECOMP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           LARECOMP_VERSION_NAME: ${{ needs.plan.outputs.version }}
           LARECOMP_APPLICATION_ID: com.lasrecomp.android.nightly
-          LARECOMP_APP_LABEL: LAS Recomp Nightly
+          LARECOMP_APP_LABEL: EoW Recomp Nightly
         run: |
           [ -n "$KEYSTORE_B64" ] && [ -n "$LARECOMP_KEYSTORE_PASSWORD" ] || { echo "::error::the signing key secrets are not set"; exit 1; }
           export LARECOMP_KEYSTORE=$RUNNER_TEMP/lasrecomp.keystore
@@ -465,7 +465,7 @@ jobs:
           APK=android/app/build/outputs/apk/release/app-release.apk
           "$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner" verify --print-certs "$APK"
           tools/check_apk.sh "$APK"
-          mkdir -p build/dist && cp "$APK" "build/dist/LAS Recomp-$VERSION-android.apk"
+          mkdir -p build/dist && cp "$APK" "build/dist/EoW Recomp-$VERSION-android.apk"
       - name: Publish
         env: { GH_TOKEN: '${{ github.token }}', GH_REPO: '${{ github.repository }}' }
         run: tools/nightly_publish.sh build/dist/*-android.apk android.apk

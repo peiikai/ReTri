@@ -1,7 +1,7 @@
 # System fonts
 
 The game draws its text with the Switch's built-in system font, which isn't part of the game files.
-Without it, LAS Recomp uses a system font on macOS and Windows (Hiragino Sans, Yu Gothic, Arial). On Linux it uses
+Without it, EoW Recomp uses a system font on macOS and Windows (Hiragino Sans, Yu Gothic, Arial). On Linux it uses
 the bundled BIZ UDPGothic (Morisawa's free font from the same universal-design gothic family as the Switch's UD Shin Go,
 `third_party/fonts/BIZUDPGothic`), then DejaVu Sans; there any substitute is given the Switch font's vertical metrics,
 so its text comes out the same size as on the console.

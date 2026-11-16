@@ -1,4 +1,4 @@
-# LAS Recomp's release builds: the macOS arm64 .dmg (make dmg), the Windows x64 .zip (make dist), the Linux
+# EoW Recomp's release builds: the macOS arm64 .dmg (make dmg), the Windows x64 .zip (make dist), the Linux
 # x86_64 / aarch64 AppImages (make appimage), the signed Android .apk (from Beta 6) and the iOS kit .laskit (make ios-kit: the iOS app without game code
 # plus the tools any of those desktops completes it with), each from the same commit, put on a DRAFT
 # GitHub release with their sha256s. It never publishes: a person reads the draft, writes the notes and publishes
@@ -142,9 +142,9 @@ jobs:
       # runtime sources)
       - name: No game code
         run: |
-          A="build/LAS Recomp.app"
+          A="build/EoW Recomp.app"
           bad=$(find "$A" -type d \( -name extracted -o -name 'generated*' -o -name exefs -o -name romfs \);
-                find "$A" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$A" -name 'lasgame*')
+                find "$A" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$A" -name 'eowgame*')
           [ -z "$bad" ] || { echo "::error::must not ship: $bad"; exit 1; }
           find "$A" -type f \( -perm +111 -o -name '*.dylib' -o -name '*.so' \) | while read -r f; do
             if nm "$f" 2>/dev/null | grep ' _\{0,1\}f_70' >/dev/null; then echo "::error::game code in $f"; exit 1; fi
@@ -214,9 +214,9 @@ jobs:
         run: make -j"$(nproc)" dist
       - name: No game files or generated C
         run: |
-          D="build/dist/LAS Recomp"
+          D="build/dist/EoW Recomp"
           bad=$(find "$D" -type d \( -name extracted -o -name 'generated*' -o -name exefs -o -name romfs \);
-                find "$D" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$D" -name 'lasgame*')
+                find "$D" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$D" -name 'eowgame*')
           [ -z "$bad" ] || { echo "::error::must not ship: $bad"; exit 1; }
           ls -la build/dist
       - uses: actions/upload-artifact@v4
@@ -275,24 +275,24 @@ jobs:
       # no symlink entries in it (an iOS install drops them; zipinfo's 'l'), every host's linker in it
       - name: No game code; the kit's layout
         run: |
-          A="build/ios-skeleton/LAS Recomp.app"
-          bad=$(find "$A" -type d \( -name extracted -o -name 'generated*' -o -name exefs -o -name romfs \); find "$A" -name 'lasgame*' -o -name 'LASGame' -type f)
+          A="build/ios-skeleton/EoW Recomp.app"
+          bad=$(find "$A" -type d \( -name extracted -o -name 'generated*' -o -name exefs -o -name romfs \); find "$A" -name 'eowgame*' -o -name 'LASGame' -type f)
           [ -z "$bad" ] || { echo "::error::must not ship: $bad"; exit 1; }
           find "$A" -type f \( -perm +111 -o -name '*.dylib' -o -name '*.so' \) | while read -r f; do
             if nm "$f" 2>/dev/null | grep -E ' _?f_[78]0' >/dev/null; then echo "::error::game code in $f"; exit 1; fi
           done
           K=$(ls build/dist/*-iOS.laskit)
-          zipinfo -1 "$K" | grep -q '^Payload/LAS Recomp.app/Info.plist$' || { echo "::error::no Payload/LAS Recomp.app in the kit"; exit 1; }
+          zipinfo -1 "$K" | grep -q '^Payload/EoW Recomp.app/Info.plist$' || { echo "::error::no Payload/EoW Recomp.app in the kit"; exit 1; }
           links=$(zipinfo "$K" | grep '^l.* Payload/' || true); [ -z "$links" ] || { echo "::error::symlink entries in the kit's app: $links"; exit 1; }
-          zipinfo -1 "$K" | grep -q '^Payload/LAS Recomp.app/Frameworks/keystone.libkeystone.framework/keystone.libkeystone$' || { echo "::error::keystone's framework missing from the kit"; exit 1; }
+          zipinfo -1 "$K" | grep -q '^Payload/EoW Recomp.app/Frameworks/keystone.libkeystone.framework/keystone.libkeystone$' || { echo "::error::keystone's framework missing from the kit"; exit 1; }
           for t in aarch64-macos x86_64-linux aarch64-linux x86_64-windows aarch64-windows; do
             zipinfo -1 "$K" | grep -q "^lld/$t/bin/lld" || { echo "::error::no linker for $t in the kit"; exit 1; }
           done
           zipinfo -1 "$K" | grep -q '^include/any-darwin-any/stdlib.h$' && zipinfo -1 "$K" | grep -q '^libSystem.B.tbd$' || { echo "::error::headers / link stub missing"; exit 1; }
           zipinfo -1 "$K" | grep -q '^version.txt$' || { echo "::error::no version.txt in the kit"; exit 1; }
           # (the executable as the kit holds it: a sideloader keeps its entitlements, without them the guest window doesn't fit)
-          X=$(mktemp -d); unzip -q "$K" 'Payload/LAS Recomp.app/lasrecomp' -d "$X"
-          codesign -d --entitlements :- "$X/Payload/LAS Recomp.app/lasrecomp" 2>/dev/null | grep -q increased-memory-limit || { echo "::error::the kit's executable is signed without increased-memory-limit"; exit 1; }
+          X=$(mktemp -d); unzip -q "$K" 'Payload/EoW Recomp.app/eowrecomp' -d "$X"
+          codesign -d --entitlements :- "$X/Payload/EoW Recomp.app/eowrecomp" 2>/dev/null | grep -q increased-memory-limit || { echo "::error::the kit's executable is signed without increased-memory-limit"; exit 1; }
           ls -la build/dist
       - uses: actions/upload-artifact@v4
         with:
@@ -359,7 +359,7 @@ jobs:
         run: |
           A=build/linux/${{ matrix.arch }}/AppDir
           bad=$(find "$A" -type d \( -name extracted -o -name 'generated*' -o -name exefs -o -name romfs \);
-                find "$A" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$A" -name 'lasgame*')
+                find "$A" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'; find "$A" -name 'eowgame*')
           [ -z "$bad" ] || { echo "::error::must not ship: $bad"; exit 1; }
           find "$A" -type f \( -perm /111 -o -name '*.so*' \) | while read -r f; do
             if readelf -Ws --wide "$f" 2>/dev/null | grep ' f_70' >/dev/null; then echo "::error::game code in $f"; exit 1; fi
@@ -426,7 +426,7 @@ jobs:
           APK=android/app/build/outputs/apk/release/app-release.apk
           "$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner" verify --print-certs "$APK"
           tools/check_apk.sh "$APK"
-          mkdir -p build/dist && cp "$APK" "build/dist/LAS Recomp-$VERSION-android.apk" && ls -la build/dist
+          mkdir -p build/dist && cp "$APK" "build/dist/EoW Recomp-$VERSION-android.apk" && ls -la build/dist
       - uses: actions/upload-artifact@v4
         with:
           name: android

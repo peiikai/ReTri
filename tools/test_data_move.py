@@ -121,17 +121,17 @@ with tempfile.TemporaryDirectory() as directory:
     t = run('target', home / 'save')
     assert t['REFUSE'] == 'That folder is inside the data folder.', t
     t = run('target', S / 'misc')
-    assert Path(t['PATH']) == S / 'misc' / 'LAS Recomp' and not t['REFUSE'] and t['HAS_DATA'] == '0', t
+    assert Path(t['PATH']) == S / 'misc' / 'EoW Recomp' and not t['REFUSE'] and t['HAS_DATA'] == '0', t
     t = run('target', S / 'empty')
     assert Path(t['PATH']) == S / 'empty' and not t['REFUSE'] and int(t['BYTES']) > 10_000_000, t
-    (S / 'logs').mkdir()  # (only LAS Recomp's own logs - a start there before: counts as empty)
-    (S / 'logs/lasrecomp.log').write_text('log')
-    (S / 'logs/lasrecomp-backup-20261110-120000-1.log').write_text('log')
+    (S / 'logs').mkdir()  # (only EoW Recomp's own logs - a start there before: counts as empty)
+    (S / 'logs/eowrecomp.log').write_text('log')
+    (S / 'logs/eowrecomp-backup-20261110-120000-1.log').write_text('log')
     t = run('target', S / 'logs')
     assert Path(t['PATH']) == S / 'logs' and not t['REFUSE'], t
-    print('target: the folder itself when empty (or holding only our logs), a "LAS Recomp" folder in a full one; the '
+    print('target: the folder itself when empty (or holding only our logs), a "EoW Recomp" folder in a full one; the '
           'data folder and folders in it refused')
-    # #736: a folder holding another program's file or folder that has one of our names is not LAS Recomp data
+    # #736: a folder holding another program's file or folder that has one of our names is not EoW Recomp data
     for name in ('cache', 'fonts', 'save', 'rando', 'extracted', 'gamecontrollerdb.txt'):
         for alone in (False, True):
             pick = S / f'other_{name}{"_alone" if alone else ""}'
@@ -144,13 +144,13 @@ with tempfile.TemporaryDirectory() as directory:
                 (pick / name).mkdir()
                 (pick / name / 'theirs.db').write_text('theirs')
             t = run('target', pick)
-            assert Path(t['PATH']) == pick / 'LAS Recomp' and t['HAS_DATA'] == '0' and not t['REFUSE'], (name, alone, t)
-    pick = S / 'other_in_ours'  # (a "LAS Recomp" folder holding another program's cache/: not used, not merged into)
-    (pick / 'LAS Recomp/cache').mkdir(parents=True)
+            assert Path(t['PATH']) == pick / 'EoW Recomp' and t['HAS_DATA'] == '0' and not t['REFUSE'], (name, alone, t)
+    pick = S / 'other_in_ours'  # (a "EoW Recomp" folder holding another program's cache/: not used, not merged into)
+    (pick / 'EoW Recomp/cache').mkdir(parents=True)
     (pick / 'my_document.txt').write_text('mine')
     t = run('target', pick)
     assert t['REFUSE'] == 'Choose an empty folder.', t
-    # LAS Recomp's own data, from any version: used as it is (the folder itself, Use it)
+    # EoW Recomp's own data, from any version: used as it is (the folder itself, Use it)
     def data(name, entries):
         d = S / name
         d.mkdir()
@@ -206,7 +206,7 @@ with tempfile.TemporaryDirectory() as directory:
 
     other = os.environ.get('LARECOMP_TEST_OTHER_FS')
     if other:
-        dst = Path(other) / f'lasrecomp-move-test-{os.getpid()}'
+        dst = Path(other) / f'eowrecomp-move-test-{os.getpid()}'
         run('move', dst, 0, stall=True)
         check_in(home, 'other drive: cut off while copying')
         assert ours_left(dst) == []
@@ -234,7 +234,7 @@ with tempfile.TemporaryDirectory() as directory:
     check_in(home, 'switched back')
     print('start fresh: the old data stays; back to it as it is; never moved into a folder with data')
 
-    # #736: a folder with another program's cache/ gets a "LAS Recomp" folder; moves there and back leave that cache/
+    # #736: a folder with another program's cache/ gets a "EoW Recomp" folder; moves there and back leave that cache/
     games = S / 'Games'
     (games / 'otherapp').mkdir(parents=True)
     (games / 'otherapp/readme.txt').write_text('theirs')
@@ -243,16 +243,16 @@ with tempfile.TemporaryDirectory() as directory:
     (games / 'cache/otherapp.db').write_text('theirs')
     theirs = sorted(p.relative_to(games).as_posix() for p in games.rglob('*'))
     t = run('target', games)
-    assert Path(t['PATH']) == games / 'LAS Recomp' and t['HAS_DATA'] == '0' and not t['REFUSE'], t
+    assert Path(t['PATH']) == games / 'EoW Recomp' and t['HAS_DATA'] == '0' and not t['REFUSE'], t
     r = run('move', games)  # (the folder itself, never offered: refused, not merged into)
     assert r['MOVE'] == 'failed Choose an empty folder.', r
     r = run('move', t['PATH'])
     assert r['MOVE'].startswith('ok'), r
-    check_in(games / 'LAS Recomp', 'moved into a "LAS Recomp" folder')
+    check_in(games / 'EoW Recomp', 'moved into a "EoW Recomp" folder')
     r = run('move', home)
     assert r['MOVE'].startswith('ok'), r
-    check_in(home, 'moved back from a "LAS Recomp" folder')
+    check_in(home, 'moved back from a "EoW Recomp" folder')
     left = sorted(p.relative_to(games).as_posix() for p in games.rglob('*'))
     assert left == theirs, left
-    print('move: a folder holding another program\'s cache/ gets a "LAS Recomp" folder; its things stay where they are')
+    print('move: a folder holding another program\'s cache/ gets a "EoW Recomp" folder; its things stay where they are')
     print(f'{plat}: data folder moves never lose data')

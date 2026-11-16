@@ -38,11 +38,11 @@ int main(int argc, char **argv) {
     };
     fs::path work = fs::u8path(game) / ".gamebuild";
     write(work / "legacy.o", "old beta_5 object without a receipt");
-    write(fs::u8path(game) / "lasgame.dll", "installed library");
+    write(fs::u8path(game) / "eowgame.dll", "installed library");
     assert(!build_cache_resumable(game.c_str()));
     BuildCache *cache = open();
     assert(cache);
-    assert(!fs::exists(work / "legacy.o") && read(fs::u8path(game) / "lasgame.dll") == "installed library");
+    assert(!fs::exists(work / "legacy.o") && read(fs::u8path(game) / "eowgame.dll") == "installed library");
     assert(build_cache_resumable(game.c_str()));
     assert(!open());
     assert(!build_cache_clear(game.c_str(), why, sizeof why)); // another process/window cannot erase an active build
@@ -81,18 +81,18 @@ int main(int argc, char **argv) {
     assert(!build_cache_save_object(cache, "main_000", source.c_str(), hash, why, sizeof why));
     write(fs::u8path(source), "int example;");
     assert(build_cache_object(cache, "main_000", source.c_str(), hash) == 1);
-    write(fs::u8path(game) / "lasgame.dll", "old library");
-    write(fs::u8path(game) / "lasgame.dll.id", "old id");
-    assert(!build_cache_publish(cache, "lasgame.dll", "new-runtime", why, sizeof why));
-    assert(read(fs::u8path(game) / "lasgame.dll") == "old library");
-    write(work / "lasgame.dll.tmp", "new library");
+    write(fs::u8path(game) / "eowgame.dll", "old library");
+    write(fs::u8path(game) / "eowgame.dll.id", "old id");
+    assert(!build_cache_publish(cache, "eowgame.dll", "new-runtime", why, sizeof why));
+    assert(read(fs::u8path(game) / "eowgame.dll") == "old library");
+    write(work / "eowgame.dll.tmp", "new library");
     write(work / "gen_main.log", "generator log");
     write(work / "main_000.log", "compiler log");
     write(work / "link.rsp", "object list");
     write(work / "zig-cache" / "temporary", "compiler cache");
     write(fs::u8path(game) / ".zigcache" / "temporary", "legacy compiler cache");
-    assert(build_cache_publish(cache, "lasgame.dll", "new-runtime", why, sizeof why));
-    assert(read(fs::u8path(game) / "lasgame.dll.id") == "new-runtime\n");
+    assert(build_cache_publish(cache, "eowgame.dll", "new-runtime", why, sizeof why));
+    assert(read(fs::u8path(game) / "eowgame.dll.id") == "new-runtime\n");
     assert(fs::exists(work / "main_000.o") && fs::exists(work / "main_000.receipt"));
     for (const char *name : {"main", "gen_main.log", "main_000.log", "link.rsp", "zig-cache", "main.generation"})
         assert(!fs::exists(work / name));
@@ -100,12 +100,12 @@ int main(int argc, char **argv) {
     // Simulate a crash between installing the library and its metadata, then restart.
     write(work / "previous-library", "old library");
     write(work / "previous-id", "old id");
-    write(work / "install-journal", "LASINSTALL1\nlasgame.dll\n1 1\n");
+    write(work / "install-journal", "LASINSTALL1\neowgame.dll\n1 1\n");
     build_cache_close(cache);
     cache = open();
     assert(cache);
-    assert(read(fs::u8path(game) / "lasgame.dll") == "old library");
-    assert(read(fs::u8path(game) / "lasgame.dll.id") == "old id");
+    assert(read(fs::u8path(game) / "eowgame.dll") == "old library");
+    assert(read(fs::u8path(game) / "eowgame.dll.id") == "old id");
     build_cache_close(cache);
     write(fs::u8path(data), "different binary input");
     cache = open();
@@ -122,13 +122,13 @@ int main(int argc, char **argv) {
     // Clearing after interrupted publication must recover before discarding rollback files.
     write(work / "previous-library", "old library");
     write(work / "previous-id", "old id");
-    write(work / "install-journal", "LASINSTALL1\nlasgame.dll\n1 1\n");
-    write(fs::u8path(game) / "lasgame.dll", "incompletely published library");
+    write(work / "install-journal", "LASINSTALL1\neowgame.dll\n1 1\n");
+    write(fs::u8path(game) / "eowgame.dll", "incompletely published library");
     write(fs::u8path(game) / ".zigcache" / "temporary", "legacy compiler cache");
     assert(build_cache_clear(game.c_str(), why, sizeof why));
     assert(!fs::exists(fs::u8path(game) / ".zigcache"));
-    assert(read(fs::u8path(game) / "lasgame.dll") == "old library");
-    assert(read(fs::u8path(game) / "lasgame.dll.id") == "old id");
+    assert(read(fs::u8path(game) / "eowgame.dll") == "old library");
+    assert(read(fs::u8path(game) / "eowgame.dll.id") == "old id");
     assert(!build_cache_present(game.c_str())); // only the lock and owner remain: nothing left to clear
     std::string fresh = (root / "fresh").u8string();
     fs::create_directories(fs::u8path(fresh));

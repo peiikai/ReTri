@@ -1,4 +1,4 @@
-# LAS Recomp on Linux (x86-64, aarch64)
+# EoW Recomp on Linux (x86-64, aarch64)
 
 Status: builds and runs the game on Vulkan (with your own game files) on x86-64, checked before
 each release by `make smoketest`. aarch64 is **experimental**: tested on a few ARM boards; reports welcome (see the end). `make appimage` / `make appimages`
@@ -19,8 +19,8 @@ The start screen asks for the folder with your own game files and sets them up.
 
 Everything the app writes lives in `~/.local/share/lasrecomp` (`$XDG_DATA_HOME/lasrecomp`): game files (`extracted/`),
 saves, seeds, settings (`larecomp.ini`), shader caches, imported fonts. Started without a terminal the log is
-`~/.local/share/lasrecomp/lasrecomp.log`, always the latest run; up to five recent runs are kept as
-`lasrecomp-backup-*.log` (from a terminal it prints there instead). `LARECOMP_DATA_ROOT=<dir>` uses
+`~/.local/share/lasrecomp/eowrecomp.log`, always the latest run; up to five recent runs are kept as
+`eowrecomp-backup-*.log` (from a terminal it prints there instead). `LARECOMP_DATA_ROOT=<dir>` uses
 another folder.
 
 Controllers work as on the other systems (SDL3's gamepad support, bundled): Xbox, PlayStation (DualShock 4,
@@ -35,14 +35,14 @@ If the AppImage won't start with a FUSE error, install your distribution's `fuse
 
 ## Building from source
 Ubuntu / Debian packages (other distributions: the same libraries under their names). SDL3 must be 3.4 or newer
-(LAS Recomp loads and saves PNGs through it); where the distribution ships an older one (Debian 13 has 3.2), build SDL3
+(EoW Recomp loads and saves PNGs through it); where the distribution ships an older one (Debian 13 has 3.2), build SDL3
 3.4 from source first - `tools/linux/build_deps.sh` builds the pinned version the AppImage uses (into
 `build/linux/<arch>/deps`).
 
     sudo apt install clang lld make pkg-config python3-venv libsdl3-dev libavformat-dev libavcodec-dev \
         libavutil-dev libswscale-dev libvulkan-dev libshaderc-dev libvulkan-memory-allocator-dev glslc vulkan-tools
 
-For Chinese or Korean menus, also install a font for them (`fonts-noto-cjk`). LAS Recomp bundles fonts for Russian
+For Chinese or Korean menus, also install a font for them (`fonts-noto-cjk`). EoW Recomp bundles fonts for Russian
 and Japanese only; without one, Chinese and Korean menu text shows as boxes.
 
 shaderc is linked the way its pkg-config file says (`libshaderc_shared` on Arch, Fedora, AOSC...); to choose
@@ -53,9 +53,9 @@ Then from the repo root:
     python3 -m venv tools/venv && tools/venv/bin/pip install lz4 capstone unicorn
     make -j         # the start screen only (no game code yet): set up the game files there, or put extracted/ here
     make gen        # once: recompile the game from your own game files
-    make -j         # -> build/lasrecomp and the game code library build/lasgame.so
+    make -j         # -> build/eowrecomp and the game code library build/eowgame.so
 
-Run `./build/lasrecomp` from the repo root: with `extracted/` in the starting folder it uses that folder for
+Run `./build/eowrecomp` from the repo root: with `extracted/` in the starting folder it uses that folder for
 everything (dev mode) instead of `~/.local/share/lasrecomp`.
 
 `ARCH` picks the target, separately from the OS: the generated code differs per arch (aarch64 runs the guest's
@@ -73,7 +73,7 @@ The randomizer from a source checkout uses LAS-Randomizer's own venv (Python 3.1
 Needs podman, and for the other arch's AppImage QEMU user emulation with binfmt (`sudo apt install podman qemu-user
 qemu-user-binfmt`).
 
-    make appimage                # this machine's arch -> build/dist/LAS Recomp-<version>-linux-<arch>.AppImage
+    make appimage                # this machine's arch -> build/dist/EoW Recomp-<version>-linux-<arch>.AppImage
     make appimage ARCH=aarch64   # on x86-64: cross-compiled
     make appimages               # both
 
@@ -96,7 +96,7 @@ RELEASE or NOT READY; `build/smoke/sheet.png` shows every screenshot. It needs `
 save outside git (`~/.local/share/lasrecomp-smoketest/save`, or `LARECOMP_SMOKE_SAVE`): copy `save/` from any build
 after starting a new game once.
 
-The AppImage holds `lasrecomp`, `rando-gen/`, the start screen font and the bundled libraries (SDL3,
+The AppImage holds `eowrecomp`, `rando-gen/`, the start screen font and the bundled libraries (SDL3,
 FFmpeg, shaderc). Not bundled: glibc, libstdc++, the Vulkan loader and the GPU drivers (always the system's). No game
 files or fonts.
 
@@ -121,15 +121,15 @@ page. It has been tested on a few ARM boards (RK3588 with a Mali GPU), so report
    `deviceName`, `driverName` and `driverInfo`.
 3. **What happened**: start screen? extraction? in game? where it stopped, any visual problems (screenshots help).
    With a controller: its model, and whether it works (the log names it: `[input] gamepad: ...`).
-4. **The log**: `~/.local/share/lasrecomp/lasrecomp.log` (or the terminal output when started from a terminal).
+4. **The log**: `~/.local/share/lasrecomp/eowrecomp.log` (or the terminal output when started from a terminal).
    A crash writes `*** signal ...` and a backtrace there; attach the whole file (or if the problem was in
-   an earlier run, that run's `lasrecomp-backup-*.log`, by date modified).
+   an earlier run, that run's `eowrecomp-backup-*.log`, by date modified).
 5. **A crash backtrace with gdb** when the log's isn't enough:
 
        ./LAS.Recomp-<version>-linux-aarch64.AppImage --appimage-extract    # -> squashfs-root/
        cd ~/.local/share/lasrecomp
        gdb -batch -ex 'handle SIGSEGV nostop noprint pass' -ex run -ex 'thread apply all bt 20' \
-           --args ~/squashfs-root/usr/bin/lasrecomp > gdb.txt 2>&1
+           --args ~/squashfs-root/usr/bin/eowrecomp > gdb.txt 2>&1
 
    (Adjust the `squashfs-root` path to where you extracted it. The game itself uses SIGSEGV for memory watches, hence
    the `handle` line; a real crash still ends in the backtrace. Attach `gdb.txt`.)

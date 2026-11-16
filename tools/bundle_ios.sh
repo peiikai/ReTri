@@ -1,10 +1,10 @@
 #!/bin/bash
-# make ipa: build/ios/LAS Recomp.app and build/dist/LAS Recomp-<version>-iOS.ipa from build/ios/lasrecomp and
-# build/ios/lasgame.dylib. The app is laid out as on macOS: the executable holds no game code; the game code library
+# make ipa: build/ios/EoW Recomp.app and build/dist/EoW Recomp-<version>-iOS.ipa from build/ios/eowrecomp and
+# build/ios/eowgame.dylib. The app is laid out as on macOS: the executable holds no game code; the game code library
 # (built from your own game files) is the embedded Frameworks/LASGame.framework, signed with the app - iOS runs only
 # code signed inside the bundle, so the .ipa holds the game's code: for your own devices, never shared.
 # The data folder on the device is the app's Documents (Files app / Finder): put your extracted/ (exefs + romfs)
-# there; saves, seeds and lasrecomp.log live there too. Fonts and the icon ship in the bundle.
+# there; saves, seeds and eowrecomp.log live there too. Fonts and the icon ship in the bundle.
 #
 #   TEAM_ID=<id>          the Apple Developer team (the entitlement in runtime/platform/ios.entitlements: any team)
 #   PROFILE=<.mobileprovision>  a development profile for BUNDLE_ID with those capabilities and this device
@@ -21,10 +21,10 @@
 #                         plists, the simulator's Python slice)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-EXE=${1:-build/ios/lasrecomp}
-LIB=${2:-$(dirname "$EXE")/lasgame.dylib}
+EXE=${1:-build/ios/eowrecomp}
+LIB=${2:-$(dirname "$EXE")/eowgame.dylib}
 SKELETON=${SKELETON:-}
-APP=${APP:-build/ios/LAS Recomp.app}
+APP=${APP:-build/ios/EoW Recomp.app}
 BUNDLE_ID=${BUNDLE_ID:-com.peiikai.lasrecomp.ios}
 IOS_MIN=${IOS_MIN:?the Makefile sets IOS_MIN - run as make ipa / ios-skeleton}
 if [ -n "${IOS_SIM:-}" ]; then
@@ -49,8 +49,8 @@ if nm "$EXE" | grep ' _f_70' >/dev/null; then echo "$EXE has game code linked in
 
 rm -rf "$APP"
 mkdir -p "$APP/Frameworks"
-cp "$EXE" "$APP/lasrecomp"
-strip -S "$APP/lasrecomp"
+cp "$EXE" "$APP/eowrecomp"
+strip -S "$APP/eowrecomp"
 
 # The game code: Frameworks/LASGame.framework (a flat iOS framework: the binary, Info.plist, its .id next to it).
 # The skeleton gets only its Info.plist (runtime/iosexport.c adds the library and its .id).
@@ -122,11 +122,11 @@ cat > "$APP/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key><string>en</string>
-	<key>CFBundleDisplayName</key><string>LAS Recomp</string>
-	<key>CFBundleExecutable</key><string>lasrecomp</string>
+	<key>CFBundleDisplayName</key><string>EoW Recomp</string>
+	<key>CFBundleExecutable</key><string>eowrecomp</string>
 	<key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-	<key>CFBundleName</key><string>LAS Recomp</string>
+	<key>CFBundleName</key><string>EoW Recomp</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>$SHORT</string>
 	<key>CFBundleVersion</key><string>1</string>
@@ -160,7 +160,7 @@ cat > "$APP/Info.plist" <<EOF
 		<key>UIApplicationShortcutItemTitle</key><string>Play Vanilla</string>
 		<key>UIApplicationShortcutItemIconSymbolName</key><string>play.fill</string>
 	</dict></array>
-	<key>NSLocalNetworkUsageDescription</key><string>LiveSplit: LAS Recomp connects to LiveSplit's Server on your computer to drive the timer.</string>
+	<key>NSLocalNetworkUsageDescription</key><string>LiveSplit: EoW Recomp connects to LiveSplit's Server on your computer to drive the timer.</string>
 EOF
 cat >> "$APP/Info.plist" <<'EOF'
 </dict>
@@ -223,8 +223,8 @@ if [ -n "$SKELETON" ]; then
     # Sideloading tools (Impactor, SideStore, AltStore) take the entitlements to ask Apple for from the executable's
     # own code signature: an ad-hoc signature carrying ours (they re-sign over it). The frameworks stay unsigned
     # (their signature has to be the tool's anyway).
-    codesign --force --sign - --entitlements runtime/platform/ios.entitlements --timestamp=none "$APP/lasrecomp"
-    codesign -d --entitlements :- "$APP/lasrecomp" 2>/dev/null | grep -q increased-memory-limit || { echo "entitlements not in the signature"; exit 1; }
+    codesign --force --sign - --entitlements runtime/platform/ios.entitlements --timestamp=none "$APP/eowrecomp"
+    codesign -d --entitlements :- "$APP/eowrecomp" 2>/dev/null | grep -q increased-memory-limit || { echo "entitlements not in the signature"; exit 1; }
     echo "$APP (skeleton): $(du -sh "$APP" | cut -f1), $(ls "$APP/Frameworks" | wc -l | tr -d ' ') frameworks, ad-hoc signed with the entitlements"
     exit 0
 fi
@@ -270,7 +270,7 @@ fi
 
 mkdir -p build/dist && rm -rf build/ios/Payload && mkdir build/ios/Payload
 cp -R "$APP" build/ios/Payload/
-IPA="build/dist/LAS Recomp-$VERSION-iOS.ipa"
+IPA="build/dist/EoW Recomp-$VERSION-iOS.ipa"
 rm -f "$IPA"
 (cd build/ios && zip -qr "../../$IPA" Payload)
 rm -rf build/ios/Payload
@@ -279,8 +279,8 @@ echo "$IPA ($(du -h "$IPA" | cut -f1))"
 if [ -n "${DEVICE:-}" ]; then
     xcrun devicectl device install app --device "$DEVICE" "$APP"
     xcrun devicectl device process launch --device "$DEVICE" --terminate-existing "$BUNDLE_ID"
-    echo "log: lasrecomp.log in the data folder (Files app; with the data folder elsewhere, launch with" \
+    echo "log: eowrecomp.log in the data folder (Files app; with the data folder elsewhere, launch with" \
          "--environment-variables '{\"LARECOMP_LOG_DOCUMENTS\":\"1\"}' to keep it in Documents), or: xcrun devicectl device" \
          "copy from --device $DEVICE --domain-type appDataContainer --domain-identifier $BUNDLE_ID" \
-         "--source Documents/lasrecomp.log --destination ."
+         "--source Documents/eowrecomp.log --destination ."
 fi

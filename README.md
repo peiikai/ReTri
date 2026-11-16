@@ -1,4 +1,4 @@
-# LAS Recomp
+# EoW Recomp
 
 > [!IMPORTANT]
 > **This project was made almost exclusively with AI.** Nearly all of the code, tooling, reverse engineering and
@@ -8,8 +8,9 @@
 > in the controversy in relation to this project. You may simply ignore this project and its code.
 > As with anything on the internet, you run the code at your own discretion.
 
-**LAS Recomp** is a static recompilation of *The Legend of Zelda: Link's Awakening* (Nintendo Switch, 2019) into a
-native Windows, macOS, Linux, Android and iOS application.
+**EoW Recomp** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch) into a native
+macOS application (Apple Silicon, Metal). It is built on the LAS Recomp runtime, which still supports *Link's
+Awakening*; much of the text below is that runtime's and describes Link's Awakening.
 
 > [!NOTE]
 > Currently supported platforms:
@@ -66,7 +67,7 @@ These are the minimums during the beta and may change as development continues.
 ![Mabe Village in a 21:9 window: the unlocked aspect ratio shows more of the island](docs/ultrawide.jpg)
 
 > [!NOTE]
-> **No game files are included.** LAS Recomp needs your own legally obtained copy of the extracted game files of
+> **No game files are included.** EoW Recomp needs your own legally obtained copy of the extracted game files of
 > *Link's Awakening* **v1.0.0, v1.0.1 or v1.1.0**. When setting up, choose a folder that contains the `exefs`
 > and `romfs` folders, or their contents. Instructions on how to obtain these files will **NOT** be provided.
 > On first launch the app sets up what it needs, including the actual recompilation locally. No game files, assets or fonts are included.
@@ -95,27 +96,27 @@ Known issues and their status are on the [GitHub issues page](https://github.com
 
 The iOS app is made on your computer from your own game files, then sideloaded.
 
-1. Set up LAS Recomp on a Mac, Windows or Linux computer as usual.
-2. From the same release, download `LAS Recomp-<version>-iOS.laskit`.
+1. Set up EoW Recomp on a Mac, Windows or Linux computer as usual.
+2. From the same release, download `EoW Recomp-<version>-iOS.laskit`.
 3. On the start screen, open Settings > System > Recomp for iOS..., choose the kit, then Export iOS app.
-   The app is saved to your Downloads folder as `LAS Recomp-<version>-iOS.ipa`.
+   The app is saved to your Downloads folder as `EoW Recomp-<version>-iOS.ipa`.
 4. Install the .ipa with a sideloading tool such as SideStore, AltStore or Sideloadly. A free Apple account works,
-   but the app then has to be refreshed every 7 days. LAS Recomp only makes the .ipa. Installing it is up to you,
+   but the app then has to be refreshed every 7 days. EoW Recomp only makes the .ipa. Installing it is up to you,
    and we can't help with these tools since they're made by others. The extra steps come from Apple's limits on
-   installing apps, not from LAS Recomp.
+   installing apps, not from EoW Recomp.
 5. Copy your game files folder (with `exefs` and `romfs` in it) to the phone or iPad:
    - Mac: connect it with a cable, select it in Finder's sidebar, open the Files tab and drag the folder onto
-     LAS Recomp.
-   - Windows: the same in the Apple Devices app (or iTunes), under Files > LAS Recomp.
+     EoW Recomp.
+   - Windows: the same in the Apple Devices app (or iTunes), under Files > EoW Recomp.
    - USB-C drive: put the folder on the drive and plug it in (iPhone 15 or newer, USB-C iPads).
-   - iCloud Drive: upload the folder, then in the Files app move it to On My iPhone (or On My iPad). LAS Recomp
+   - iCloud Drive: upload the folder, then in the Files app move it to On My iPhone (or On My iPad). EoW Recomp
      won't use game files that are still on iCloud Drive.
 6. Open the app and choose that folder when it asks for your game files. Use the same game version as the files
    on your computer.
 
 ### Increased Memory Limit
 
-LAS Recomp asks iOS for more memory than a normal app gets. iOS only grants it when the tool that signs the app also
+EoW Recomp asks iOS for more memory than a normal app gets. iOS only grants it when the tool that signs the app also
 turns on Increased Memory Limit for the app's App ID. Not every tool does. Without it, iOS may close the game when it
 needs more memory, and the start screen says "Installed without the increased memory limit".
 
@@ -158,7 +159,7 @@ GetMoreRam. More on the iOS app is there too.
 
 Every platform needs your own game files (v1.0.0, v1.0.1 or v1.1.0): build first, then use the start screen's game-file setup.
 `make gen` then recompiles the game code from your own game files into `generated/`, and `make` builds it into its own
-library next to the app (`build/lasgame.*`); without it the start screen builds that library itself, as it does for
+library next to the app (`build/eowgame.*`); without it the start screen builds that library itself, as it does for
 players. Release builds hold none of the game's code: the start screen builds it on each player's machine from their
 own game files, with the bundled generator (`make gen-helper`) and compiler (`tools/fetch_zig.sh`).
 
@@ -167,14 +168,14 @@ own game files, with the bundled generator (`make gen-helper`) and compiler (`to
 Requirements: Apple Silicon, Xcode command line tools (clang), [Homebrew](https://brew.sh) `sdl3` and `ffmpeg`,
 Python 3.12.
 
-1. Build: `make -j10` -> `build/lasrecomp`. Set up your game files (above), then `make gen` and `make -j10` again.
+1. Build: `make -j10` -> `build/eowrecomp`. Set up your game files (above), then `make gen` and `make -j10` again.
 2. Randomizer: create the Python environment for LAS-Randomizer, from `third_party/LAS-Randomizer`:
    `python3.12 -m venv venv && venv/bin/pip install -r requirements.txt`.
-3. Run: `./build/lasrecomp extracted` (start screen) or `./build/lasrecomp extracted --play` (straight into the game).
+3. Run: `./build/eowrecomp extracted` (start screen) or `./build/eowrecomp extracted --play` (straight into the game).
 4. Package: `make deps` (once: SDL3, FFmpeg, keystone and Python from pinned sources, built for macOS 15),
    `make rando-helper` (the seed generator as a standalone helper, so players need no Python), `make gen-helper` and
    `tools/fetch_zig.sh` (what the start screen builds the game code with), then `make app` ->
-   `build/LAS Recomp.app` (macOS 15+, Apple Silicon) and `make dmg` -> `build/dist/LAS Recomp-<version>-macOS.dmg`.
+   `build/EoW Recomp.app` (macOS 15+, Apple Silicon) and `make dmg` -> `build/dist/EoW Recomp-<version>-macOS.dmg`.
 
 ### Windows
 
@@ -186,10 +187,10 @@ that page.
    It installs MSYS2 (UCRT64: clang, make, SDL3, FFmpeg, Vulkan, shaderc), Python 3.12 for the tools and the
    randomizer (`third_party\LAS-Randomizer\venv`) and switches the clone to LF line endings.
 2. Build, from an MSYS2 UCRT64 shell (or Git Bash with `export PATH="/c/msys64/ucrt64/bin:/c/msys64/usr/bin:$PATH"`):
-   `make -j` -> `build/lasrecomp.exe`. Set up your game files (above), then `make gen` and `make -j` again.
-3. Run: `./build/lasrecomp.exe extracted`, from a shell with `C:\msys64\ucrt64\bin` on PATH (for the DLLs).
+   `make -j` -> `build/eowrecomp.exe`. Set up your game files (above), then `make gen` and `make -j` again.
+3. Run: `./build/eowrecomp.exe extracted`, from a shell with `C:\msys64\ucrt64\bin` on PATH (for the DLLs).
 4. Package: `make deps-windows` (once: LGPL FFmpeg), `make rando-helper RANDO_PY="<path to python.org Python 3.12>"`
-   (MSYS2's Python has no oead wheel), then `make dist` -> `build/dist/LAS Recomp-<version>-windows.zip`.
+   (MSYS2's Python has no oead wheel), then `make dist` -> `build/dist/EoW Recomp-<version>-windows.zip`.
 
 ### Linux
 
@@ -197,21 +198,21 @@ Requirements: x86-64 with AVX2 (or aarch64, experimental), a GPU with Vulkan 1.3
 Vulkan Memory Allocator from your distribution, Python 3.12. Packages, cross builds and details in
 [docs/linux.md](docs/linux.md).
 
-1. Build: `make -j` -> `build/lasrecomp`. Set up your game files (above), then `make gen` and `make -j` again.
-2. Run: `./build/lasrecomp extracted`.
+1. Build: `make -j` -> `build/eowrecomp`. Set up your game files (above), then `make gen` and `make -j` again.
+2. Run: `./build/eowrecomp extracted`.
 3. Package: `make appimage` (this machine's arch; `ARCH=aarch64` cross-compiles) or `make appimages` (both) ->
-   `build/dist/LAS Recomp-<version>-linux-<arch>.AppImage`, built in Ubuntu 22.04 containers (podman). `make smoketest`
+   `build/dist/EoW Recomp-<version>-linux-<arch>.AppImage`, built in Ubuntu 22.04 containers (podman). `make smoketest`
    checks the x86-64 AppImage before a release.
 
 Where files live (game files, saves, seeds, settings and logs):
 - macOS: `~/Library/Application Support/com.peiikai.lasrecomp/`
-- Windows: next to `lasrecomp.exe`, so keep the `LAS Recomp` folder somewhere writable (not Program Files).
+- Windows: next to `eowrecomp.exe`, so keep the `EoW Recomp` folder somewhere writable (not Program Files).
 - Linux: `~/.local/share/lasrecomp/`
 - Android: `Android/data/com.lasrecomp.android/files` in the phone's storage.
-- iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > LAS Recomp).
+- iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > EoW Recomp).
 - You can move it to another folder or drive in Settings > System > Data folder.
 - `LARECOMP_DATA_ROOT=<dir>` overrides all of these.
-- For a bug report, attach `lasrecomp.log` from that folder.
+- For a bug report, attach `eowrecomp.log` from that folder.
 
 ### Android
 
@@ -225,7 +226,7 @@ Python 3. Details in [docs/android.md](docs/android.md).
 ### Resuming game-code builds
 
 If the game-code build is cancelled or interrupted, **Resume game code** continues where it stopped. It also resumes
-by itself the next time LAS Recomp starts. **System > Clear build cache** removes the build's leftover files
+by itself the next time EoW Recomp starts. **System > Clear build cache** removes the build's leftover files
 without touching the installed game, your game files or your saves.
 
 ## Credits
@@ -337,13 +338,13 @@ none of their files are used):
 
 ## Legal
 
-LAS Recomp is a fan project. It is not affiliated with, endorsed by or sponsored by Nintendo. *The Legend of Zelda*
+EoW Recomp is a fan project. It is not affiliated with, endorsed by or sponsored by Nintendo. *The Legend of Zelda*
 and *Link's Awakening* are trademarks of Nintendo. No game files, game code, assets or fonts are included - not in
 this repository and not in release builds. You must provide your own legally obtained copy of the game files to play.
 
 ## License
 
-LAS Recomp's own code (the recompiler tools, the runtime, the randomizer additions) is open source under the
+EoW Recomp's own code (the recompiler tools, the runtime, the randomizer additions) is open source under the
 [MIT License](LICENSE). Third-party components keep their own licenses: LAS-Randomizer (MIT), ported audio renderer code (MIT, see `third_party/`), Dear ImGui (MIT),
 Vulkan Memory Allocator (MIT), SMAA (MIT), AMD FSR 1 (MIT), the Baloo 2 and BIZ UDPGothic fonts (SIL OFL 1.1), the DejaVu Sans font (Bitstream Vera / DejaVu license), SDL 3 (zlib), FFmpeg (LGPL 2.1+, linked dynamically, and statically in the iOS app), the
 Zig compiler (MIT; its LLVM / Clang / LLD: Apache 2.0 with LLVM exceptions; its C library headers keep their own
@@ -355,7 +356,7 @@ processes, so it embeds CPython and the seed generator's packages - oead, evfl a
 quicktex (LGPL 3), Pillow, PyYAML, appdirs - and links SDL 3 and FFmpeg (LGPL 2.1+) statically; the app's `LICENSES/`
 folder carries each one's licence text, its sources are this repository plus the versions in the table (the LGPL
 libraries can be relinked: `make deps-ios` builds them from source, `make ipa` the app), and the game code library it
-embeds is built from the player's own game files and never shared. The license covers LAS Recomp's code only - it grants
+embeds is built from the player's own game files and never shared. The license covers EoW Recomp's code only - it grants
 nothing for Nintendo's game, which you must supply yourself.
 
 ### Source code of bundled third-party components

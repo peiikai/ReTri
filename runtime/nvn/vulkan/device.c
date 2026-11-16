@@ -168,8 +168,8 @@ static void create_instance(void) {
     bool validate = strict || getenv("LARECOMP_VK_VALIDATION") != NULL;
     if (validate) ext[n_ext++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
     const char *layers[] = {"VK_LAYER_KHRONOS_validation"};
-    VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "LARecomp",
-                             .pEngineName = "LARecomp", .apiVersion = VK_API_VERSION_1_3};
+    VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "EoWRecomp",
+                             .pEngineName = "EoWRecomp", .apiVersion = VK_API_VERSION_1_3};
     VkInstanceCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &app,
                                .enabledExtensionCount = n_ext, .ppEnabledExtensionNames = ext,
                                .enabledLayerCount = validate ? 1 : 0, .ppEnabledLayerNames = layers};
@@ -299,7 +299,7 @@ void vk_device_fault_report(void) {
 }
 
 // Each memory heap: its size, the driver's budget for this process (smaller when other programs hold that memory),
-// this process's use and the part LAS Recomp allocated through VMA. Logged at start and when an allocation fails
+// this process's use and the part EoW Recomp allocated through VMA. Logged at start and when an allocation fails
 // (issue #45: out of device memory on a 6 GB GTX 1060 - our own use, or other programs'?).
 void vk_log_memory(const char *why) {
     if (!g_vk.vma) return;
@@ -2094,7 +2094,7 @@ void ui_window_init(void) {
                                             getenv("LARECOMP_HOST_INPUT") || getenv("LARECOMP_BIND_TEST"));
         if (scripted) SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
     }
-    window = SDL_CreateWindow("LAS Recomp", win_w, win_h, wflags);
+    window = SDL_CreateWindow("EoW Recomp", win_w, win_h, wflags);
 #ifdef __ANDROID__
     // opened with the screen locked / off: no surface to make the window on yet; it comes once the activity shows.
     // SDL_PumpEvents sleeps while the app is paused, so the 5 s count only time in the foreground, and a window that
@@ -2103,7 +2103,7 @@ void ui_window_init(void) {
         if (tries == 0) LOG("[vk] waiting for the Android window (%s)\n", SDL_GetError());
         SDL_PumpEvents();
         SDL_Delay(50);
-        window = SDL_CreateWindow("LAS Recomp", win_w, win_h, wflags);
+        window = SDL_CreateWindow("EoW Recomp", win_w, win_h, wflags);
     }
 #endif
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
