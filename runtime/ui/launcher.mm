@@ -2285,7 +2285,7 @@ static void load_fonts(void) {
     const char *fonts[] = {getenv("LARECOMP_LAUNCHER_FONT") ? getenv("LARECOMP_LAUNCHER_FONT") : "",  // (test)
                            own.c_str(), "fonts/nintendo_udsgr_std_003.ttf", "/System/Library/Fonts/Avenir Next.ttc",
                            "/System/Library/Fonts/Helvetica.ttc", "C:/Windows/Fonts/segoeui.ttf"};
-    // the menus' language's glyphs (i18n.h), and its script's font merged in; the title only says "EoW Recompiled"
+    // the menus' language's glyphs (i18n.h), and its script's font merged in; the title only says "ReTri" or "EoW Recompiled"
     static const ImWchar title_ranges[] = {0x20, 0x7E, 0};
     for (const char *p : fonts) {
         if (g_font_menu || !*p || !file_exists(p)) continue;
@@ -2298,6 +2298,10 @@ static void load_fonts(void) {
         g_font_title = io.Fonts->AddFontFromFileTTF(p, 92 * (b2 ? 2.3f : 1), NULL, title_ranges);
     }
     if (!g_font_menu) g_font_small = g_font_menu = g_font_title = io.Fonts->AddFontDefault();
+    // the title in Hylia Serif (Omni Jacala, free, not for profit: third_party/fonts/HyliaSerif)
+    char hylia[1024];
+    if (rt_resource("HyliaSerifBeta-Regular.otf", "third_party/fonts/HyliaSerif/HyliaSerifBeta-Regular.otf", hylia, sizeof hylia))
+        if (ImFont *f = io.Fonts->AddFontFromFileTTF(hylia, 150, NULL, title_ranges)) g_font_title = f;
 }
 
 extern "C" void launcher_run(const char *root) {
