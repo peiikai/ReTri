@@ -79,7 +79,7 @@ extern "C" void general_draw(float scale) {
     if (la && opt_choice("Text speed", &g_settings.text_speed, g_text_speeds, N_TEXT_SPEEDS, TEXT_SPEED_NORMAL,
                    "How fast message text appears. Each message still waits for your button press."))
         settings_save();
-    if (la) {   // (from Video, user 2026-11-12, after Text speed: a live preview, as an Off / On choice)
+    {   // (from Video, user 2026-11-12, after Text speed: a live preview, as an Off / On choice; EoW too)
         static const char *const oo[] = {LN("Off"), LN("On")};
         int rb = g_settings.blur_removal;
         if (opt_preview("Remove tilt-shift blur", &rb, oo, 2, 0,
