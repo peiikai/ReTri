@@ -106,6 +106,12 @@ const GameVersion *game_other_of(const char *game_dir) {
     return NULL;
 }
 
+uint64_t game_other_sdk_base_of(const GameVersion *v) {
+    for (size_t i = 0; v && i < sizeof games / sizeof *games; i++)
+        if (&games[i].v == v) return games[i].sdk_base;
+    return SDK_BASE;
+}
+
 bool game_version_select(const char *game_dir, char *why, size_t why_size) {
     uint8_t id[20];
     char exefs[1100], path[1100];
