@@ -57,8 +57,9 @@ endfunction()
 set(INC ${CMAKE_BINARY_DIR}/inc)
 las_c_string(${R}/third_party/smaa/SMAA.hlsl ${INC}/smaa_hlsl.inc)
 las_c_string(${R}/runtime/nvn/shader_variants.txt ${INC}/shader_variants.inc "\"\"\n")
+las_c_string(${R}/runtime/nvn/shader_variants_eow.txt ${INC}/shader_variants_other.inc "\"\"\n")  # (EoW's: the Makefile's EOW_SHADER_LIST)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${R}/third_party/smaa/SMAA.hlsl
-             ${R}/runtime/nvn/shader_variants.txt)
+             ${R}/runtime/nvn/shader_variants.txt ${R}/runtime/nvn/shader_variants_eow.txt)
 
 add_library(SDL3 SHARED IMPORTED)
 set_target_properties(SDL3 PROPERTIES IMPORTED_LOCATION ${DEPS}/lib/libSDL3.so)
