@@ -1,9 +1,9 @@
-# libmain.so: the LAS Recomp runtime for Android (what the Makefile builds into the desktop executable), with the
+# libmain.so: the TriCompiled runtime for Android (what the Makefile builds into the desktop executable), with the
 # Vulkan backend and the ImGui UI, built with the moving guest window (LARECOMP_DYN_BASE: runtime/rt.h). The game code
 # is not in it: it is built on the device from the player's own extracted game files. From LASRecompAndroid by mamcjr
 # (MIT).
 cmake_minimum_required(VERSION 3.22)
-project(lasrecomp C CXX)
+project(tricompiled C CXX)
 
 get_filename_component(R ${CMAKE_CURRENT_SOURCE_DIR}/../../../../.. ABSOLUTE)   # the repository
 set(DEPS ${R}/android/deps/out)                                                  # android/deps/build_deps.sh

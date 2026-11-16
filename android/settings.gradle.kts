@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "LASRecomp"
+rootProject.name = "TriCompiled"
 include(":app")

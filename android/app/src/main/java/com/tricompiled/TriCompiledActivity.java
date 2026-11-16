@@ -1,12 +1,12 @@
-// LAS Recomp on Android: SDL's activity runs the runtime (libmain.so, runtime/main.c). Before the native code starts,
+// TriCompiled on Android: SDL's activity runs the runtime (libmain.so, runtime/main.c). Before the native code starts,
 // the shipped resources (assets/res: the start screen's font, the fallback fonts, the icon) are copied to
 // <internal files>/res, where runtime/platform/linux.c (plat_exe_path) and runtime/paths.c find them, as next to the
 // desktop executable. The data folder (game files, saves, settings, the log) is <external files>:
-// Android/data/com.lasrecomp.android/files.
+// Android/data/com.tricompiled.android/files.
 // The game files folder is picked with Android's own folder picker (SDL has none for folders), which gives a
 // content:// folder rather than a path: the setup copies the game files from it through the storage framework
 // (importGameFiles), into the data folder, where the runtime reads them as files. From LASRecompAndroid by mamcjr (MIT).
-package com.lasrecomp;
+package com.tricompiled;
 
 import android.content.ContentResolver;
 import android.content.Intent;
@@ -32,8 +32,8 @@ import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-public class LASRecompActivity extends SDLActivity {
-    private static final String TAG = "LASRecomp";
+public class TriCompiledActivity extends SDLActivity {
+    private static final String TAG = "TriCompiled";
 
     @Override
     protected String[] getLibraries() {
@@ -59,7 +59,7 @@ public class LASRecompActivity extends SDLActivity {
             Os.setenv("LARECOMP_ANDROID_TABLET", getResources().getConfiguration().smallestScreenWidthDp >= 600 ? "1" : "0", true);
             // the desktop's debug and test switches (docs/debug-hooks.md) from the launch, in debuggable builds only (the
             // activity is exported: in a release build any app could start it with switches set):
-            //   adb shell am start -n com.lasrecomp.android/com.lasrecomp.LASRecompActivity --es LARECOMP_LOG_SKIPS 1
+            //   adb shell am start -n com.tricompiled.android/com.tricompiled.TriCompiledActivity --es LARECOMP_LOG_SKIPS 1
             boolean debuggable = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
             Bundle extras = debuggable && getIntent() != null ? getIntent().getExtras() : null;
             if (extras != null)
@@ -170,10 +170,10 @@ public class LASRecompActivity extends SDLActivity {
     private static final Object dlgLock = new Object();
     private static boolean dlgDone;
     private static String dlgText;
-    private static LASRecompActivity self;
+    private static TriCompiledActivity self;
 
     public static boolean driverErrorDialog(String text) {
-        LASRecompActivity a = self;
+        TriCompiledActivity a = self;
         if (a == null) return false;
         synchronized (dlgLock) { dlgDone = false; dlgText = text; }
         a.runOnUiThread(() -> a.showDriverError(null));
@@ -203,7 +203,7 @@ public class LASRecompActivity extends SDLActivity {
             }
             return true;
         } catch (Exception e) {
-            Log.w("LASRecomp", "update check: " + e);
+            Log.w("TriCompiled", "update check: " + e);
             new File(path).delete();
             return false;
         } finally {
@@ -225,7 +225,7 @@ public class LASRecompActivity extends SDLActivity {
     private void showDriverError(String extra) {
         String msg = dlgText + (extra != null ? "\n\n" + extra : "");
         android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("LAS Recomp").setMessage(msg).setCancelable(false);
+            .setTitle("TriCompiled").setMessage(msg).setCancelable(false);
         if (snapdragon())  // (elsewhere no package can help: Close, or back to the phone's own driver)
             b.setPositiveButton("Choose a driver package", (d, w) -> {
                 Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
