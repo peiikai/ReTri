@@ -23,9 +23,9 @@
 // back, cancels or saves. Each control: settings touch_ctl_<name> = x, y (share of the screen), size, hidden.
 // Echoes of Wisdom (game_other()): the game has no context known here, so play shows the whole Switch pad - the stick,
 // A B X Y, L R ZL ZR, Plus / Minus and a D-pad (the echo list, accessories) - from the moment the game runs, with
-// the Switch letters on them; nothing reads LA's save and no tap on the game's screen turns into presses. They take
-// look of the inventory screen's background (eow_disc), laid out as LA's; Y shows the echo or
-// item on the HUD's Y slot (texpatch_eow_y_icon: the icon the HUD draws).
+// the Switch letters on them; nothing reads LA's save. A drag on the game's screen pans the camera (the right stick,
+// C_PAN). They take the look of the inventory screen's background (eow_disc), laid out as LA's; Y and X show the echo
+// or item on the HUD's Y / X buttons (texpatch_eow_slot_icon: the icons the HUD draws).
 // A quick tap still reaches the game (a button is held at least 80 ms). LARECOMP_TOUCH_SHOW_INPUT=1 (videos, tests):
 // scripted input (LARECOMP_INPUT) lights the buttons and moves the stick as a thumb would.
 #include <SDL3/SDL.h>
@@ -52,7 +52,7 @@ bool tracker_map_page_shown(void);   // runtime/ui/tracker_overlay.mm
 bool chaos_dgnmap_shown(void);       // runtime/ui/chaos_overlay.mm
 bool pause_menu_shown(void);         // runtime/ui/inventory_overlay.mm
 int texpatch_title_screen(void);     // runtime/nvn/texpatch.c
-const char *texpatch_eow_y_icon(void);
+const char *texpatch_eow_slot_icon(int slot);
 int texpatch_ui_rgba_list(const char *const *names, int n, uint8_t **out, int *w, int *h);
 extern int g_start_screen;           // runtime/hle/warp.c
 }
@@ -102,6 +102,12 @@ static std::atomic<int> g_ctx{X_PLAY};     // what the game shows, as of the las
 static std::atomic<uint32_t> g_want{0};    // the controls on screen now (context and what Link has)
 static float g_stick_cx, g_stick_cy;       // where the stick's base is now (it follows the thumb's first touch)
 static float g_knob_x, g_knob_y;
+// EoW: a finger on the game's screen (no control under it) pans the camera, as the right stick: the world follows it,
+// as a map dragged by hand (drag left: the view goes right), the push its distance from where it went down (all of
+// it at 1/8 of the screen's height), let go: back. The finger's control is C_PAN.
+enum { C_PAN = C_COUNT };
+static std::atomic<int32_t> g_rx{0}, g_ry{0};
+static float g_pan_x, g_pan_y;
 static bool g_menu_down, g_edit_down;
 static double g_last_touch, g_last_pad;    // (SDL_GetTicks seconds) Auto: shown when a touch came after the pad's last use
 #define MAX_FINGERS 10
@@ -280,7 +286,7 @@ static void dpad_to(float x, float y) {
 
 static void release_all(void) {
     for (int i = 0; i < MAX_FINGERS; i++) g_fingers[i].ctl = -1;
-    g_buttons = 0, g_lx = 0, g_ly = 0;
+    g_buttons = 0, g_lx = 0, g_ly = 0, g_rx = 0, g_ry = 0;
     g_knob_x = g_stick_cx = g_ctl[C_STICK].x, g_knob_y = g_stick_cy = g_ctl[C_STICK].y;
     g_menu_down = false, g_edit_down = false;
 }
@@ -545,6 +551,11 @@ static bool handle(const SDL_Event *e, bool *toggle_menu) {
     if (menu_input_captured() || !touch_visible()) { release_all(); return false; }  // (the menu takes touches)
     if (e->type == SDL_EVENT_FINGER_DOWN) {
         int c = hit(x, y);
+        if (c < 0 && eow() && in_game()) {  // (EoW: the camera)
+            if (slot < 0) for (int i = 0; i < MAX_FINGERS && slot < 0; i++) if (g_fingers[i].ctl < 0) slot = i;
+            if (slot >= 0) g_fingers[slot].id = e->tfinger.fingerID, g_fingers[slot].ctl = C_PAN, g_pan_x = x, g_pan_y = y;
+            return true;
+        }
         if (c < 0) {  // a tap on the game's own screen
             int ctx = g_ctx.load();
             if (ctx == X_TITLE) title_tap(x, y);
@@ -569,6 +580,12 @@ static bool handle(const SDL_Event *e, bool *toggle_menu) {
     if (slot < 0) return true;
     int c = g_fingers[slot].ctl;
     if (e->type == SDL_EVENT_FINGER_MOTION) {
+        if (c == C_PAN) {
+            float full = g_h * 0.125f, dx = (g_pan_x - x) / full, dy = (y - g_pan_y) / full, m = hypotf(dx, dy);
+            if (m > 1) dx /= m, dy /= m;
+            g_rx = (int32_t)(dx * 32767), g_ry = (int32_t)(dy * 32767);  // (y: the stick's up is +)
+            return true;
+        }
         if (c == C_STICK) stick_to(x, y);
         else if (c == C_DPAD) { dpad_to(x, y); g_held_until[C_DPAD] = 0; }  // (a slide: the new arm only)
         else if (c >= C_A && c <= C_Y) {  // sliding across the face buttons presses the one under the thumb
@@ -580,6 +597,7 @@ static bool handle(const SDL_Event *e, bool *toggle_menu) {
     }
     // up / cancelled
     g_fingers[slot].ctl = -1;
+    if (c == C_PAN) { g_rx = 0, g_ry = 0; return true; }
     if (c == C_STICK) stick_up();
     if (c == C_MENU && g_menu_down) {
         g_menu_down = false;
@@ -595,6 +613,7 @@ static bool handle(const SDL_Event *e, bool *toggle_menu) {
 
 extern "C" uint64_t touch_buttons(void) { return g_editing ? 0 : g_buttons | g_nav; }
 extern "C" void touch_stick(int32_t *lx, int32_t *ly) { *lx = g_editing ? 0 : g_lx.load(), *ly = g_editing ? 0 : g_ly.load(); }
+extern "C" void touch_rstick(int32_t *rx, int32_t *ry) { *rx = g_editing ? 0 : g_rx.load(), *ry = g_editing ? 0 : g_ry.load(); }
 
 // ---- what the game shows, what Link has
 static int context(void) {
@@ -1001,8 +1020,8 @@ extern "C" void touch_draw(ImDrawList *dl, float w, float h, ImFont *font, ImFon
                 dl->AddLine(ImVec2(c.x - u, c.y + k * u * 0.6f), ImVec2(c.x + u, c.y + k * u * 0.6f), ink, 3 * th);
             continue;
         }
-        // (EoW: Y shows the echo or item the HUD's Y slot shows)
-        const char *in = eow() ? (i == C_Y ? texpatch_eow_y_icon() : NULL) : g_editing && i != C_X && i != C_Y ? icon_of(X_PLAY, i) : icon_of(ctx, i);
+        // (EoW: Y and X show the echo or item the HUD's Y / X buttons show)
+        const char *in = eow() ? (i == C_Y ? texpatch_eow_slot_icon(0) : i == C_X ? texpatch_eow_slot_icon(1) : NULL) : g_editing && i != C_X && i != C_Y ? icon_of(X_PLAY, i) : icon_of(ctx, i);
         ImTextureID tex = in ? ui_game_icon(in) : (ImTextureID)0;
         if (tex) {
             icon(dl, tex, p, r, fa);

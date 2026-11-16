@@ -278,6 +278,7 @@ static EowIcon *g_icons;
 static int g_nicons;
 static pthread_once_t g_icons_once = PTHREAD_ONCE_INIT;
 static _Atomic uint64_t *g_icon_seen;  // (per icon: when a draw last sampled it, plat_now_ns)
+static float (*g_icon_at)[2];          // (and where: the pane's position, layout units; NAN when not known)
 
 static uint64_t fnv64(const uint8_t *p, size_t n) {
     uint64_t h = 1469598103934665603ull;
@@ -327,6 +328,7 @@ static void load_icons(void) {
         free(d);
     }
     g_icon_seen = calloc(g_nicons ? g_nicons : 1, sizeof *g_icon_seen);
+    g_icon_at = calloc(g_nicons ? g_nicons : 1, sizeof *g_icon_at);
     LOG("[texpatch] %d echo and item icons known\n", g_nicons);
 }
 
@@ -347,17 +349,36 @@ static int eow_icon_identify(const NvnTexture *t, uint64_t total) {
     return -1;
 }
 
-// The icon on the HUD's Y slot: in play the HUD draws exactly one echo or item icon, Y's; when more are drawn at once
-// (the echo list, the menus) or none (a cutscene), the last one stays. NULL until one is seen.
-const char *texpatch_eow_y_icon(void) {
-    static int last = -1;
-    if (!g_icon_seen) return NULL;
+// The icon on the HUD's Y (slot 0) or X (1) button. Where the HUD's buttons are known (runtime/hle/hud_eow.c), the
+// icon drawn there; else, for Y, the one icon the HUD draws in play. When none is (a cutscene) or the slot can't be
+// told (the echo list, the menus: many at once), the last one stays. NULL until one is seen.
+const char *texpatch_eow_slot_icon(int slot) {
+    extern bool hud_eow_slot_at(int slot, float *x, float *y);
+    static int last[2] = {-1, -1};
+    if (!g_icon_seen || slot < 0 || slot > 1) return NULL;
     uint64_t now = plat_now_ns(), recent = 150000000ull;  // (a few frames; the render thread is a frame or two behind)
+    float sx, sy;
     int one = -1, n = 0;
-    for (int i = 0; i < g_nicons && n < 2; i++)
-        if (now - g_icon_seen[i] < recent) one = i, n++;
-    if (n == 1) last = one;
-    return last >= 0 ? g_icons[last].name : NULL;
+    if (hud_eow_slot_at(slot, &sx, &sy)) {
+        for (int i = 0; i < g_nicons && n < 2; i++)
+            if (now - g_icon_seen[i] < recent && fabsf(g_icon_at[i][0] - sx) < 60 && fabsf(g_icon_at[i][1] - sy) < 60) one = i, n++;
+    } else if (slot == 0) {
+        for (int i = 0; i < g_nicons && n < 2; i++)
+            if (now - g_icon_seen[i] < recent) one = i, n++;
+    }
+    if (n == 1) last[slot] = one;
+    return last[slot] >= 0 ? g_icons[last[slot]].name : NULL;
+}
+const char *texpatch_eow_y_icon(void) { return texpatch_eow_slot_icon(0); }
+
+// texpatch_note_draw with the draw's vertex uniforms (a layout pane's: its position at [19], [23])
+void texpatch_note_draw_at(int id, const float *ui, uint64_t size) {
+    if (id >= TEXPATCH_EOW_ICON_BASE && id < TEXPATCH_EOW_ICON_BASE + g_nicons && g_icon_at) {
+        bool ok = ui && size >= 24 * 4;
+        g_icon_at[id - TEXPATCH_EOW_ICON_BASE][0] = ok ? ui[19] : NAN;
+        g_icon_at[id - TEXPATCH_EOW_ICON_BASE][1] = ok ? ui[23] : NAN;
+    }
+    texpatch_note_draw(id);
 }
 
 void texpatch_note_draw(int id) {

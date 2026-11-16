@@ -216,6 +216,11 @@ void rt_hud_corners_tick(uint64_t hud) {
 #endif
 }
 
+// Echoes of Wisdom (runtime/hle/hud_eow.c, its game thread): its HUD's panes are moved there; the same widened draws
+void hud_corners_set_other(bool active, float left, float right, float up) {
+    g_active = active, g_left = left, g_right = right, g_up = up;
+}
+
 // ---- render thread
 static uint64_t g_bars_frame = ~0ull, g_crop_frame = ~0ull;
 static float g_crop_u0, g_crop_u1, g_crop_v0, g_crop_v1;
