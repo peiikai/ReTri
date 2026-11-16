@@ -22,6 +22,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   in plum and bronze (macOS, Windows, iOS and Android).
 - Indirect draws run on the GPU by default (no CPU waits, shadows kept).
 - LA's 30 fps hold is off for EoW.
+- EoW's final image and HUD are drawn at the window's size, not larger and then scaled down: less GPU work at
+  every resolution setting (on an 11" iPad, 4 million pixels instead of 7.5).
 - The start screen has EoW's own look: the title "TriCompiled", the game's title movie playing behind it (a still
   of it on Vulkan; a plum and bronze background before the game files are set up), and text in the settings menu's
   colours.

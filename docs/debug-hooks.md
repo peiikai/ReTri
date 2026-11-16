@@ -203,6 +203,7 @@ These work on both Metal and Vulkan unless noted.
 | `LARECOMP_NO_SCALE` | 1 | Keep all render targets at the game's own size (no resolution scaling). |
 | `LARECOMP_AO_SCALE` | 1 to 4 | Draw the game's ambient occlusion at this many times the Switch's size, whatever the setting and render scale. |
 | `LARECOMP_AO_SCALED` | 1 | Scale the ambient occlusion with the frame, as before issue #356 (shows the old haze and dither). |
+| `LARECOMP_2D_SCALED` | 1 | EoW: scale its 1080-line 2D targets (the composed frame, the HUD) like its 792-line 3D, as before (larger than the window). |
 | `LARECOMP_SHADOW_SCALE` | 0.5 to 4 | Draw the game's shadow map at this many times the Switch's size, whatever the setting. |
 | `LARECOMP_SHADOW_BIAS_RAW` | 1 | Keep the game's polygon offset slope in the shadow map as it is, instead of scaling it with the map's size (A/B tests). |
 | `LARECOMP_AO_NO_GRID` | 1 | Leave the ambient occlusion shaders on the game's own pixel grid when the AO is larger than the Switch's. |
