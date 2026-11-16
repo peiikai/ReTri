@@ -1353,10 +1353,11 @@ NvnTexture *texpatch_hint_icon(void) {
 // read once for the whole list. The caller frees them; returns how many were found.
 // (Runtime-made icons for our overlays: runtime/ui/triforce_icons.mm, race_overlay.mm - nothing of the game ships.)
 int texpatch_ui_rgba_list(const char *const *want, int nwant, uint8_t **out, int *w_out, int *h_out) {
-    // (LA's archives, then EoW's echo and item icons: texpatch_eow_y_icon's names)
+    // (LA's archives, then EoW's echo and item icons (texpatch_eow_y_icon's names) and its HUD and menus
     static const char *const arcs[] = {"region_common/ui/Game.arc", "regionUS/common/ui/GameRegionCommon.arc",
                                        "regionEU/common/ui/GameRegionCommon.arc", "region_common/ui/StartUp.arc",
-                                       "region_common/ui/IconCopyActor.arc", "region_common/ui/IconItem.arc"};
+                                       "region_common/ui/IconCopyActor.arc", "region_common/ui/IconItem.arc",
+                                       "region_common/ui/GameMain.arc"};
     static const uint8_t astc_blocks[][3] = {{0x2d, 4, 4}, {0x2e, 5, 4}, {0x2f, 5, 5}, {0x30, 6, 5}, {0x31, 6, 6},
                                              {0x32, 8, 5}, {0x33, 8, 6}, {0x34, 8, 8}};  // (format: block w, h)
     int found = 0;

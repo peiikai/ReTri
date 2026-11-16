@@ -24,7 +24,7 @@
 // Echoes of Wisdom (game_other()): the game has no context known here, so play shows the whole Switch pad - the stick,
 // A B X Y, L R ZL ZR, Plus / Minus and a D-pad (the echo list, accessories) - from the moment the game runs, with
 // the Switch letters on them; nothing reads LA's save and no tap on the game's screen turns into presses. They take
-// the menus' EoW theme (eow_disc: the pause menu's cells, the cursor's brackets while pressed); Y shows the echo or
+// look of the inventory screen's background (eow_disc), laid out as LA's; Y shows the echo or
 // item on the HUD's Y slot (texpatch_eow_y_icon: the icon the HUD draws).
 // A quick tap still reaches the game (a button is held at least 80 ms). LARECOMP_TOUCH_SHOW_INPUT=1 (videos, tests):
 // scripted input (LARECOMP_INPUT) lights the buttons and moves the stick as a thumb would.
@@ -33,6 +33,7 @@
 #include <atomic>
 #include <mutex>
 #include <string.h>
+#include <vector>
 
 #include "imgui.h"
 #include "../plastic.h"
@@ -52,9 +53,11 @@ bool chaos_dgnmap_shown(void);       // runtime/ui/chaos_overlay.mm
 bool pause_menu_shown(void);         // runtime/ui/inventory_overlay.mm
 int texpatch_title_screen(void);     // runtime/nvn/texpatch.c
 const char *texpatch_eow_y_icon(void);
+int texpatch_ui_rgba_list(const char *const *names, int n, uint8_t **out, int *w, int *h);
 extern int g_start_screen;           // runtime/hle/warp.c
 }
 ImTextureID ui_game_icon(const char *name);  // runtime/ui/triforce_icons.mm
+ImTextureID ui_rgba_texture(const uint8_t *rgba, int w, int h);
 
 enum { BTN_A = 0, BTN_B, BTN_X, BTN_Y, BTN_L = 6, BTN_R, BTN_ZL, BTN_ZR, BTN_PLUS, BTN_MINUS,
        BTN_LEFT, BTN_UP, BTN_RIGHT, BTN_DOWN };  // (input.c's bits)
@@ -803,58 +806,92 @@ static bool dpad_disc(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly,
 }
 
 // ---- drawing: Echoes of Wisdom's look
-// The menus' EoW theme (plastic.h, from the game's pause menu): each button a cell drawn by the menus' own plastic
-// pieces, in the plum of the inventory screen's bands (a little lighter, to read over the game) with a lighter plum
-// rim, the letter set in it in the menu's cream. Pressed: lighter, with the cursor's corner brackets (gold above,
-// green below).
-static ImVec4 alpha_of(ImVec4 c, float a) { return ImVec4(c.x, c.y, c.z, c.w * a); }
-static ImU32 u32(ImVec4 c, float a = 1) { return ImGui::ColorConvertFloat4ToU32(alpha_of(c, a)); }
-static ImVec4 rgb(unsigned v, float a = 1) { return ImVec4((v >> 16 & 255) / 255.0f, (v >> 8 & 255) / 255.0f, (v & 255) / 255.0f, a); }
-static const unsigned kPlum = 0x4A2C3E, kPlumOn = 0x6A3F58, kPlumRim = 0x8A5E76, kPlumRimOn = 0xB58AA0, kPlumWell = 0x2A1822;
-static void eow_cell(ImDrawList *dl, ImVec2 p0, ImVec2 p1, float radius, ImVec4 col, ImVec4 rim, float th) {
-    const PlasticTheme &t = plastic_theme();  // (as plastic_pill: the theme's flat cells, its rim width)
-    float w = fminf(t.ring_w * th * 1.5f, (p1.y - p0.y) * 0.12f), depth = 6 * th;
-    if (t.corner > 0) radius = fminf(radius, t.corner * th), depth = fminf(depth, 3 * th);
-    rim.w = col.w;
-    plastic_add(dl, p0, p1, radius, col, PK_PILL, depth, 0, rim, w, t.edge);
+// The inventory screen's background, laid out as LA's slot discs (round buttons, the stick's compass points and knob,
+// the D-pad's cross). The fill: the felt the screen is made of (MatCloth_00^w) with its faint pinwheel facets
+// (MainBGNormal_00+w, a normal map, lit from the top left), both from the player's GameMain.arc, scaled so its average
+// is the background's colour in the running game (45, 35, 30: sampled from a 1280 x 720 screenshot of the Items page,
+// away from the slots). The edge: the item slots' 1-pixel grey line over a darker one. Pressed: the cursor's corner
+// brackets (gold above, green below). 0: the textures aren't there (LA's look's fallback: the blue bubbles).
+static const int kFill = 512;  // (the fill's size: texels drawn one per 1080p pixel)
+static ImTextureID eow_fill_tex(void) {
+    static int state;
+    static ImTextureID tex;
+    if (state) return tex;
+    state = 1;
+    const char *const names[2] = {"MatCloth_00^w", "MainBGNormal_00+w"};
+    uint8_t *px[2];
+    int w[2], h[2];
+    texpatch_ui_rgba_list(names, 2, px, w, h);
+    if (px[0] && px[1] && w[0] >= kFill && h[0] >= kFill && w[1] > 0 && h[1] > 0) {
+        const float facet = 2.8f;  // (the facets' size on the screen per texel of their map)
+        std::vector<float> f((size_t)kFill * kFill * 3);
+        double sum[3] = {0, 0, 0};
+        for (int y = 0; y < kFill; y++)
+            for (int x = 0; x < kFill; x++) {
+                const uint8_t *c = px[0] + ((size_t)y * w[0] + x) * 4;
+                const uint8_t *n = px[1] + ((size_t)((int)(y / facet) % h[1]) * w[1] + (int)(x / facet) % w[1]) * 4;
+                float nx = n[0] / 127.5f - 1, ny = n[1] / 127.5f - 1;
+                float shade = 1 + 0.10f * (-0.6f * nx + 0.8f * ny);
+                for (int k = 0; k < 3; k++) sum[k] += f[((size_t)y * kFill + x) * 3 + k] = c[k] * shade;
+            }
+        static const float target[3] = {45, 35, 30};
+        std::vector<uint8_t> o((size_t)kFill * kFill * 4);
+        for (size_t i = 0; i < (size_t)kFill * kFill; i++) {
+            for (int k = 0; k < 3; k++)
+                o[i * 4 + k] = (uint8_t)clampf(f[i * 3 + k] * target[k] / (float)(sum[k] / ((double)kFill * kFill)), 0, 255);
+            o[i * 4 + 3] = 255;
+        }
+        tex = ui_rgba_texture(o.data(), kFill, kFill);
+    }
+    free(px[0]);
+    free(px[1]);
+    return tex;
 }
+
+static ImU32 u32(ImVec4 c, float a = 1) { return ImGui::ColorConvertFloat4ToU32(ImVec4(c.x, c.y, c.z, c.w * a)); }
+static const ImU32 kSlotEdge = IM_COL32(65, 62, 61, 255), kSlotShade = IM_COL32(30, 22, 20, 255);  // (sampled as the fill)
+static const ImU32 kSlotIn = IM_COL32(36, 28, 25, 255);  // (inside an item slot: the cross's well)
 static bool eow_disc(ImDrawList *dl, ImVec2 c, float r, bool on, float a, float th, bool sel) {
+    ImTextureID t = eow_fill_tex();
+    if (!t) return false;
     a = fminf(1, 0.55f + 0.5f * a);  // (mostly solid: 0.85 at the opacity setting's default)
+    float span = fminf(2 * r / th, (float)kFill) / kFill;  // (one texel per 1080p pixel; each button its own patch)
+    float u = fmodf(fabsf(c.x / th) * 0.61f, (1 - span) * kFill) / kFill, v = fmodf(fabsf(c.y / th) * 0.61f, (1 - span) * kFill) / kFill;
+    dl->AddCircleFilled(ImVec2(c.x, c.y + 3 * th), r + 1.5f * th, col(0, 0, 0, 0.35f * a), 64);  // (a soft drop)
+    dl->AddImageRounded(t, ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r), ImVec2(u, v), ImVec2(u + span, v + span),
+                        col(255, 255, 255, a), r);
+    ImU32 shade = (kSlotShade & 0x00FFFFFF) | ((ImU32)(255 * a) << 24), edge = (kSlotEdge & 0x00FFFFFF) | ((ImU32)(255 * a) << 24);
+    dl->AddCircle(c, r - 0.5f * th, shade, 64, 2.0f * th);
+    dl->AddCircle(c, r - 2.0f * th, edge, 64, 1.5f * th);
     ImVec2 p0(c.x - r, c.y - r), p1(c.x + r, c.y + r);
-    eow_cell(dl, p0, p1, r, rgb(on ? kPlumOn : kPlum, a), rgb(on ? kPlumRimOn : kPlumRim), th);
     if (on || sel) plastic_brackets(dl, p0, p1, th * (sel ? 1.4f : 1.0f));
     return true;
 }
 
-// The stick: a cell with the compass points pressed into it, the knob a small tan cell (the menus' buttons) with a
-// diamond. The D-pad: a recessed cross in the cell, its arrows tan, the arms held down in the theme's gold-orange.
+// As LA's: the stick's eight compass points pressed into its disc and a small disc for the knob, lit (the brackets)
+// while it's held; the D-pad's cross on the disc, here in the slots' darker inside with their grey edge, the arrows in
+// the menu's cream and the arms held down in the cursor's gold.
 static bool eow_compass(ImDrawList *dl, ImVec2 c, float r, ImVec2 knob, float a, float th, bool sel) {
-    const PlasticTheme &t = plastic_theme();
-    eow_disc(dl, c, r, false, a, th, sel);
+    if (!eow_disc(dl, c, r, false, a, th, sel)) return false;
     float ea = fminf(1, 0.55f + 0.5f * a);
     for (int k = 0; k < 8; k++) {
-        float ang = k * 3.14159265f / 4, len = k % 2 ? 0.62f : 0.90f, wd = k % 2 ? 0.09f : 0.13f;
+        float ang = k * 3.14159265f / 4, len = k % 2 ? 0.62f : 0.92f, wd = k % 2 ? 0.10f : 0.14f;
         ImVec2 tip(c.x + cosf(ang) * r * len, c.y + sinf(ang) * r * len);
         ImVec2 s1(c.x + cosf(ang + 1.5708f) * r * wd, c.y + sinf(ang + 1.5708f) * r * wd);
         ImVec2 s2(c.x - cosf(ang + 1.5708f) * r * wd, c.y - sinf(ang + 1.5708f) * r * wd);
-        dl->AddTriangleFilled(tip, s1, s2, u32(rgb(kPlumRim), (k % 2 ? 0.55f : 0.85f) * ea));
+        dl->AddTriangleFilled(tip, s1, s2, col(20, 14, 12, (k % 2 ? 0.45f : 0.70f) * ea));
+        dl->AddTriangle(tip, s1, s2, col(65, 62, 61, (k % 2 ? 0.45f : 0.70f) * ea), 1.0f * th);
     }
     bool held = hypotf(knob.x - c.x, knob.y - c.y) > r * 0.04f;
-    float kr = r * 0.42f;
-    ImVec2 k0(knob.x - kr, knob.y - kr), k1(knob.x + kr, knob.y + kr);
-    eow_cell(dl, k0, k1, kr, t.button, rgb(0xF0D8A8), th);
-    if (held) plastic_brackets(dl, k0, k1, th * 0.8f);
-    float d = kr * 0.30f;
-    dl->AddQuadFilled(ImVec2(knob.x, knob.y - d), ImVec2(knob.x + d, knob.y), ImVec2(knob.x, knob.y + d), ImVec2(knob.x - d, knob.y),
-                      t.text_button);
+    eow_disc(dl, knob, r * 0.42f, held, 1.0f, th, false);
     return true;
 }
 
 static bool eow_dpad(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly, float a, float th, bool sel) {
+    if (!eow_disc(dl, c, r, false, a, th, sel)) return false;
     const PlasticTheme &t = plastic_theme();
-    eow_disc(dl, c, r, false, a, th, sel);
     float ea = fminf(1, 0.55f + 0.5f * a), len = r * 0.80f, w = r * 0.27f, rnd = r * 0.08f;
-    ImU32 well = u32(rgb(kPlumWell), 0.9f * ea), lit = u32(t.bar, ea), edge = u32(rgb(kPlumRim), ea);
+    ImU32 well = (kSlotIn & 0x00FFFFFF) | ((ImU32)(230 * ea) << 24), lit = col(0xE8, 0xD0, 0x60, ea), edge = (kSlotEdge & 0x00FFFFFF) | ((ImU32)(255 * ea) << 24);
     dl->AddRectFilled(ImVec2(c.x - w, c.y - len), ImVec2(c.x + w, c.y + len), well, rnd);
     dl->AddRectFilled(ImVec2(c.x - len, c.y - w), ImVec2(c.x + len, c.y + w), well, rnd);
     float in = 2.5f * th;  // (the held arm inside the edge)
@@ -864,9 +901,9 @@ static bool eow_dpad(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly, 
     if (lx > 8000) dl->AddRectFilled(ImVec2(c.x + w, c.y - w + in), ImVec2(c.x + len - in, c.y + w - in), lit, rnd);
     ImVec2 o[12] = {{c.x - w, c.y - len}, {c.x + w, c.y - len}, {c.x + w, c.y - w}, {c.x + len, c.y - w}, {c.x + len, c.y + w}, {c.x + w, c.y + w},
                     {c.x + w, c.y + len}, {c.x - w, c.y + len}, {c.x - w, c.y + w}, {c.x - len, c.y + w}, {c.x - len, c.y - w}, {c.x - w, c.y - w}};
-    dl->AddPolyline(o, 12, edge, ImDrawFlags_Closed, 1.8f * th);
+    dl->AddPolyline(o, 12, edge, ImDrawFlags_Closed, 1.5f * th);
     float tp = len * 0.86f, hh = len * 0.58f, s = r * 0.13f;
-    ImU32 ar = u32(t.button, fmaxf(ea, 0.9f)), dark = t.text_button;
+    ImU32 ar = u32(plastic_col(t.text), fmaxf(ea, 0.9f)), dark = col(40, 30, 20, 1);
     dl->AddTriangleFilled(ImVec2(c.x, c.y - tp), ImVec2(c.x + s, c.y - hh), ImVec2(c.x - s, c.y - hh), ly > 8000 ? dark : ar);
     dl->AddTriangleFilled(ImVec2(c.x, c.y + tp), ImVec2(c.x - s, c.y + hh), ImVec2(c.x + s, c.y + hh), ly < -8000 ? dark : ar);
     dl->AddTriangleFilled(ImVec2(c.x - tp, c.y), ImVec2(c.x - hh, c.y - s), ImVec2(c.x - hh, c.y + s), lx < -8000 ? dark : ar);

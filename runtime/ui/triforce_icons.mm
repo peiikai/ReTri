@@ -40,6 +40,12 @@ static ImTextureID upload(const std::vector<uint8_t> &rgba, int w, int h) {
 #endif
 }
 
+// An RGBA8 image made here (straight alpha), uploaded and kept for the session (the touch controls' EoW fill)
+ImTextureID ui_rgba_texture(const uint8_t *rgba, int w, int h) {
+    std::vector<uint8_t> v(rgba, rgba + (size_t)w * h * 4);
+    return upload(v, w, h);
+}
+
 // One of the game's own UI textures by name (Game.arc: item icons...), uploaded once and kept; 0 when it isn't there.
 // The touch controls draw the items on their buttons with these (runtime/ui/mobile/touch_controls.mm).
 ImTextureID ui_game_icon(const char *name) {

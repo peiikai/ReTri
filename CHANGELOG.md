@@ -13,8 +13,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - iPhone and iPad (TriCompiled for iOS): the app holds the game code built on a Mac from your own game files.
 - Touch controls for EoW: the whole Switch pad on screen (stick, D-pad, A B X Y, L R ZL ZR, + and -), each
   control movable and resizable in the layout editor. A controller hides them, a touch brings them back.
-- The EoW touch controls take the menus' EoW look in the inventory screen's plum (the cursor's corners when pressed), and
-  Y shows the echo or item on the HUD's Y slot, from your own game files.
+- The EoW touch controls look like the inventory screen's background (its felt and colour, the item slots'
+  edges, the cursor's corners when pressed), laid out as in LAS. Y shows the echo or item on the HUD's Y slot.
 
 ### Changed
 - The window and error dialogs are titled "TriCompiled", the project's new name.
