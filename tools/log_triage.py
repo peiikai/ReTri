@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Log triage for GitHub issues: a short summary of the lasrecomp.log files attached to an issue.
+"""Log triage for GitHub issues: a short summary of the eowrecomp.log files attached to an issue.
 
 .github/workflows/log_triage.yml runs it when an issue or a comment is added or edited. It reads the issue
 and its comments through the GitHub API, downloads the attached logs (github.com/user-attachments/files/... links
-whose file name starts with "lasrecomp", at most MAX_BYTES each), and keeps ONE bot comment per issue up to date
+whose file name starts with "eowrecomp", at most MAX_BYTES each), and keeps ONE bot comment per issue up to date
 with a summary of the newest logs, plus a "log: crash" / "log: device-lost" / "log: ok" label for the newest one.
 Shader variants the shipped list lacks ("[shader] record ..." lines) are listed in the comment, folded, and the issue
 gets the "log: new shaders" label, so they can be merged into runtime/nvn/shader_variants.txt
@@ -27,7 +27,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-MARKER = "<!-- lasrecomp-log-triage -->"
+MARKER = "<!-- eowrecomp-log-triage -->"
 MAX_BYTES = 20 * 1024 * 1024  # per log
 MAX_LOGS = 3                  # newest logs summarised per comment
 LABELS = {"crash": ("log: crash", "b60205", "Newest attached log ends in a crash or hang"),
@@ -56,9 +56,9 @@ def code(s, n=160):
 FPS_RE = re.compile(r"^\[(vk|metal)\] t=([\d.]+) frame (\d+) ([\d.]+) fps max (\d+)ms level (\S+)")
 BUILD_RE = re.compile(r"LAS[ ._-]?Recomp[ ._-]((?:beta_\d+(?:[._-]\d+)?)|(?:v\d+\.\d+\.\d+)|(?:test-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*?))"
                       r"(?:-(windows|macos|linux|android)\b|[\\/\s]|$)", re.I)
-# runtime/main.c log_startup_info: "[info] LAS Recomp beta_5.4, Windows 11 (10.0.26300, x64), AMD Ryzen 5 7500F
+# runtime/main.c log_startup_info: "[info] EoW Recomp beta_5.4, Windows 11 (10.0.26300, x64), AMD Ryzen 5 7500F
 # 6-Core Processor 6 cores / 12 threads, 31.7 GB RAM, zip" - the build; the OS, CPU and RAM; the package when known
-INFO_RE = re.compile(r"^\[info\] LAS Recomp ([^\s,]+), (.+?(?:GB RAM|RAM unknown))(?:, (.+))?$")
+INFO_RE = re.compile(r"^\[info\] EoW Recomp ([^\s,]+), (.+?(?:GB RAM|RAM unknown))(?:, (.+))?$")
 MS_RE = re.compile(r"([\d.]+)\s*ms")
 # runtime/nvn/shader_seen.c shader_seen_note: "[shader] record G vs=... fs=... f=1 ..." (hashes and pipeline state only)
 RECORD_RE = re.compile(r"^\[shader\] record ([GC] [A-Za-z0-9=,:./+ -]{1,400})$")
@@ -259,11 +259,11 @@ def shader_records(entries):
 def render(entries, total):
     """entries: newest first, (source description, parse result or error string)"""
     out = [MARKER,
-           "This is an automatic summary of the LAS Recomp log files attached to this issue. It only reads the logs, "
+           "This is an automatic summary of the EoW Recomp log files attached to this issue. It only reads the logs, "
            "so a person will still look at the details.",
            "",
-           "For a new report, please attach `lasrecomp.log` from LAS Recomp's data folder (it always holds the latest "
-           "run; `lasrecomp-backup-*.log` there are the earlier runs)."]
+           "For a new report, please attach `eowrecomp.log` from EoW Recomp's data folder (it always holds the latest "
+           "run; `eowrecomp-backup-*.log` there are the earlier runs)."]
     for k, (src, r) in enumerate(entries):
         out += ["", f"#### {'Newest log' if k == 0 else 'Earlier log'}: {src}"]
         out.append(summarise(r) if isinstance(r, dict) else f"- Could not read this log: {clean(r, 120)}")
@@ -288,7 +288,7 @@ class Api:
         url = path if path.startswith("https://") else f"https://api.github.com/repos/{self.repo}/{path}"
         req = urllib.request.Request(url, method=method, data=json.dumps(body).encode() if body is not None else None,
                                      headers={"Authorization": f"Bearer {self.token}", "Accept": "application/vnd.github+json",
-                                              "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "lasrecomp-log-triage"})
+                                              "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "eowrecomp-log-triage"})
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = resp.read()
             link = resp.headers.get("Link", "")
@@ -316,7 +316,7 @@ class _Redirects(urllib.request.HTTPRedirectHandler):
 def download(url):
     if not ATTACH_RE.fullmatch(url): raise ValueError("not a GitHub attachment link")
     opener = urllib.request.build_opener(_Redirects)
-    req = urllib.request.Request(url, headers={"User-Agent": "lasrecomp-log-triage"})  # (no token: public files)
+    req = urllib.request.Request(url, headers={"User-Agent": "eowrecomp-log-triage"})  # (no token: public files)
     with opener.open(req, timeout=60) as resp:
         if int(resp.headers.get("Content-Length") or 0) > MAX_BYTES: raise ValueError("log larger than 20 MB")
         data = resp.read(MAX_BYTES + 1)
@@ -325,11 +325,11 @@ def download(url):
 
 
 def attachments(text):
-    """lasrecomp*.log / *.txt attachment links in a body, in order, without repeats"""
+    """eowrecomp*.log / *.txt attachment links in a body, in order, without repeats"""
     seen, out = set(), []
     for u in ATTACH_RE.findall(text or ""):
         name = urllib.parse.unquote(u.rsplit("/", 1)[1]).lower()
-        if name.startswith("lasrecomp") and name.endswith((".log", ".txt")) and u not in seen:
+        if name.startswith("eowrecomp") and name.endswith((".log", ".txt")) and u not in seen:
             seen.add(u)
             out.append(u)
     return out
@@ -353,7 +353,7 @@ def run_issue():
         found += [(u, f"comment from {c['created_at'][:10]}", c["html_url"]) for u in attachments(c.get("body"))]
     seen = set()  # (a quote reply repeats the quoted comment's links: each log once, where it was attached)
     found = [f for f in found if f[0] not in seen and not seen.add(f[0])]
-    if not found: print("no lasrecomp log attached: nothing to do"); return
+    if not found: print("no eowrecomp log attached: nothing to do"); return
     newest = list(reversed(found))[:MAX_LOGS]
     entries = []
     for u, where, link in newest:

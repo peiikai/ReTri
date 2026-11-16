@@ -1,16 +1,16 @@
 #!/bin/bash
 # The embedded Python's self-test in the iOS Simulator: tools/test_ios_sim.sh <app> [simulator name]
-# (make ios-sim-test). Boots a simulator (SIM_DEVICE, default "LAS Recomp test": created from the newest iPhone type
+# (make ios-sim-test). Boots a simulator (SIM_DEVICE, default "EoW Recomp test": created from the newest iPhone type
 # and iOS runtime when missing), installs the app, launches it with LARECOMP_IOS_PYTEST=1 and reads
-# Documents/lasrecomp.log from the app's data container: `[py] selftest ok` must be there (every native package
+# Documents/eowrecomp.log from the app's data container: `[py] selftest ok` must be there (every native package
 # imported and exercised) and, with no game files in the simulator, `[py] generator skipped`. SIM_ROMFS=<romfs dir>
 # links that romfs into the app's Documents first, and then the generator's two runs and their comparison are
 # required too (as on a device). The game itself is not run in the simulator (its GPU is the Mac's; the macOS build
 # covers the game code).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-APP=${1:-build/ios-sim/LAS Recomp.app}
-NAME=${2:-${SIM_DEVICE:-LAS Recomp test}}
+APP=${1:-build/ios-sim/EoW Recomp.app}
+NAME=${2:-${SIM_DEVICE:-EoW Recomp test}}
 BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "$APP/Info.plist")
 
 UDID=$(xcrun simctl list devices available -j | python3 -c '
@@ -36,7 +36,7 @@ xcrun simctl bootstatus "$UDID" -b >/dev/null
 xcrun simctl uninstall "$UDID" "$BUNDLE_ID" 2>/dev/null || true
 xcrun simctl install "$UDID" "$APP"
 DATA=$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" data)
-LOG=$DATA/Documents/lasrecomp.log
+LOG=$DATA/Documents/eowrecomp.log
 if [ -n "${SIM_ROMFS:-}" ]; then
     mkdir -p "$DATA/Documents/extracted" && ln -sfn "$(cd "$SIM_ROMFS" && pwd)" "$DATA/Documents/extracted/romfs"
 fi

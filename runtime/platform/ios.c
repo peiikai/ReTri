@@ -93,7 +93,7 @@ static uint64_t memory_limit(void) {
     return avail + vi.phys_footprint;
 }
 
-// stdout / stderr -> lasrecomp.log in the data folder, as on the desktop (five backups, posix_log.h; Documents when
+// stdout / stderr -> eowrecomp.log in the data folder, as on the desktop (five backups, posix_log.h; Documents when
 // the chosen one isn't there), unless LARECOMP_LOG_STDERR is set (Xcode / devicectl console runs).
 // LARECOMP_LOG_DOCUMENTS=1: in Documents whatever the data folder (where devicectl can pull it from).
 void plat_init(void) {
@@ -218,7 +218,7 @@ void plat_exec(char *const argv[]) { (void)argv; }  // (no exec on iOS: the call
 static atomic_int g_fatal_box;  // 1: on screen, 2: closed
 static void SDLCALL fatal_box(void *text) {
     atomic_store(&g_fatal_box, 1);
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "LAS Recomp", text, NULL);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "EoW Recomp", text, NULL);
     atomic_store(&g_fatal_box, 2);
 }
 void plat_fatal_notice(void) {

@@ -2,7 +2,7 @@
 
 The real builder, the bundled zig (build/zig: tools/fetch_zig.sh) and the Mach-O linker of the iOS kit
 (build/lld/<arch>-<os>: tools/fetch_lld.sh), packed into a fixture .laskit as tools/ios_kit.sh lays it out, compile
-the fixture for arm64 iOS and link lasgame-ios.dylib; the result must be an arm64 Mach-O dylib with the install name
+the fixture for arm64 iOS and link eowgame-ios.dylib; the result must be an arm64 Mach-O dylib with the install name
 the exported app loads it by. The kit's tools must land in <data root>/cache/ios-kit/<kit id>/ once. Only process
 launching and resource lookup are bridged to Python, as tools/test_gamebuild_resume.py does. No game files, no device.
 """
@@ -111,8 +111,8 @@ with tempfile.TemporaryDirectory() as temporary:
     # the kit's contents (tools/ios_kit.sh): the app's marker, the Darwin headers (any-darwin-any from the zig archive
     # is what the real kit holds; the headers zig keeps for a macOS host are the same set, a Linux / Windows host's
     # zig has none, so the archive is read), the linker, the tbd
-    (skeleton/'Payload/LAS Recomp.app').mkdir(parents=True)
-    (skeleton/'Payload/LAS Recomp.app/Info.plist').write_text('<plist/>\n')
+    (skeleton/'Payload/EoW Recomp.app').mkdir(parents=True)
+    (skeleton/'Payload/EoW Recomp.app/Info.plist').write_text('<plist/>\n')
     darwin = ZIG.parent/'lib/libc/include/any-darwin-any'
     if not darwin.exists():
         archive = next(p for p in (ROOT/'build/zig-dl').iterdir() if p.name.startswith('zig-') and p.suffix in ('.xz', '.zip'))
@@ -152,7 +152,7 @@ with tempfile.TemporaryDirectory() as temporary:
     if os.name == 'nt':  # (find_tools wants the exe's import library; the iOS link doesn't use it)
         (resources/'build').mkdir()
         stub = tmp/'stub.c'; stub.write_text('int fixture_export;\n')
-        subprocess.run(cc+[str(stub), '-shared', '-Wl,--out-implib,'+str(resources/'build/lasrecomp.dll.a'),
+        subprocess.run(cc+[str(stub), '-shared', '-Wl,--out-implib,'+str(resources/'build/eowrecomp.dll.a'),
                            '-o', str(tmp/'stub.dll')], check=True)
     obj = tmp/'gamebuild.o'
     subprocess.run(cc+['-std=gnu11', '-fPIC', '-Iruntime', '-DGAMELIB_ID="fixture"', '-DGAMELIB_IOS_ID="fixture-ios"',
@@ -264,11 +264,11 @@ with tempfile.TemporaryDirectory() as temporary:
         assert gens and all(a[a.index('--simd') + 1] == 'asm' for a in gens if '--simd' in a) and all('--simd' in a for a in gens), gens
         link = next(a for a in launched if a[0].endswith('lld'+EXE))
         assert f'ios-kit/{kit_id}/lld' in joined(link[:1]) and link[1:3] == ['-flavor', 'darwin'] and '@rpath/LASGame.framework/LASGame' in link, link
-        out = game/'lasgame-ios.dylib'
+        out = game/'eowgame-ios.dylib'
         head = out.read_bytes()[:8]
         magic, cputype = struct.unpack('<II', head)
         assert magic == 0xFEEDFACF and cputype == 0x0100000C, f'not an arm64 Mach-O: {head.hex()}'  # (CPU_TYPE_ARM64)
-        assert (game/'lasgame-ios.dylib.id').read_text().strip() == 'fixture-ios-0123456789ABCDEF'
+        assert (game/'eowgame-ios.dylib.id').read_text().strip() == 'fixture-ios-0123456789ABCDEF'
         # a second build finds the tools unpacked already: nothing is unpacked twice
         marker = kits[0]/'.complete'; before = marker.stat().st_mtime_ns
         assert library.gamebuild_run(str(game).encode(), ct.byref(options), why, len(why)), why.value

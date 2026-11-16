@@ -1,4 +1,4 @@
-# How LAS Recomp works
+# How EoW Recomp works
 
 A one-page map of the code. CONTRIBUTING.md lists the files and how to build and test; this explains how the parts
 fit together. File names are on the current development branch.
@@ -74,5 +74,5 @@ seed and handles what can't be done with data alone.
 ## Debugging
 
 Most debug and test switches are environment variables: see [debug-hooks.md](debug-hooks.md). The log is
-`lasrecomp.log` in the data folder. A crash names the guest address (`main+0x...`), which `tools/sym.py` maps to
+`eowrecomp.log` in the data folder. A crash names the guest address (`main+0x...`), which `tools/sym.py` maps to
 the game's code.
