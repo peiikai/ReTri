@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../game_addresses.h"
 #include "../hle.h"
 #include "../settings.h"
 #include "output_scale.h"
@@ -1113,8 +1114,10 @@ float output_scale_ao(float al) {
 
 // The game's shadow map: one 2048x2048 D24S8 render target for the whole scene (2D, not multisampled). Lit shaders take
 // four compare taps one texel apart, in the game's texel size (maxwell/translate.c shadow_taps).
+// (another game: EoW's is 1024x1024, the shadow pass's 1024x1024 viewport - the Shadows setting never reached it)
 bool output_scale_is_shadow_map(uint32_t target, uint32_t samples, uint32_t w, uint32_t h, uint32_t format, bool render_target) {
-    return target == 1 && samples <= 1 && w == 2048 && h == 2048 && format == 0x35 && render_target;
+    uint32_t size = game_other() ? 1024 : 2048;
+    return target == 1 && samples <= 1 && w == size && h == size && format == 0x35 && render_target;
 }
 
 // Its scale: half to 4 times the Switch's size (the Shadows setting), at any render scale. Each step up costs more
