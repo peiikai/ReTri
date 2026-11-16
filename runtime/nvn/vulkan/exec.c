@@ -734,6 +734,19 @@ void renderer_wait_seq(uint64_t seq) {
     gmir_writeback();  // (what the GPU stored, in guest memory before the game reads it)
 }
 
+// Wait until submission `seq` has completed, now: renderer_wait_seq without the overlap deferral (objects.c
+// other_lag_cap, EoW: the GPU at most a frame behind the game, as renderer.m's).
+void renderer_wait_seq_now(uint64_t seq) {
+    if (!seq) return;
+    pthread_mutex_lock(&seq_lock);
+    uint64_t s = submit_seq;
+    pthread_mutex_unlock(&seq_lock);
+    if (seq > s) seq = s;  // not queued yet (other thread): everything queued so far
+    vk_wait_seq(seq);
+    gw_inval_done(vk_completed_seq());
+    gmir_writeback();
+}
+
 // A descriptor set for the pending submission (record.c: the slot's pools, allocated in batches per layout). With
 // the recorder on it is a stand-in, to be written and bound through rec_* only, and only for this submission.
 VkDescriptorSet vk_alloc_set(VkDescriptorSetLayout layout) {
@@ -1504,6 +1517,18 @@ static inline bool ss_need(uint32_t bit, bool same) {
 static void vk_end_pass_at(int line);
 void vk_end_pass(void) { vk_end_pass_at(0); }
 #define vk_end_pass() vk_end_pass_at(__LINE__)
+
+// (objects.c nvn_texture_destroy, EoW; in queue order on the render thread) a texture the game frees while it is still
+// a render target: the pass ends and the slot empties, as renderer.m's, so the next pass doesn't name a freed texture.
+void renderer_texture_destroying(NvnTexture *t) {
+    bool used = st.rt.depth == t;
+    for (int i = 0; i < st.rt.ncolor && i < 8; i++) used |= st.rt.color[i] == t;
+    if (!used) return;
+    vk_end_pass();
+    for (int i = 0; i < st.rt.ncolor && i < 8; i++) if (st.rt.color[i] == t) st.rt.color[i] = NULL, st.rt.has_cview[i] = 0;
+    if (st.rt.depth == t) st.rt.depth = NULL, st.rt.has_dview = 0;
+    st.rt_dirty = true;
+}
 static void vk_end_pass_at(int line) {
     if (!in_pass) return;
     if (prof && line < 4096) prof_end_line[line]++;
