@@ -378,6 +378,23 @@ static float vp_sx = 1, vp_sy = 1, vp_ox = 0, vp_oy = 0;
 static float tex_sc[2][64][2];          // per bound texture slot: the contents' scale (for shaders' texel math)
 static float tex_fr[2][64][2];          // per bound texture slot: the part of the texture the contents occupy (Dynamic)
 static uint32_t tex_wh[2][64][2];       // per bound texture slot: guest size
+// Screen captures of the boxed frame (capture_from_box): their coordinate mapping
+#define NCAP 8
+static NvnTexture *g_cap[NCAP];  // the latest screen captures (and whole copies of them)
+static bool tex_cap[64];         // per fragment texture slot of the draw: a capture
+static void capture_note(NvnTexture *t, bool on) {
+    int at = -1;
+    for (int i = 0; i < NCAP; i++) if (g_cap[i] == t) at = i;
+    if (at >= 0 && !on) g_cap[at] = NULL;
+    if (at >= 0 || !on) return;
+    for (int i = 0; i < NCAP; i++) if (!g_cap[i]) at = i;
+    if (at < 0) memmove(g_cap, g_cap + 1, sizeof g_cap[0] * (NCAP - 1)), at = NCAP - 1;
+    g_cap[at] = t;
+}
+static bool capture_of(NvnTexture *t) {
+    for (int i = 0; t && i < NCAP; i++) if (g_cap[i] == t) return true;
+    return false;
+}
 static int draw_bottle;                 // a fragment texture is the bottle's item icon (1) / model map (2): Escape Bottle
 static int draw_heart;                  // ... a HUD / file select heart's: heart colour (Cosmetics tab)
 static bool draw_item_cursor;           // a fragment texture is the Items page's cursor brackets
@@ -2653,6 +2670,7 @@ static void bind_textures(int stage, ShaderInfo *si) {
         uint32_t tic = h & 0xFFFFF, tsc = (uint32_t)(h >> 20) & 0xFFF;
         tex_sc[stage][i][0] = tex_sc[stage][i][1] = 1;
         if (i < 64) { tex_wh[stage][i][0] = tex_wh[stage][i][1] = 0; tex_fr[stage][i][0] = tex_fr[stage][i][1] = 1; }
+        if (stage == 1 && i < 64) tex_cap[i] = false;
         if (h && st.tpool && tic < (uint32_t)st.tpool->count) {
             NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
             if (g_interp_log) e = (NvnTexEntry *)interp_texentry(stage, i, e, sizeof *e);  // (frame interpolation: the frame's entry)
@@ -2701,6 +2719,7 @@ static void bind_textures(int stage, ShaderInfo *si) {
                     tex_fr[stage][i][1] *= (float)e->tex->height / (float)alias->height;
                 }
                 tex_wh[stage][i][0] = e->tex->width; tex_wh[stage][i][1] = e->tex->height;
+                if (stage == 1) tex_cap[i] = capture_of(e->tex);
             }
             for (int k = 0; k < nfeedback; k++)
                 if (e->tex == feedback_tex[k]) {
@@ -5845,8 +5864,9 @@ static void draw_one(CmdRec *r, bool indexed) {
             }
         }
         if (g_debug_frame && getenv("LARECOMP_LOG_UI")) {
-            LOG("[ui2] fs=%llx count %llu ntex %d reads_scene %d fill %d quad %d -> %d |", st.program->stages[1].code_addr, r->x[2],
-                pr->fi->ntex, reads_scene, fullscreen_fill, fullscreen_quad, composite);
+            LOG("[ui2] fs=%llx hash %016llx ubo0 %llu count %llu ntex %d reads_scene %d fill %d quad %d -> %d |", st.program->stages[1].code_addr,
+                (unsigned long long)g_cur_fs_hash, (unsigned long long)st.ubuf[0][0].size, r->x[2], pr->fi->ntex, reads_scene, fullscreen_fill,
+                fullscreen_quad, composite);
             for (int i = 0; i < pr->fi->ntex && i < 4; i++)
                 LOG(" t%d %dx%d sc %.2f,%.2f", i, tex_wh[1][i][0], tex_wh[1][i][1], tex_sc[1][i][0], tex_sc[1][i][1]);
             LOG(" | rt %ux%u vp %.0f,%.0f %.0fx%.0f\n", st.rt.color[0]->width, st.rt.color[0]->height, st.viewport[0][0],
@@ -5870,7 +5890,9 @@ static void draw_one(CmdRec *r, bool indexed) {
             // (the pause screen's backdrop first: the HUD's stretch stays on for the pause screen's first frames, while
             // the world still counts as on screen, and would keep the backdrop boxed until it went off)
             extern const void *pause_fill_ubo(const float *u, uint64_t size, float k, float ky);
-            hud_u = pause_fill_ubo((const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size, hud_k, hud_ky);
+            bool cap = false;  // (a pane showing a screen capture of the box stays in it: capture_from_box)
+            for (int i = 0; i < pr->fi->ntex && i < 64; i++) cap |= tex_cap[i];
+            if (!cap) hud_u = pause_fill_ubo((const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size, hud_k, hud_ky);
             extern const void *hud_corners_ubo(const float *u, uint64_t size, float k, float ky);
             if (!hud_u) hud_u = hud_corners_ubo((const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size, hud_k, hud_ky);
         }
@@ -6984,6 +7006,28 @@ static void copy_texture_to_buffer(const TexRefRec *src, uint64_t dst) {
     renderer_flush();  // the CPU may read the result right after the fence
 }
 
+// A layout pane's screen capture on a window that isn't 16:9 (another game: EoW's echo list grabs rows 310-810 of its
+// 1920x1080 frame into a 1920x500 texture, copies that into another, draws the slots into it and shows it as the band
+// behind them). The frame's UI goes into the centred 16:9 box (draw), the band too, so the capture takes the box's
+// part of the frame, what is under the band; the frame's whole width squeezed into the box showed the world beside it
+// (user 2026-11-16). Panes sampling a capture stay in the box (not widened to the window: runtime/hle/pause_fill.c),
+// the layers under them reach the window's edges. Copies out of the presented frame into a texture of its own shape
+// (not window-shaped) only.
+static void capture_from_box(NvnTexture *s, NvnTexture *d, float ssx, float ssy, float dsx, float dsy, const int32_t *sr,
+                             int *sx0, int *sy0, int *sw, int *sh) {
+    if (!game_other() || fabsf(ssx - ssy) <= 0.01f * ssy || fabsf(dsx - dsy) > 0.01f * dsy || !renderer_texture_presented(s) ||
+        renderer_format_is_depth(s->format)) {
+        // (a capture copied whole into another texture stays one)
+        capture_note(d, capture_of(s) && s->width == d->width && s->height == d->height && !sr[0] && !sr[1]);
+        return;
+    }
+    float u = fminf(ssx, ssy);
+    float ox = s->width * (ssx - u) * 0.5f, oy = s->height * (ssy - u) * 0.5f;
+    *sx0 = (int)lroundf(ox + sr[0] * u), *sy0 = (int)lroundf(oy + sr[1] * u);
+    *sw = (int)lroundf((sr[3] ? sr[3] : (int32_t)s->width) * u), *sh = (int)lroundf((sr[4] ? sr[4] : (int32_t)s->height) * u);
+    capture_note(d, true);
+}
+
 static void copy_texture(const TexRefRec *src, const TexRefRec *dst, uint64_t flags) {
     snap_reason = "tex2tex"; snapshots_invalidate(NULL);
     NvnTexture *st_ = (NvnTexture *)(uintptr_t)src->tex, *dt = (NvnTexture *)(uintptr_t)dst->tex;
@@ -7023,6 +7067,7 @@ static void copy_texture(const TexRefRec *src, const TexRefRec *dst, uint64_t fl
     int dx0 = (int)lroundf(dr[0] * dsx), dy0 = (int)lroundf(dr[1] * dsy);
     int sw = sr[3] ? (int)lroundf(sr[3] * ssx) : (int)lroundf(st_->width * ssx), sh = sr[4] ? (int)lroundf(sr[4] * ssy) : (int)lroundf(st_->height * ssy);
     int dw = dr[3] ? (int)lroundf(dr[3] * dsx) : (int)lroundf(dt->width * dsx), dh = dr[4] ? (int)lroundf(dr[4] * dsy) : (int)lroundf(dt->height * dsy);
+    capture_from_box(st_, dt, ssx, ssy, dsx, dsy, sr, &sx0, &sy0, &sw, &sh);
     static int no_depth_scale = -1;
     if (no_depth_scale < 0) no_depth_scale = getenv("LARECOMP_NO_DEPTH_SCALE") != NULL;
     if (!no_depth_scale && renderer_format_is_depth(dt->format) && (sw != dw || sh != dh) && s.sampleCount == 1 && dt->format != 0x31) {
