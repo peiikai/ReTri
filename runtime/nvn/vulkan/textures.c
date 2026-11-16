@@ -223,7 +223,11 @@ static bool tex_scalable(const NvnTexture *t) {
     if (off) return false;
     if (t->target != 1 || t->samples > 1 || !(t->flags & 8) || t->width < 32 || t->height < 16) return false;
     float a = (float)t->width / (float)t->height;
-    return a > 1.74f && a < 1.81f;  // 16:9 (1920x1080 and its fractions, 704x396, 60x33...)
+    if (!(a > 1.74f && a < 1.81f)) return false;  // 16:9 (1920x1080 and its fractions, 704x396, 60x33...)
+    // (another game: not the small ones, as metal.m - EoW rasterises its lights into a 64x36 grid whose cells the
+    // fragment shaders address by pixel; scaled, only some cells got their bits: interiors lit in patches, darker)
+    if (game_other() && t->width < 128) return false;
+    return true;
 }
 // The scale a scalable texture is allocated and drawn at: the ambient occlusion's own, else the frame's
 // (the AO: uniform, by the height's)
