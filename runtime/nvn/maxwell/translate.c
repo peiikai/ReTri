@@ -130,6 +130,7 @@ typedef struct {
     bool glsl;               // emit Vulkan GLSL: dialect-specific constructs here, the rest via glsl_rewrite()
     bool quad_used;          // (GLSL) a quad swap through derivatives was emitted: the qswap helpers go in the prelude
     bool uses_gmem_store;    // STG present: the gmem buffer is not readonly
+    uint32_t gatom_ops;      // (GLSL) RED / ATOM operations used (gatom_key bits): GMATOM_* functions in the prelude
     uint32_t cbuf_need[18];  // highest constant vec4 index + 1 per cbuf (array size of the GLSL block)
     // GLSL, LARECOMP_VK_STATIC_STACKS: every SYNC / BRK / CONT's target resolved at translation time
     // (static_stacks_resolve): the pops become plain jumps and the SSY / PBK / PCNT stacks go away
@@ -1074,6 +1075,37 @@ static void stack_pop(Ctx *c, const char *n, bool keep, uint32_t pc) {  // keep:
     sp(&c->body, keep ? "    { uint i_ = (%s_n - 1u) & 15u; pc = " : "    { uint i_ = (--%s_n) & 15u; pc = ", n);
     for (int k = 0; k < 15; k++) sp(&c->body, "i_ == %du ? %s%d : ", k, n, k);
     sp(&c->body, "%s15; } continue;\n", n);
+}
+
+// (GLSL) RED / ATOM on global memory. GLSL atomics take the buffer element itself, so each operation becomes a
+// function per heap layout (the prelude's GMATOM_<name>(word, value) -> old value) plus a statement on the compute
+// copy (gfast_). Keys: ATOM's op numbering (RED's is the same up to xor) with the signedness folded in.
+enum { GATOM_N = 11 };
+static const char *const gatom_name[GATOM_N] = {"add", "umin", "smin", "umax", "smax", "inc", "dec", "and", "or", "xor", "exch"};
+static int gatom_key(int op, bool sgn) {
+    switch (op) {
+    case 0: case 10: return 0;  // add, safeadd
+    case 1: return sgn ? 2 : 1;
+    case 2: return sgn ? 4 : 3;
+    case 3: return 5;
+    case 4: return 6;
+    case 5: return 7;
+    case 6: return 8;
+    case 7: return 9;
+    case 8: return 10;
+    default: return -1;
+    }
+}
+// The statement: res = the old value of lv, lv = op(lv, v). Signed min / max and INC / DEC (wrapping at v, as CUDA's
+// atomicInc / atomicDec) have no GLSL atomic on uint memory: a compare-and-swap loop.
+static void gatom_stmt(Str *b, int key, const char *res, const char *lv) {
+    static const char *const fn[GATOM_N] = {"atomicAdd", "atomicMin", NULL, "atomicMax", NULL, NULL, NULL,
+                                            "atomicAnd", "atomicOr", "atomicXor", "atomicExchange"};
+    if (fn[key]) { sp(b, "%s = %s(%s, v);", res, fn[key], lv); return; }
+    static const char *const nx[GATOM_N] = {[2] = "uint(min(int(o_), int(v)))", [4] = "uint(max(int(o_), int(v)))",
+                                            [5] = "o_ >= v ? 0u : o_ + 1u", [6] = "(o_ == 0u || o_ > v) ? v : o_ - 1u"};
+    sp(b, "{ uint o_ = %s; for (;;) { uint n_ = %s; uint r_ = atomicCompSwap(%s, o_, n_); if (r_ == o_) break; o_ = r_; } "
+          "%s = o_; }", lv, nx[key], lv, res);
 }
 
 static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
@@ -2132,6 +2164,42 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         sp(&c->body, "      }\n");
         if (d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      r%d = old_;\n", d); }
         sp(&c->body, "    }\n");
+    } else if (c->glsl && ((OPM(0xebf8000000000000ull, 0xfff8000000000000ull) && bits(w, 20, 3) < 2) ||  // RED
+                           (OPM(0xed00000000000000ull, 0xff00000000000000ull) && bits(w, 49, 3) < 2))) {  // ATOM
+        // RED / ATOM (GLSL; as the Metal ones above): 32-bit atomic op of R[b] into global memory at R[a](:R[a+1]
+        // with .E) + imm20; ATOM also returns the old value in R[d]. EoW builds its light grid with them (atomic ORs):
+        // skipped before, as other games' unsupported stores.
+        bool red = OPM(0xebf8000000000000ull, 0xfff8000000000000ull);
+        int op = red ? (int)bits(w, 23, 3) : (int)bits(w, 52, 4);
+        bool sgn = red ? bits(w, 20, 3) == 1 : bits(w, 49, 3) == 1;
+        int rb = red ? (int)(w & 0xff) : (int)bits(w, 20, 8);
+        int key = gatom_key(op, sgn);
+        if (key < 0) { fail(c, "%s op %d", red ? "red" : "atom", op); return; }
+        int64_t off = sbits(w, 28, 20);
+        bool e64 = bits(w, 48, 1);
+        c->info->uses_gmem = true;
+        c->uses_gmem_store = true;
+        c->info->uses_gmem_store = true;
+        c->gatom_ops |= 1u << key;
+        char addr[256];
+        if (a == RZ) sprintf(addr, "ulong(%lld)", (long long)off);
+        else if (e64) sprintf(addr, "((ulong(%s) << 32 | ulong(%s)) + ulong(%lld))", R(a + 1), R(a), (long long)off);
+        else sprintf(addr, "(ulong(%s) + ulong(%lld))", R(a), (long long)off);
+        sp(&c->body, "    { ulong ga = %s - 0x%llxul; uint old_ = 0u; uint v = %s;\n", addr,
+           (unsigned long long)maxwell_gmem_base, R(rb));
+        sp(&c->body, "      if (ga < 0x%llxul && (ga & 3ul) == 0ul) {\n", (unsigned long long)maxwell_gmem_size);
+        if (c->stage == STAGE_COMPUTE || maxwell_gmem_mirror) {  // (as LDG / STG: the dispatch's storage buffers in gfast_)
+            c->info->uses_gmem_map = true;
+            sp(&c->body, "        uint fw = %s(uint(ga));\n        if (fw != 0xFFFFFFFFu) ", maxwell_gmem_mirror ? "gfind" : "gfindw");
+            gatom_stmt(&c->body, key, "old_", "gfast_.w[fw]");
+            if (!maxwell_gmem_mirror) sp(&c->body, "\n        else old_ = GMATOM_%s(uint(ga >> 2), v);", gatom_name[key]);
+            sp(&c->body, "\n");
+        } else {
+            sp(&c->body, "        old_ = GMATOM_%s(uint(ga >> 2), v);\n", gatom_name[key]);
+        }
+        sp(&c->body, "      }\n");
+        if (!red && d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      r%d = old_;\n", d); }
+        sp(&c->body, "    }\n");
     } else if (maxwell_skip_unsupported_stores && (OPM(0xebf8000000000000ull, 0xfff8000000000000ull) ||  // RED
                                                    OPM(0xeb20000000000000ull, 0xfff8000000000000ull))) {  // SUST.B
         // (experimental, other games: global reductions and surface stores aren't translated yet - skipped, so the rest
@@ -2248,6 +2316,8 @@ static const char glsl_prelude[] =
     "#extension GL_KHR_shader_subgroup_basic : require\n"
     "#extension GL_KHR_shader_subgroup_shuffle : require\n"
     "#extension GL_KHR_shader_subgroup_shuffle_relative : require\n"
+    "#extension GL_KHR_shader_subgroup_vote : require\n"    // (VOTE)
+    "#extension GL_KHR_shader_subgroup_ballot : require\n"  // (VOTE's ballot)
     "#extension GL_EXT_texture_shadow_lod : require\n"
     "#define cbr(cb, off) cb[min((off) >> 4, uint(cb.length() - 1))][((off) >> 2) & 3u]\n"
     "uint as_u(float x) { return floatBitsToUint(x); }\n"
@@ -2447,6 +2517,12 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         if (c->uses_gmem_store)
             sp(&s, "#define GMW(i, v) gmem_.w[i] = (v)\n#define GMAND(i, m) atomicAnd(gmem_.w[i], m)\n"
                    "#define GMOR(i, m) atomicOr(gmem_.w[i], m)\n");
+        for (int k = 0; k < GATOM_N; k++)
+            if (c->gatom_ops & (1u << k)) {
+                sp(&s, "uint GMATOM_%s(uint i, uint v) { uint r = 0u; ", gatom_name[k]);
+                gatom_stmt(&s, k, "r", "gmem_.w[i]");
+                sp(&s, " return r; }\n");
+            }
     } else if (info->uses_gmem && !maxwell_gmem_lazy) {  // the heap in windows, one binding each, plain branches (shader.h)
         int n = maxwell_gmem_chunks(), ws = (int)maxwell_gmem_chunk_shift - 2, cs = GMEM_CHUNK_SET(stage);
         for (int k = 0; k < n; k++)
@@ -2468,6 +2544,18 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
                 sp(&s, "}\n");
             }
             sp(&s, "#define GMW(i, v) GMW_(i, v)\n#define GMAND(i, m) GMAND_(i, m)\n#define GMOR(i, m) GMOR_(i, m)\n");
+            for (int op = 0; op < GATOM_N; op++) {
+                if (!(c->gatom_ops & (1u << op))) continue;
+                sp(&s, "uint GMATOM_%s(uint i, uint v) { uint c = i >> %du, o = i & 0x%xu, r = 0u;\n", gatom_name[op], ws, (1u << ws) - 1);
+                for (int k = 0; k < n; k++) {
+                    char lv[32];
+                    snprintf(lv, sizeof lv, "gmem%d_.w[o]", k);
+                    sp(&s, "  if (c == %du) ", k);
+                    gatom_stmt(&s, op, "r", lv);
+                    sp(&s, "\n");
+                }
+                sp(&s, "  return r; }\n");
+            }
         }
     } else if (info->uses_gmem) {  // chunks imported lazily: a table of device addresses, buffer references (shader.h)
         int ws = (int)maxwell_gmem_chunk_shift - 2, cs = GMEM_CHUNK_SET(stage);
@@ -2529,6 +2617,21 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         }
         sp(&s, "#define GMR(i) GMR1(i)\n");
         if (c->uses_gmem_store) sp(&s, "#define GMW(i, v) GMW1(i, v)\n#define GMAND(i, m) GMAND1(i, m)\n#define GMOR(i, m) GMOR1(i, m)\n");
+        for (int op = 0; op < GATOM_N; op++) {  // (as the functions above: the draw's chunks, then the table)
+            if (!(c->gatom_ops & (1u << op))) continue;
+            sp(&s, "uint GMATOM_%s(uint i, uint v) { uint o, r = 0u;", gatom_name[op]);
+            if (direct)
+                for (int k = 0; k < GMEM_DIRECT_MAX; k++) {
+                    char lv[32];
+                    snprintf(lv, sizeof lv, "gdir%d_.w[o]", k);
+                    sp(&s, " o = i - gd[%d].x; if (o < gd[%d].y) { ", k, k);
+                    gatom_stmt(&s, op, "r", lv);
+                    sp(&s, " return r; }");
+                }
+            sp(&s, " uint c = GMC(i); o = GMO(i); uvec4 e = gchunk[c]; if (o < e.z) { GW p = GW((uint64_t(e.y) << 32) | uint64_t(e.x)); ");
+            gatom_stmt(&s, op, "r", "p.w[o]");
+            sp(&s, " return r; } gmiss(c, i); return 0u; }\n");
+        }
     }
     if (info->uses_gmem_map) {  // (compute) the dispatch's storage buffers, device-local: gmap[i] = heap offset, size, word
         sp(&s, "layout(std140, set = %d, binding = %d) uniform GMap { uvec4 gmap[%d]; };\n", set, GMAP_BUFFER_INDEX, GMAP_MAX + 1);
