@@ -17,4 +17,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - LA's 30 fps hold is off for EoW.
 
 ### Fixed
+- The app shows its version as v0.1.0 and looks for updates on EoW Recomp's own releases, not LAS Recomp's.
+- A cold first start is much faster on Mac (shader preparation 19.5 min -> about 1 min on an M3 Max).
 - The underwater area is no longer black (shader builds run at the default priority).
