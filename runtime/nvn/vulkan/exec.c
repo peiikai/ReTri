@@ -2732,9 +2732,18 @@ typedef struct { NvnTexture *key; TexBackend copy; } Snap;
 static Snap snaps[16];
 static int nsnaps;
 
+// A shader's texture handle by its slot ((cbuf offset - 0x20) / 8): 0-31 the bound textures; 32-39 (offsets
+// 0x120-0x15f) the bound images - a texture fetch through an image binding (EoW's environment-map dispatch reads one
+// this way, as renderer.m's handle_at); both handles index the texture pool.
+static uint64_t handle_at(int stage, int slot) {
+    if (slot >= 0 && slot < 32) return st.tex[stage][slot];
+    if (slot >= 32 && slot < 40) return st.img[stage][slot - 32];
+    return 0;
+}
+
 static NvnTexture *shader_texture_object(int stage, ShaderTexture *st_) {
     int slot = ((int)st_->handle_offset - 0x20) / 8;
-    uint64_t h = (slot >= 0 && slot < 32) ? st.tex[stage][slot] : 0;
+    uint64_t h = handle_at(stage, slot);
     uint32_t tic = h & 0xFFFFF;
     if (!h || !st.tpool || tic >= (uint32_t)st.tpool->count) return NULL;
     return ((NvnTexEntry *)st.tpool->entries)[tic].tex;
@@ -5806,7 +5815,7 @@ static void shadow_slot_check(int stage, const ShaderTexture *st_, int i, uint64
 static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo *out, float sc[2], uint32_t wh[2], float fr[2]) {
     ShaderTexture *st_ = &si->tex[i];
     int slot = ((int)st_->handle_offset - 0x20) / 8;  // 64-bit handles from offset 0x20
-    uint64_t h = (slot >= 0 && slot < 32) ? st.tex[stage][slot] : 0;
+    uint64_t h = handle_at(stage, slot);
     VkImageView view = VK_NULL_HANDLE;
     VkSampler smp = VK_NULL_HANDLE;
     uint32_t tic = h & 0xFFFFF, tsc = (uint32_t)(h >> 20) & 0xFFF;
