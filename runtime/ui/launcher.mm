@@ -1651,10 +1651,11 @@ static void ios_export_wire(void) {
 #endif
 
 // A button of the progress overlay, drawn as the menus' buttons are (hot: lit, dark text) - the overlay is drawn on
-// the foreground over everything, not as ImGui items
+// the foreground over everything, not as ImGui items. Idle: the button colour, which text_button is made for (EoW's
+// rows are dark and its button text dark: Skip on a row was unreadable)
 static void busy_button(ImDrawList *dl, ImVec2 a, ImVec2 b, const char *label, float fs, bool hot, float sc) {
     const PlasticTheme &t = plastic_theme();
-    plastic_pill(dl, a, b, (b.y - a.y) * 0.5f, hot ? t.row_hot : t.row, (hot ? 6 : 4.5f) * sc, hot ? 1.0f : 0.7f, sc, hot);
+    plastic_pill(dl, a, b, (b.y - a.y) * 0.5f, hot ? t.row_hot : t.button, (hot ? 6 : 4.5f) * sc, hot ? 1.0f : 0.7f, sc, hot);
     ImVec2 ls = g_font_small->CalcTextSizeA(fs, FLT_MAX, 0, label);
     dl->AddText(g_font_small, fs, ImVec2((a.x + b.x - ls.x) * 0.5f, (a.y + b.y - ls.y) * 0.5f),
                 hot ? t.text_sel : t.text_button, label);
