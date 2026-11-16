@@ -660,7 +660,7 @@ static void upload_texture(NvnTexture *t, TexBackend *b, id<MTLBlitCommandEncode
             } else {
                 tegra_deswizzle(src, lin, l.wb, l.hb, l.d, fi->bpb, l.block_height_log2, l.block_depth_log2);
             }
-            if (b->tp > 0 && layer == 0) texpatch_apply(b->tp - 1, lv, lin, l.w, l.h, row);
+            if (b->tp > 0) texpatch_apply(b->tp - 1, layer, lv, lin, l.w, l.h, row);
             uint8_t *data = lin;
             uint32_t out_row = row;
             static int bc5log;  // LARECOMP_LOG_BC5: endpoint bytes of BC5 (0x4B/0x4C) textures (unorm ~128 vs snorm ~0)
@@ -2629,7 +2629,7 @@ void ui_window_init(void) {
     if (getenv("LARECOMP_HIDDEN")) wflags |= SDL_WINDOW_HIDDEN;
     // (tests) LARECOMP_NO_ACTIVATE=1: a visible window that doesn't take the focus; LARECOMP_WINDOW_POS=<x>,<y>
     if (getenv("LARECOMP_NO_ACTIVATE")) SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
-    window = SDL_CreateWindow("EoW Recomp", win_w, win_h, wflags);
+    window = SDL_CreateWindow("ReTri", win_w, win_h, wflags);
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());
     if (getenv("LARECOMP_WINDOW_POS")) {
         int x = 0, y = 0;
@@ -2647,12 +2647,12 @@ void ui_window_init(void) {
     // The game's textures are mostly BC (metal_format): on iOS every Apple9 GPU (A17 Pro, M3) and newer has it, an
     // Apple7 / Apple8 one (A14-A16, M1, M2) only some (Metal Feature Set Tables), older ones none. Say so instead of
     // failing at the first texture. Not on macOS: every Mac it runs on has them. Not in the Simulator
-    // either: its GPU has no BC on any Mac, and only the start screen runs there (tools/test_ios_sim.sh).
+    // either: its GPU has no BC on any Mac, and only the start screen runs there.
     if (TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR && !dev.supportsBCTextureCompression && !getenv("LARECOMP_NO_BC_CHECK")) {
         static const char msg[] = "This iPhone or iPad can't run EoW Recomp: its graphics chip has no support for the "
                                   "game's texture formats (BC).";
         fprintf(stderr, "FATAL: %s (the GPU has no BC texture formats)\n", msg);
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "EoW Recomp", msg, window);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ReTri", msg, window);
         exit(1);
     }
     settings_resolve_defaults(false);  // (Apple GPUs keep MetalFX as the default upscaler)

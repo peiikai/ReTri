@@ -2090,11 +2090,11 @@ void ui_window_init(void) {
     {   // scripted test runs (user input ignored: runtime/hle/input.c input_user_blocked) open without taking the
         // keyboard focus from whatever the player is doing
         const char *v = getenv("LARECOMP_NO_USER_INPUT");
-        bool scripted = v ? atoi(v) != 0 : (getenv("LARECOMP_INPUT") || getenv("LARECOMP_DOORJUMP_TEST") || getenv("LARECOMP_PLACE") ||
+        bool scripted = v ? atoi(v) != 0 : (getenv("LARECOMP_INPUT") || getenv("LARECOMP_PLACE") ||
                                             getenv("LARECOMP_HOST_INPUT") || getenv("LARECOMP_BIND_TEST"));
         if (scripted) SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0");
     }
-    window = SDL_CreateWindow("EoW Recomp", win_w, win_h, wflags);
+    window = SDL_CreateWindow("ReTri", win_w, win_h, wflags);
 #ifdef __ANDROID__
     // opened with the screen locked / off: no surface to make the window on yet; it comes once the activity shows.
     // SDL_PumpEvents sleeps while the app is paused, so the 5 s count only time in the foreground, and a window that
@@ -2103,7 +2103,7 @@ void ui_window_init(void) {
         if (tries == 0) LOG("[vk] waiting for the Android window (%s)\n", SDL_GetError());
         SDL_PumpEvents();
         SDL_Delay(50);
-        window = SDL_CreateWindow("EoW Recomp", win_w, win_h, wflags);
+        window = SDL_CreateWindow("ReTri", win_w, win_h, wflags);
     }
 #endif
     if (!window) FATAL("SDL_CreateWindow: %s\n", SDL_GetError());

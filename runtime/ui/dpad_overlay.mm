@@ -34,7 +34,7 @@ int game_in_play(void);
 uint64_t renderer_present_count(void);
 bool world_on_screen(void);
 bool inventory_items_page_shown(void);
-bool pause_menu_shown(void);  // runtime/ui/inventory_overlay.mm
+bool pause_menu_shown(void);  // runtime/ui/pause_pages.mm
 int hud_xy_alpha(void);  // runtime/hle/hud_corners.c
 int mirror_fill_alpha(void);  // runtime/hle/mirror.c
 }
@@ -168,7 +168,7 @@ extern "C" void dpad_overlay_draw(ImVec2 display, ImFont *font, float scale) {
     const float fade = cross_alpha() / 255.0f;
     auto col = [fade](int r, int g, int b, int a) { return IM_COL32(r, g, b, (int)(a * fade + 0.5f)); };
     // the game's HUD sits in a 16:9 box centred in the window; its 1280x720 layout has X / Y top right (Y at 476, 296
-    // from the centre, y up; runtime/hle/escape.c). The D-pad goes under X. LARECOMP_DPAD_POS=x,y (layout): elsewhere.
+    // from the centre, y up). The D-pad goes under X. LARECOMP_DPAD_POS=x,y (layout): elsewhere.
     float bw = fminf(display.x, display.y * 16 / 9), bh = bw * 9 / 16;
     float bx = (display.x - bw) * 0.5f, by = (display.y - bh) * 0.5f, u = bw / 1280;
     static float lx = 1e9f, ly;

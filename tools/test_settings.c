@@ -61,9 +61,10 @@ int main(int argc, char **argv) {
         settings_save();
         return 0;
     }
-    if (argc == 3 && !strcmp(argv[1], "rando-options")) {  // the New seed options (an opaque seed ID), kept as saved
+    if (argc == 2 && !strcmp(argv[1], "old-keys")) {  // a file with LA's randomizer keys: loads, the rest kept
         settings_load();
-        assert(!strcmp(g_settings.rando_options, argv[2]));
+        assert(g_settings.aspect == ASPECT_ORIGINAL);
+        assert(!strcmp(g_settings.rando_seed, "X"));
         settings_save();
         return 0;
     }

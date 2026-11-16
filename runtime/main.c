@@ -106,7 +106,7 @@ __attribute__((constructor(101))) static void reserve_guest_space(void) {
     else if (plat_reserve_guest(GUEST_LO, GUEST_HI)) { g_guest_reserved = true; return; }
 #endif
     else setenv("LARECOMP_REEXEC_WHY", "", 0);  // (the platform may have said what holds the range; else nothing more)
-    if (PLAT_IOS) return;  // (no re-exec there: the start screen and the seed generator still run; the game can't)
+    if (PLAT_IOS) return;  // (no re-exec there: the start screen still runs; the game can't)
     const char *tries = getenv("LARECOMP_REEXEC");
     int n = tries ? atoi(tries) : 0;
     if (n >= 20) {
@@ -219,7 +219,7 @@ static void boot(const char *root) {
     if (!game_version_select(root, why, sizeof why)) FATAL("%s\n", why);  // (the address table: game_addresses.h)
     if (!gamelib_load(root, why, sizeof why)) FATAL("%s\n", why);
     loader_load(exefs);
-    rando_boot();  // the chosen seed's data patches go into the freshly loaded module
+    rando_boot();  // the chosen seed (runtime/rando.c)
     { extern void settings_load(void); settings_load(); }
     kernel_init();
     dispatch_init();
