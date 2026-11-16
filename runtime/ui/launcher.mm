@@ -151,8 +151,8 @@ extern "C" const char *larecomp_version(void) { return LARECOMP_VERSION; }  // (
 // v0.<n>.<m> the same as beta_<n>.<m>; other tags (the alpha_* ones) are ignored. (Beta 5 and earlier only know
 // beta_<n>: they never offer a hotfix; builds before Beta 5.3 don't know v0.<n>.<m> either.) Offline / no curl /
 // anything unexpected: nothing is shown.
-#define RELEASES_URL "https://api.github.com/repos/peiikai/TriCompiled/releases?per_page=100"
-#define RELEASE_PAGE "https://github.com/peiikai/TriCompiled/releases/tag/"
+#define RELEASES_URL "https://api.github.com/repos/peiikai/ReTri/releases?per_page=100"
+#define RELEASE_PAGE "https://github.com/peiikai/ReTri/releases/tag/"
 
 #include "update_tags.h"  // tag_rank, tag_label
 
@@ -2285,7 +2285,7 @@ static void load_fonts(void) {
     const char *fonts[] = {getenv("LARECOMP_LAUNCHER_FONT") ? getenv("LARECOMP_LAUNCHER_FONT") : "",  // (test)
                            own.c_str(), "fonts/nintendo_udsgr_std_003.ttf", "/System/Library/Fonts/Avenir Next.ttc",
                            "/System/Library/Fonts/Helvetica.ttc", "C:/Windows/Fonts/segoeui.ttf"};
-    // the menus' language's glyphs (i18n.h), and its script's font merged in; the title only says "TriCompiled" or "EoW Recompiled"
+    // the menus' language's glyphs (i18n.h), and its script's font merged in; the title only says "ReTri" or "EoW Recompiled"
     static const ImWchar title_ranges[] = {0x20, 0x7E, 0};
     for (const char *p : fonts) {
         if (g_font_menu || !*p || !file_exists(p)) continue;
@@ -2742,7 +2742,7 @@ extern "C" void launcher_run(const char *root) {
             ImGui::SetCursorPos(ImVec2(x0, 120 * s));
             ImGui::PushFont(g_font_title);
             if (page == MAIN) {  // gold to orange, shadowed (not behind the Settings / System windows)
-                const char *t = game_other() ? "TriCompiled" : "EoW Recompiled";
+                const char *t = game_other() ? "ReTri" : "EoW Recompiled";
                 ImVec2 p = ImGui::GetCursorScreenPos();
                 text_fx(ImGui::GetWindowDrawList(), ImGui::GetFont(), ImGui::GetFontSize(), p,
                         eow_or(IM_COL32(255, 232, 120, 255), IM_COL32(240, 216, 144, 255)),
