@@ -83,6 +83,8 @@ val prepareLasRecomp by tasks.registering {
     val res = mapOf(
         "Baloo2-SemiBold.ttf" to "third_party/fonts/Baloo2/Baloo2-SemiBold.ttf",
         "Baloo2-OFL.txt" to "third_party/fonts/Baloo2/OFL.txt",
+        "HyliaSerifBeta-Regular.otf" to "third_party/fonts/HyliaSerif/HyliaSerifBeta-Regular.otf",
+        "HyliaSerif-README.md" to "third_party/fonts/HyliaSerif/README.md",
         "BIZUDPGothic-Regular.ttf" to "third_party/fonts/BIZUDPGothic/BIZUDPGothic-Regular.ttf",
         "BIZUDPGothic-OFL.txt" to "third_party/fonts/BIZUDPGothic/OFL.txt",
         "DejaVuSans.ttf" to "third_party/fonts/DejaVu/DejaVuSans.ttf",

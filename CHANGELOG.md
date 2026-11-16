@@ -12,6 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
 
 ### Changed
+- The start screen title is in Hylia Serif, a free fan font by Omni Jacala (credited in the README).
 - The window and error dialogs are titled "TriCompiled", the project's new name.
 - The app is named EoW Recomp: binaries `eowrecomp` and `eowgame.dylib`, logs `eowrecomp.log`, and the name in
   menus, window titles and docs. Env vars stay `LARECOMP_*`.
