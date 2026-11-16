@@ -34,6 +34,8 @@ NvnTexture *texpatch_hint_icon(void);
 bool texpatch_is_item_cursor(int id);
 // A draw sampled known texture `id` (the renderer, each draw's textures)
 void texpatch_note_draw(int id);
+// EoW: the name of the echo or item icon on the HUD's Y slot (IconCopyActor.arc / IconItem.arc), NULL until seen
+const char *texpatch_eow_y_icon(void);
 // What the game shows: 1 the title screen, 2 the file select (drawn in the last few frames), else 0
 int texpatch_title_screen(void);
 // Changes whenever the wanted look of the known textures changes (prompt style, controller, Hero icon setting):

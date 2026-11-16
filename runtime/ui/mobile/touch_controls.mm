@@ -24,7 +24,8 @@
 // Echoes of Wisdom (game_other()): the game has no context known here, so play shows the whole Switch pad - the stick,
 // A B X Y, L R ZL ZR, Plus / Minus and a D-pad (the echo list, accessories) - from the moment the game runs, with
 // the Switch letters on them; nothing reads LA's save and no tap on the game's screen turns into presses. They take
-// the look of the game's own HUD item button (eow_disc): a tan paper disc, the letter on a cream badge.
+// the menus' EoW theme (eow_disc: the pause menu's cells, the cursor's brackets while pressed); Y shows the echo or
+// item on the HUD's Y slot (texpatch_eow_y_icon: the icon the HUD draws).
 // A quick tap still reaches the game (a button is held at least 80 ms). LARECOMP_TOUCH_SHOW_INPUT=1 (videos, tests):
 // scripted input (LARECOMP_INPUT) lights the buttons and moves the stick as a thumb would.
 #include <SDL3/SDL.h>
@@ -50,11 +51,10 @@ bool tracker_map_page_shown(void);   // runtime/ui/tracker_overlay.mm
 bool chaos_dgnmap_shown(void);       // runtime/ui/chaos_overlay.mm
 bool pause_menu_shown(void);         // runtime/ui/inventory_overlay.mm
 int texpatch_title_screen(void);     // runtime/nvn/texpatch.c
-int texpatch_ui_rgba_list(const char *const *names, int n, uint8_t **out, int *w, int *h);
+const char *texpatch_eow_y_icon(void);
 extern int g_start_screen;           // runtime/hle/warp.c
 }
 ImTextureID ui_game_icon(const char *name);  // runtime/ui/triforce_icons.mm
-ImTextureID ui_rgba_texture(const uint8_t *rgba, int w, int h);
 
 enum { BTN_A = 0, BTN_B, BTN_X, BTN_Y, BTN_L = 6, BTN_R, BTN_ZL, BTN_ZR, BTN_PLUS, BTN_MINUS,
        BTN_LEFT, BTN_UP, BTN_RIGHT, BTN_DOWN };  // (input.c's bits)
@@ -803,91 +803,51 @@ static bool dpad_disc(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly,
 }
 
 // ---- drawing: Echoes of Wisdom's look
-// The HUD's own item button (its layout SetItem): a paper disc in tan, see-through in the middle with a firmer rim. Made
-// once from the game's UI textures (GameMain.arc): ItemBG_00^q (the left half of the disc and its shadow; the layout
-// mirrors it), ItemBG_01^t (the rim) and MatPaper_00^_A (the paper). Drawn tinted: tan, pale while pressed. 0: the
-// textures aren't there (the blue bubbles instead).
-static const float kDiscSpan = 72.0f / 48;  // (the image's half width per disc radius)
-static ImTextureID eow_disc_tex(void) {
-    static int state;  // 0 not made, 1 made (or not there)
-    static ImTextureID tex;
-    if (state) return tex;
-    state = 1;
-    const char *const names[3] = {"ItemBG_00^q", "ItemBG_01^t", "MatPaper_00^_A"};
-    uint8_t *px[3];
-    int w[3], h[3];
-    texpatch_ui_rgba_list(names, 3, px, w, h);
-    const int S = 144;
-    if (px[0] && px[1] && px[2] && w[0] == S / 2 && h[0] == S && w[1] == S / 2 && h[1] == S && w[2] >= S && h[2] >= S) {
-        uint8_t *o = (uint8_t *)malloc((size_t)S * S * 4);
-        for (int y = 0; y < S; y++)
-            for (int x = 0; x < S; x++) {
-                int hx = x < S / 2 ? x : S - 1 - x;
-                const uint8_t *b = px[0] + ((size_t)y * w[0] + hx) * 4, *pp = px[2] + ((size_t)y * w[2] + x) * 4;
-                float rim = px[1][((size_t)y * w[1] + hx) * 4 + 3] / 255.0f;
-                float lum = (b[0] + b[1] + b[2]) / 765.0f;  // (white the disc, black its shadow)
-                float k = lum * (0.88f + 0.30f * rim), cover = 1 + lum * (0.62f + 0.38f * rim - 1);
-                uint8_t *q = o + ((size_t)y * S + x) * 4;
-                for (int ch = 0; ch < 3; ch++) q[ch] = (uint8_t)clampf(pp[ch] * k, 0, 255);
-                q[3] = (uint8_t)clampf(b[3] * cover, 0, 255);
-            }
-        tex = ui_rgba_texture(o, S, S);
-        free(o);
-    }
-    for (int i = 0; i < 3; i++) free(px[i]);
-    return tex;
-}
-
-static const ImU32 kEowInk = IM_COL32(104, 96, 80, 255);  // (the HUD badge's letter)
+// The menus' EoW theme (plastic.h, from the game's pause menu): each button a round cell in its grey-brown with a thin
+// lighter rim, drawn by the menus' own plastic pieces, the letter set in it in the menu's cream. Pressed: the
+// selection's colour and the cursor's corner brackets, gold above and green below.
+static ImVec4 alpha_of(ImVec4 c, float a) { return ImVec4(c.x, c.y, c.z, c.w * a); }
+static ImU32 u32(ImVec4 c, float a = 1) { return ImGui::ColorConvertFloat4ToU32(alpha_of(c, a)); }
 static bool eow_disc(ImDrawList *dl, ImVec2 c, float r, bool on, float a, float th, bool sel) {
-    ImTextureID t = eow_disc_tex();
-    if (!t) return false;
+    const PlasticTheme &t = plastic_theme();
     a = fminf(1, 0.55f + 0.5f * a);  // (mostly solid: 0.85 at the opacity setting's default)
-    float s = r * kDiscSpan;
-    dl->AddImage(t, ImVec2(c.x - s, c.y - s), ImVec2(c.x + s, c.y + s), ImVec2(0, 0), ImVec2(1, 1),
-                 on ? col(250, 240, 186, fminf(1, a + 0.15f)) : col(200, 182, 128, a));
-    if (on) dl->AddCircle(c, r * 0.97f, col(232, 214, 96, fminf(1, a + 0.15f)), 48, 3.5f * th);  // (the items cursor's gold)
-    if (sel) dl->AddCircle(c, r * 1.02f, col(236, 194, 84, 1), 48, 5.0f * th);
+    ImVec2 p0(c.x - r, c.y - r), p1(c.x + r, c.y + r);
+    plastic_pill(dl, p0, p1, r, alpha_of(on ? t.row_sel : t.row, a), 6 * th, 1.0f, th, false);
+    if (on || sel) plastic_brackets(dl, p0, p1, th * (sel ? 1.4f : 1.0f));
     return true;
 }
 
-// the cream badge the HUD puts the button's letter on (drawn in the middle here: no item on it)
-static void eow_badge(ImDrawList *dl, ImVec2 c, float r, float a) {
-    float br = r * 0.52f;
-    a = fmaxf(a, 0.85f);
-    dl->AddCircleFilled(ImVec2(c.x, c.y + br * 0.08f), br * 1.03f, col(40, 30, 10, 0.30f * a), 32);
-    dl->AddCircleFilled(c, br, col(238, 232, 196, a), 32);
-}
-
-// The stick: the disc with the compass points pressed into it, the knob a small cream disc. The D-pad: a cross in the
-// items page's dark slot colour on the disc, edged in tan, the arms held down in the cursor's gold.
+// The stick: a cell with the compass points pressed into it, the knob a small tan cell (the menus' buttons) with a
+// diamond. The D-pad: a recessed cross in the cell, its arrows tan, the arms held down in the theme's gold-orange.
 static bool eow_compass(ImDrawList *dl, ImVec2 c, float r, ImVec2 knob, float a, float th, bool sel) {
-    if (!eow_disc(dl, c, r, false, a, th, sel)) return false;
+    const PlasticTheme &t = plastic_theme();
+    eow_disc(dl, c, r, false, a, th, sel);
     float ea = fminf(1, 0.55f + 0.5f * a);
     for (int k = 0; k < 8; k++) {
         float ang = k * 3.14159265f / 4, len = k % 2 ? 0.62f : 0.90f, wd = k % 2 ? 0.09f : 0.13f;
         ImVec2 tip(c.x + cosf(ang) * r * len, c.y + sinf(ang) * r * len);
         ImVec2 s1(c.x + cosf(ang + 1.5708f) * r * wd, c.y + sinf(ang + 1.5708f) * r * wd);
         ImVec2 s2(c.x - cosf(ang + 1.5708f) * r * wd, c.y - sinf(ang + 1.5708f) * r * wd);
-        dl->AddTriangleFilled(tip, s1, s2, col(92, 76, 48, (k % 2 ? 0.40f : 0.62f) * ea));
+        dl->AddTriangleFilled(tip, s1, s2, u32(t.ring_sel, (k % 2 ? 0.55f : 0.85f) * ea));
     }
     bool held = hypotf(knob.x - c.x, knob.y - c.y) > r * 0.04f;
-    float kr = r * 0.42f, s = kr * kDiscSpan;
-    dl->AddImage(eow_disc_tex(), ImVec2(knob.x - s, knob.y - s), ImVec2(knob.x + s, knob.y + s), ImVec2(0, 0), ImVec2(1, 1),
-                 held ? col(255, 246, 200, 1) : col(238, 232, 196, 1));
-    if (held) dl->AddCircle(knob, kr * 0.97f, col(232, 214, 96, 1), 40, 3.0f * th);
-    float d = kr * 0.30f;  // (the items page's empty-slot diamond)
+    float kr = r * 0.42f;
+    ImVec2 k0(knob.x - kr, knob.y - kr), k1(knob.x + kr, knob.y + kr);
+    plastic_pill(dl, k0, k1, kr, t.button, 5 * th, 1.0f, th, false);
+    if (held) plastic_brackets(dl, k0, k1, th * 0.8f);
+    float d = kr * 0.30f;
     dl->AddQuadFilled(ImVec2(knob.x, knob.y - d), ImVec2(knob.x + d, knob.y), ImVec2(knob.x, knob.y + d), ImVec2(knob.x - d, knob.y),
-                      col(150, 128, 84, 0.85f));
+                      t.text_button);
     return true;
 }
 
 static bool eow_dpad(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly, float a, float th, bool sel) {
-    if (!eow_disc(dl, c, r, false, a, th, sel)) return false;
+    const PlasticTheme &t = plastic_theme();
+    eow_disc(dl, c, r, false, a, th, sel);
     float ea = fminf(1, 0.55f + 0.5f * a), len = r * 0.80f, w = r * 0.27f, rnd = r * 0.08f;
-    ImU32 slot = col(40, 30, 25, 0.82f * ea), lit = col(232, 214, 96, ea), edge = col(238, 232, 196, 0.85f * ea);
-    dl->AddRectFilled(ImVec2(c.x - w, c.y - len), ImVec2(c.x + w, c.y + len), slot, rnd);
-    dl->AddRectFilled(ImVec2(c.x - len, c.y - w), ImVec2(c.x + len, c.y + w), slot, rnd);
+    ImU32 well = u32(t.inset, 0.9f * ea / fmaxf(t.inset.w, 0.01f)), lit = u32(t.bar, ea), edge = u32(t.ring_sel, ea);
+    dl->AddRectFilled(ImVec2(c.x - w, c.y - len), ImVec2(c.x + w, c.y + len), well, rnd);
+    dl->AddRectFilled(ImVec2(c.x - len, c.y - w), ImVec2(c.x + len, c.y + w), well, rnd);
     float in = 2.5f * th;  // (the held arm inside the edge)
     if (ly > 8000) dl->AddRectFilled(ImVec2(c.x - w + in, c.y - len + in), ImVec2(c.x + w - in, c.y - w), lit, rnd);
     if (ly < -8000) dl->AddRectFilled(ImVec2(c.x - w + in, c.y + w), ImVec2(c.x + w - in, c.y + len - in), lit, rnd);
@@ -895,14 +855,13 @@ static bool eow_dpad(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly, 
     if (lx > 8000) dl->AddRectFilled(ImVec2(c.x + w, c.y - w + in), ImVec2(c.x + len - in, c.y + w - in), lit, rnd);
     ImVec2 o[12] = {{c.x - w, c.y - len}, {c.x + w, c.y - len}, {c.x + w, c.y - w}, {c.x + len, c.y - w}, {c.x + len, c.y + w}, {c.x + w, c.y + w},
                     {c.x + w, c.y + len}, {c.x - w, c.y + len}, {c.x - w, c.y + w}, {c.x - len, c.y + w}, {c.x - len, c.y - w}, {c.x - w, c.y - w}};
-    dl->AddPolyline(o, 12, edge, ImDrawFlags_Closed, 2.0f * th);
-    float t = len * 0.86f, hh = len * 0.58f, s = r * 0.13f;
-    ImU32 ar = col(238, 232, 196, fmaxf(ea, 0.9f));
-    auto arrow = [&](bool held, ImVec2 p0, ImVec2 p1, ImVec2 p2) { dl->AddTriangleFilled(p0, p1, p2, held ? col(74, 58, 30, 1) : ar); };
-    arrow(ly > 8000, ImVec2(c.x, c.y - t), ImVec2(c.x + s, c.y - hh), ImVec2(c.x - s, c.y - hh));
-    arrow(ly < -8000, ImVec2(c.x, c.y + t), ImVec2(c.x - s, c.y + hh), ImVec2(c.x + s, c.y + hh));
-    arrow(lx < -8000, ImVec2(c.x - t, c.y), ImVec2(c.x - hh, c.y - s), ImVec2(c.x - hh, c.y + s));
-    arrow(lx > 8000, ImVec2(c.x + t, c.y), ImVec2(c.x + hh, c.y + s), ImVec2(c.x + hh, c.y - s));
+    dl->AddPolyline(o, 12, edge, ImDrawFlags_Closed, 1.8f * th);
+    float tp = len * 0.86f, hh = len * 0.58f, s = r * 0.13f;
+    ImU32 ar = u32(t.button, fmaxf(ea, 0.9f)), dark = t.text_button;
+    dl->AddTriangleFilled(ImVec2(c.x, c.y - tp), ImVec2(c.x + s, c.y - hh), ImVec2(c.x - s, c.y - hh), ly > 8000 ? dark : ar);
+    dl->AddTriangleFilled(ImVec2(c.x, c.y + tp), ImVec2(c.x - s, c.y + hh), ImVec2(c.x + s, c.y + hh), ly < -8000 ? dark : ar);
+    dl->AddTriangleFilled(ImVec2(c.x - tp, c.y), ImVec2(c.x - hh, c.y - s), ImVec2(c.x - hh, c.y + s), lx < -8000 ? dark : ar);
+    dl->AddTriangleFilled(ImVec2(c.x + tp, c.y), ImVec2(c.x + hh, c.y + s), ImVec2(c.x + hh, c.y - s), lx > 8000 ? dark : ar);
     return true;
 }
 
@@ -977,9 +936,8 @@ extern "C" void touch_draw(ImDrawList *dl, float w, float h, ImFont *font, ImFon
         bool disc = slot_disc(dl, p, r, on, fa, th, sel);
         if (!disc) bubble(dl, p, r, on, i == C_A, fa, th, sel);
         ImU32 ink = disc ? col(74, 52, 26, fmaxf(fa, 0.9f)) : col(255, 255, 255, fmaxf(fa, 0.85f));  // (on a disc: the game's brown)
+        if (eow()) ink = plastic_theme().text;  // (the menu's cream, set in the cell)
         float ir = r;  // (the size the letter or symbol is drawn for)
-        bool eow_badged = disc && eow();
-        if (eow_badged) eow_badge(dl, p, r, fa), ink = kEowInk, ir = r * 0.62f;
         if (i == C_EDIT) {  // a pencil, tip down to the left
             float u = ir * 0.55f, d = 0.7071f, wd = u * 0.24f;
             ImVec2 a(c.x - u * 0.55f, c.y + u * 0.55f), z(c.x + u * 0.62f, c.y - u * 0.62f);  // (the tip's base, the top)
@@ -994,15 +952,18 @@ extern "C" void touch_draw(ImDrawList *dl, float w, float h, ImFont *font, ImFon
                 dl->AddLine(ImVec2(c.x - u, c.y + k * u * 0.6f), ImVec2(c.x + u, c.y + k * u * 0.6f), ink, 3 * th);
             continue;
         }
-        const char *in = eow() ? NULL : g_editing && i != C_X && i != C_Y ? icon_of(X_PLAY, i) : icon_of(ctx, i);
+        // (EoW: Y shows the echo or item the HUD's Y slot shows)
+        const char *in = eow() ? (i == C_Y ? texpatch_eow_y_icon() : NULL) : g_editing && i != C_X && i != C_Y ? icon_of(X_PLAY, i) : icon_of(ctx, i);
         ImTextureID tex = in ? ui_game_icon(in) : (ImTextureID)0;
         if (tex) {
             icon(dl, tex, p, r, fa);
-            badge(dl, font, p, r, c.label, fa);
+            if (eow())  // (the letter small in the cell's lower left, as the HUD's)
+                label_text(dl, font, r * 0.48f, ImVec2(p.x - r * 0.56f, p.y + r * 0.52f), c.label, ink, true, true);
+            else badge(dl, font, p, r, c.label, fa);
         } else {  // no icon: the letter in the middle
             bool pm = c.label[0] == '+' || c.label[0] == '-';
-            float fs = eow_badged ? r * (pm ? 0.95f : strlen(c.label) > 1 ? 0.52f : 0.68f) : r * (pm ? 1.4f : i == C_A ? 1.15f : 0.95f);
-            label_text(dl, font, fs, p, c.label, ink, !disc, true);
+            float fs = r * (pm ? 1.4f : eow() && strlen(c.label) > 1 ? 0.80f : i == C_A ? 1.15f : 0.95f);
+            label_text(dl, font, fs, p, c.label, ink, !disc || eow(), true);
         }
         const char *hn = g_editing ? NULL : hint(ctx, i);
         if (hn && *hn) {  // what it does here: a small brown tab on the button's bottom rim (the top one when there's

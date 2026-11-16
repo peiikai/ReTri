@@ -264,7 +264,107 @@ static bool g_tunic_layout_ok;
 bool texpatch_is_item_cursor(int id) { return id >= 0 && id < g_nrefs && g_refs[id].role == R_ITEM_CURSOR; }
 
 static _Atomic uint64_t g_screen_seen[2];  // when the title's logo / the file select's frame was last drawn
+// ------------------------------------------------------------------ Echoes of Wisdom: the echo and item icons
+// The echoes' and items' icons (IconCopyActor.arc, IconItem.arc), known by a hash of their data as stored, so the
+// touch controls can show what's on Y (texpatch_eow_y_icon). Ids from TEXPATCH_EOW_ICON_BASE (identified only).
+#define TEXPATCH_EOW_ICON_BASE 2048
+typedef struct {
+    uint16_t w, h;
+    uint32_t size;
+    uint64_t hash;
+    char name[48];
+} EowIcon;
+static EowIcon *g_icons;
+static int g_nicons;
+static pthread_once_t g_icons_once = PTHREAD_ONCE_INIT;
+static _Atomic uint64_t *g_icon_seen;  // (per icon: when a draw last sampled it, plat_now_ns)
+
+static uint64_t fnv64(const uint8_t *p, size_t n) {
+    uint64_t h = 1469598103934665603ull;
+    for (size_t i = 0; i < n; i++) h = (h ^ p[i]) * 1099511628211ull;
+    return h;
+}
+
+static void load_icons(void) {
+    static const char *const arcs[] = {"region_common/ui/IconCopyActor.arc", "region_common/ui/IconItem.arc"};
+    int cap = 0;
+    for (int a = 0; a < 2; a++) {
+        size_t len;
+        uint8_t *d = read_all(arcs[a], &len);
+        if (!d) continue;
+        if (len > 0x20 && !memcmp(d, "SARC", 4)) {
+            uint32_t data_off = rd32(d + 0xC);
+            uint16_t n = rd16(d + 0x1A);
+            const uint8_t *ent = d + 0x20, *names = d + 0x20 + 16 * n + 8;
+            for (uint16_t i = 0; i < n && ent + 16 * (i + 1) <= d + len; i++) {
+                uint32_t attr = rd32(ent + 16 * i + 4), st = rd32(ent + 16 * i + 8), e = rd32(ent + 16 * i + 12);
+                const char *nm = (attr >> 24) ? (const char *)names + (attr & 0xffffff) * 4 : "";
+                if ((const uint8_t *)nm >= d + len || strcmp(nm, "timg/__Combined.bntx") || data_off + e > len) continue;
+                const uint8_t *b = d + data_off + st;
+                size_t blen = e - st;
+                if (blen < 0x40 || memcmp(b, "BNTX", 4)) continue;
+                uint32_t count = rd32(b + 0x24);
+                uint64_t infos = rd64(b + 0x28);
+                for (uint32_t k = 0; k < count && infos + 8 * k + 8 <= blen; k++) {
+                    uint64_t brti = rd64(b + infos + 8 * k);
+                    if (brti + 0x90 > blen || memcmp(b + brti, "BRTI", 4)) continue;
+                    const uint8_t *t = b + brti + 16;
+                    uint64_t name_at = rd64(t + 80), ptrs = rd64(t + 96);
+                    if (name_at + 2 >= blen || ptrs + 8 > blen) continue;
+                    uint16_t nl = rd16(b + name_at);
+                    uint32_t size = rd32(t + 64);
+                    uint64_t data = rd64(b + ptrs);
+                    if (nl >= sizeof g_icons->name || name_at + 2 + nl > blen || data + size > blen) continue;
+                    if (g_nicons == cap) g_icons = realloc(g_icons, (size_t)(cap = cap ? cap * 2 : 128) * sizeof *g_icons);
+                    EowIcon *ic = &g_icons[g_nicons++];
+                    ic->w = (uint16_t)rd32(t + 20), ic->h = (uint16_t)rd32(t + 24), ic->size = size;
+                    ic->hash = fnv64(b + data, size);
+                    memcpy(ic->name, b + name_at + 2, nl);
+                    ic->name[nl] = 0;
+                }
+            }
+        }
+        free(d);
+    }
+    g_icon_seen = calloc(g_nicons ? g_nicons : 1, sizeof *g_icon_seen);
+    LOG("[texpatch] %d echo and item icons known\n", g_nicons);
+}
+
+static int eow_icon_identify(const NvnTexture *t, uint64_t total) {
+    pthread_once(&g_icons_once, load_icons);
+    uint64_t h = 0;
+    uint32_t hashed = 0;  // (the size hashed: icons of one size share it)
+    for (int i = 0; i < g_nicons; i++) {
+        const EowIcon *ic = &g_icons[i];
+        if (ic->w != t->width || ic->h != t->height || ic->size > total) continue;
+        if (hashed != ic->size) h = fnv64((const uint8_t *)(uintptr_t)t->addr, hashed = ic->size);
+        if (h == ic->hash) {
+            static int nlog;
+            if (nlog++ < 16) LOG("[texpatch] icon %s (%ux%u) uploaded\n", ic->name, ic->w, ic->h);
+            return TEXPATCH_EOW_ICON_BASE + i;
+        }
+    }
+    return -1;
+}
+
+// The icon on the HUD's Y slot: in play the HUD draws exactly one echo or item icon, Y's; when more are drawn at once
+// (the echo list, the menus) or none (a cutscene), the last one stays. NULL until one is seen.
+const char *texpatch_eow_y_icon(void) {
+    static int last = -1;
+    if (!g_icon_seen) return NULL;
+    uint64_t now = plat_now_ns(), recent = 150000000ull;  // (a few frames; the render thread is a frame or two behind)
+    int one = -1, n = 0;
+    for (int i = 0; i < g_nicons && n < 2; i++)
+        if (now - g_icon_seen[i] < recent) one = i, n++;
+    if (n == 1) last = one;
+    return last >= 0 ? g_icons[last].name : NULL;
+}
+
 void texpatch_note_draw(int id) {
+    if (id >= TEXPATCH_EOW_ICON_BASE && id < TEXPATCH_EOW_ICON_BASE + g_nicons && g_icon_seen) {
+        g_icon_seen[id - TEXPATCH_EOW_ICON_BASE] = plat_now_ns();
+        return;
+    }
     if (id < 0 || id >= g_nrefs) return;
     int r = g_refs[id].role;
     if (r == R_TITLE_LOGO || r == R_FILE_FRAME) g_screen_seen[r == R_FILE_FRAME] = plat_now_ns();
@@ -277,7 +377,10 @@ int texpatch_title_screen(void) {
 }
 
 int texpatch_identify(const NvnTexture *t) {
-    if (game_other()) return -1;  // (LA's textures only: another game on the engine may share hashes)
+    if (game_other()) {  // (LA's textures are LA's only: another game on the engine may share hashes)
+        if (!t->addr || t->depth > 1) return -1;
+        return eow_icon_identify(t, tegra_total_size(&t->layout));
+    }
     pthread_once(&g_once, load_refs);
     if (!t->addr || t->depth > 1) return -1;
     uint64_t total = tegra_total_size(&t->layout);
@@ -1246,15 +1349,14 @@ NvnTexture *texpatch_hint_icon(void) {
 }
 
 // The game's own UI textures, by name (e.g. "MapMark_05^w"), decoded to RGBA8 (w x h, the texture's own colour
-// encoding) from the user's UI archives: out[i] NULL if it isn't there or its format isn't one of ours (BC3, ASTC, and
-// BC5 masks as grey + alpha: red, green). Each archive is read once for the whole list. The caller frees them; returns
-// how many were found. Link's Awakening's archives first, then Echoes of Wisdom's (GameMain.arc: the HUD and menus).
-// (Runtime-made icons for our overlays: runtime/ui/triforce_icons.mm, race_overlay.mm, the touch controls - nothing of
-// the game ships.)
+// encoding) from the user's UI archives: out[i] NULL if it isn't there or its format isn't one of ours. Each archive is
+// read once for the whole list. The caller frees them; returns how many were found.
+// (Runtime-made icons for our overlays: runtime/ui/triforce_icons.mm, race_overlay.mm - nothing of the game ships.)
 int texpatch_ui_rgba_list(const char *const *want, int nwant, uint8_t **out, int *w_out, int *h_out) {
+    // (LA's archives, then EoW's echo and item icons: texpatch_eow_y_icon's names)
     static const char *const arcs[] = {"region_common/ui/Game.arc", "regionUS/common/ui/GameRegionCommon.arc",
                                        "regionEU/common/ui/GameRegionCommon.arc", "region_common/ui/StartUp.arc",
-                                       "region_common/ui/GameMain.arc"};
+                                       "region_common/ui/IconCopyActor.arc", "region_common/ui/IconItem.arc"};
     static const uint8_t astc_blocks[][3] = {{0x2d, 4, 4}, {0x2e, 5, 4}, {0x2f, 5, 5}, {0x30, 6, 5}, {0x31, 6, 6},
                                              {0x32, 8, 5}, {0x33, 8, 6}, {0x34, 8, 8}};  // (format: block w, h)
     int found = 0;
@@ -1289,10 +1391,10 @@ int texpatch_ui_rgba_list(const char *const *want, int nwant, uint8_t **out, int
                     if (wi < 0 || ptrs + 8 > blen) continue;
                     uint32_t fmt = rd32(t + 12), w = rd32(t + 20), h = rd32(t + 24), size = rd32(t + 64);
                     uint64_t data = rd64(b + ptrs);
-                    uint32_t hi = fmt >> 8, xb = 4, yb = 4;
-                    int kind = hi == 0x1c ? K_BC3 : hi == 0x1e ? K_BC5 : -1;
+                    uint32_t xb = 4, yb = 4;
+                    int kind = (fmt >> 8) == 0x1c ? K_BC3 : -1;
                     for (size_t q = 0; q < sizeof astc_blocks / sizeof *astc_blocks; q++)
-                        if (astc_blocks[q][0] == hi) kind = K_ASTC4, xb = astc_blocks[q][1], yb = astc_blocks[q][2];
+                        if (astc_blocks[q][0] == fmt >> 8) kind = K_ASTC4, xb = astc_blocks[q][1], yb = astc_blocks[q][2];
                     if (kind < 0 || data + size > blen) continue;
                     Ref r = {0, (uint8_t)kind, (uint8_t)((fmt & 0xff) == 6), 0, (uint16_t)w, (uint16_t)h, 1, size, NULL, ""};
                     uint32_t bw = (w + xb - 1) / xb, bh = (h + yb - 1) / yb;
@@ -1301,8 +1403,6 @@ int texpatch_ui_rgba_list(const char *const *want, int nwant, uint8_t **out, int
                     out[wi] = malloc((size_t)w * h * 4);
                     if (kind == K_ASTC4) astc_decode_ldr(lin, w, h, xb, yb, r.srgb, out[wi]);
                     else decode_image(&r, lin, bw * 16, out[wi]);
-                    if (kind == K_BC5)  // (a mask: red the shade, green the coverage)
-                        for (size_t p = 0; p < (size_t)w * h; p++) out[wi][p * 4 + 1] = out[wi][p * 4 + 2] = out[wi][p * 4];
                     free(lin);
                     w_out[wi] = (int)w, h_out[wi] = (int)h;
                     found++;
