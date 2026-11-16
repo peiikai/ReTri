@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Unlocked aspect ratio: the camera fills wide windows.
 - Logging of shader records the shipped list lacks, once per run.
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
+- Button icons follow the controller, as in LAS Recomp: PlayStation pads show Cross, Circle, Square and Triangle,
+  Xbox pads their own letters, in the HUD, menu prompts and text. "Button icons" setting (Controls tab).
 
 ### Changed
 - The start screen title is in Hylia Serif, a free fan font by Omni Jacala (credited in the README).

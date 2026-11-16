@@ -367,7 +367,7 @@ extern "C" void controls_tab_draw(float scale) {
         opt_child_end();
     }
     if (la) opt_toggle("Controller light", &g_settings.controller_light, true, "The light bar shows Link's health.");
-    if (la) {
+    {  // (EoW too: runtime/nvn/texpatch.c)
         static const char *const fam[] = {LN("Nintendo"), LN("Xbox"), LN("PlayStation")};
         char autol[64];  // (in the menus' language already: the row leaves it as it is)
         snprintf(autol, sizeof autol, L("Auto (%s)"), L(fam[input_pad_family() % 3]));

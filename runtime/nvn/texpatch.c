@@ -16,6 +16,11 @@
 // Plus / Minus = Menu / View, Options / Create. A button remapped on a Nintendo-style pad gets Nintendo letters; one
 // moved to a stick click / the d-pad gets LS / RS (L3 / R3) or an arrow. Stick glyphs stay. (The keyboard has no
 // glyphs of its own: keyboard bindings don't change the prompts.)
+//
+// Echoes of Wisdom (game_other): its prompt glyphs are ButtonA_00^w .. ButtonZR_00^w, ButtonPlus_00^w and
+// ButtonMinus_00^w (48x48 ASTC 4x4, GameMain.arc / Keep.arc: the HUD's item buttons and the menus' prompts), and
+// the button glyphs of Pictogram.bffnt (message text: one BC7 texture of 4 layers, the cells found through its own
+// CMAP, eow_sheet). The rest of this file (LA's tunic, hearts, bottle, Hero Mode icon) stays LA's.
 #include "../game_addresses.h"
 #include "texpatch.h"
 
@@ -31,6 +36,7 @@
 #include "../platform.h"
 #include "../settings.h"
 #include "astc.h"
+#include "bc.h"
 #include "recolour.h"
 #include "skin_face.h"
 #include "tegra.h"
@@ -39,7 +45,7 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../../third_party/imgui/imstb_truetype.h"
 
-enum { K_BC5, K_BC3, K_ASTC4, K_RGBA8, K_BC1, K_OTHER /* identified only */ };
+enum { K_BC5, K_BC3, K_ASTC4, K_RGBA8, K_BC1, K_BC7, K_OTHER /* identified only */ };
 enum { R_A = 1, R_B, R_X, R_Y, R_L, R_R, R_ZL, R_ZR, R_PLUS, R_MINUS, R_HERO, R_SHEET, R_TUNIC, R_TUNIC_RED, R_TUNIC_BLUE,
        R_HEART, R_SKIN, R_TITLE_LOGO, R_FILE_FRAME };
 enum { STYLE_NINTENDO, STYLE_XBOX, STYLE_PS };
@@ -84,6 +90,15 @@ static uint64_t rd64(const uint8_t *p) { return rd32(p) | (uint64_t)rd32(p + 4) 
 static bool g_scanning_link;  // (Playerlink.bfres: its face maps are Link's skin)
 
 static int role_of(const char *name) {
+    if (game_other()) {  // (EoW: only its button glyphs)
+        static const struct { const char *prefix; int role; } e[] = {
+            {"ButtonA_", R_A}, {"ButtonB_", R_B}, {"ButtonX_", R_X}, {"ButtonY_", R_Y}, {"ButtonL_", R_L},
+            {"ButtonR_", R_R}, {"ButtonZL_", R_ZL}, {"ButtonZR_", R_ZR}, {"ButtonPlus_", R_PLUS}, {"ButtonMinus_", R_MINUS},
+        };
+        for (unsigned i = 0; i < sizeof e / sizeof *e; i++)
+            if (!strncmp(name, e[i].prefix, strlen(e[i].prefix))) return e[i].role;
+        return 0;
+    }
     // cosmetics: Link's skin (Cosmetics tab "Skin color"): his face's maps (eyes / mouth expressions, ears; the body
     // map's arms and hands are recoloured with the tunic map, tunic_apply)
     if (g_scanning_link && (!strncmp(name, "MI_eye_alb", 10) || !strncmp(name, "MI_mouth_alb", 12) ||
@@ -141,9 +156,9 @@ static void scan_bntx(const uint8_t *b, size_t len, bool sheet) {
         uint64_t data = rd64(b + ptrs);
         if (data + size > len) continue;
         int kind = (fmt >> 8) == 0x1e ? K_BC5 : (fmt >> 8) == 0x1c ? K_BC3 : (fmt >> 8) == 0x2d ? K_ASTC4 :
-                   (fmt >> 8) == 0x0b ? K_RGBA8 : (fmt >> 8) == 0x1a ? K_BC1 : -1;
+                   (fmt >> 8) == 0x0b ? K_RGBA8 : (fmt >> 8) == 0x1a ? K_BC1 : (fmt >> 8) == 0x20 ? K_BC7 : -1;
         if (kind < 0 && (role == R_TITLE_LOGO || role == R_FILE_FRAME)) kind = K_OTHER;  // (the logo: 0x09, never decoded)
-        if (kind < 0 || (sheet && kind != K_RGBA8)) continue;
+        if (kind < 0 || (sheet && kind != K_RGBA8 && kind != K_BC7)) continue;
         add_ref(role, kind, (fmt & 0xff) == 6, w, h, levels, b + data, size, name, rd32(t + 36) & 7);
     }
 }
@@ -166,7 +181,72 @@ static void scan_sarc(const char *rel) {
     free(d);
 }
 
+// EoW's Pictogram.bffnt: its TGLP's cells (cw x ch, a 1-pixel gap after each; rows from the bottom of the stored
+// sheet, as LA's) and the button glyphs' places, by the CMAP: U+E0E0 A, E0E1 B, E0E2 X, E0E3 Y, E0E4 L, E0E5 R,
+// E0E6 ZL, E0E7 ZR, E0EF / E0F0 the circled + / - (E0F1 / E0F2, the bare + / -, have no label to redraw)
+static struct {
+    int cw, ch, cols, rows, n;
+    struct { uint8_t role, layer; uint16_t cell; } g[10];
+} g_eow_sheet;
+
+static void eow_sheet(const uint8_t *f, size_t len) {
+    static const struct { uint32_t code; uint8_t role; } want[] = {
+        {0xE0E0, R_A}, {0xE0E1, R_B}, {0xE0E2, R_X}, {0xE0E3, R_Y}, {0xE0E4, R_L}, {0xE0E5, R_R},
+        {0xE0E6, R_ZL}, {0xE0E7, R_ZR}, {0xE0EF, R_PLUS}, {0xE0F0, R_MINUS},
+    };
+    if (len < 0x14 || memcmp(f, "FFNT", 4)) return;
+    int per = 0, glyph[10];
+    for (int i = 0; i < 10; i++) glyph[i] = -1;
+    size_t o = rd16(f + 6);
+    for (int blk = rd16(f + 0x10); blk > 0 && o + 0x1c <= len; blk--) {
+        uint32_t sz = rd32(f + o + 4);
+        if (sz < 8 || o + sz > len) break;
+        if (!memcmp(f + o, "TGLP", 4)) {
+            g_eow_sheet.cw = f[o + 8], g_eow_sheet.ch = f[o + 9];
+            g_eow_sheet.cols = rd16(f + o + 20), g_eow_sheet.rows = rd16(f + o + 22);
+            per = g_eow_sheet.cols * g_eow_sheet.rows;
+        } else if (!memcmp(f + o, "CMAP", 4)) {
+            uint32_t lo = rd32(f + o + 8), hi = rd32(f + o + 12);
+            int method = rd16(f + o + 16);
+            for (int i = 0; i < 10; i++) {
+                uint32_t c = want[i].code;
+                if (method == 0 && c >= lo && c <= hi) glyph[i] = rd16(f + o + 0x18) + (int)(c - lo);
+                else if (method == 1 && c >= lo && c <= hi && o + 0x1a + 2 * (c - lo) <= o + sz) {
+                    uint16_t g = rd16(f + o + 0x18 + 2 * (c - lo));
+                    if (g != 0xffff) glyph[i] = g;
+                } else if (method == 2) {
+                    uint32_t n = rd32(f + o + 0x18);
+                    for (uint32_t k = 0; k < n && o + 0x24 + 8 * k <= o + sz; k++)
+                        if (rd32(f + o + 0x1c + 8 * k) == c) glyph[i] = rd16(f + o + 0x20 + 8 * k);
+                }
+            }
+        }
+        o += sz;
+    }
+    if (!per) return;
+    for (int i = 0; i < 10; i++)
+        if (glyph[i] >= 0)
+            g_eow_sheet.g[g_eow_sheet.n++] = (typeof(g_eow_sheet.g[0])){want[i].role, (uint8_t)(glyph[i] / per),
+                                                                          (uint16_t)(glyph[i] % per)};
+    LOG("[texpatch] Pictogram.bffnt: %d button glyphs (cells %dx%d, %d x %d a layer)\n", g_eow_sheet.n, g_eow_sheet.cw,
+        g_eow_sheet.ch, g_eow_sheet.cols, g_eow_sheet.rows);
+}
+
 static void load_refs(void) {
+    if (game_other()) {  // Echoes of Wisdom: its button glyphs only
+        scan_sarc("region_common/ui/GameMain.arc");
+        scan_sarc("region_common/ui/Keep.arc");
+        size_t len;
+        uint8_t *f = read_all("region_common/ui/Pictogram.bffnt", &len);
+        if (f) {
+            eow_sheet(f, len);
+            for (size_t i = 0; g_eow_sheet.n && i + 8 < len; i += 4)
+                if (!memcmp(f + i, "BNTX\0\0\0\0", 8)) { scan_bntx(f + i, len - i, true); break; }
+            free(f);
+        }
+        LOG("[texpatch] %d known textures (button glyphs, pictogram sheet)\n", g_nrefs);
+        return;
+    }
     scan_sarc("region_common/ui/Game.arc");
     scan_sarc("region_common/ui/StartUp.arc");
     scan_sarc("regionUS/common/ui/GameRegionCommon.arc");
@@ -222,9 +302,9 @@ int texpatch_title_screen(void) {
 }
 
 int texpatch_identify(const NvnTexture *t) {
-    if (game_other()) return -1;  // (LA's textures only: another game on the engine may share hashes)
-    pthread_once(&g_once, load_refs);
-    if (!t->addr || t->depth > 1) return -1;
+    pthread_once(&g_once, load_refs);  // (another game on the engine: its own list, load_refs)
+    // (no 3D textures; a 2D array's layers come as its depth too: EoW's Pictogram sheet, 4 layers)
+    if (!t->addr || (t->depth > 1 && t->layout.layers != t->depth)) return -1;
     uint64_t total = tegra_total_size(&t->layout);
     for (int i = 0; i < g_nrefs; i++) {
         const Ref *r = &g_refs[i];
@@ -239,6 +319,7 @@ int texpatch_identify(const NvnTexture *t) {
             return i;
         }
     }
+    if (game_other()) return -1;  // (the rest: LA's)
     int rc = recolour_identify(t, total);  // (Cosmetics recolours: identified only, runtime/nvn/recolour.c)
     return rc >= 0 ? TEXPATCH_RECOLOUR_BASE + rc : -1;
 }
@@ -427,15 +508,70 @@ static void astc_encode4(const uint8_t px[16][4], bool srgb, uint8_t *b) {
     }
 }
 
+// BC7 mode 6: one subset, RGBA endpoints of 7 bits + a shared low bit each, 4-bit weights (EoW's Pictogram sheet;
+// only the blocks we change are re-encoded, and those hold two colours and their blend)
+static void bc7_encode6(const uint8_t px[16][4], uint8_t *b) {
+    int bi = 0, bj = 0, bd = -1;
+    for (int i = 0; i < 16; i++)
+        for (int j = i + 1; j < 16; j++) {
+            int d = 0;
+            for (int k = 0; k < 4; k++) d += (px[i][k] - px[j][k]) * (px[i][k] - px[j][k]);
+            if (d > bd) { bd = d; bi = i; bj = j; }
+        }
+    int e[2][4], pb[2] = {0, 0};
+    for (int s = 0; s < 2; s++) {
+        const uint8_t *c = px[s ? bj : bi];
+        int best = 1 << 30;
+        for (int p = 0; p < 2; p++) {
+            int err = 0, q[4];
+            for (int k = 0; k < 4; k++) {
+                int v = (c[k] - p + 1) / 2;
+                q[k] = v < 0 ? 0 : v > 127 ? 127 : v;
+                err += ((q[k] << 1 | p) - c[k]) * ((q[k] << 1 | p) - c[k]);
+            }
+            if (err < best) { best = err; pb[s] = p; for (int k = 0; k < 4; k++) e[s][k] = q[k] << 1 | p; }
+        }
+    }
+    static const int w4[16] = {0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64};
+    int idx[16];
+    for (int i = 0; i < 16; i++) {
+        int best = 0, be = 1 << 30;
+        for (int q = 0; q < 16; q++) {
+            int err = 0;
+            for (int k = 0; k < 4; k++) {
+                int v = ((64 - w4[q]) * e[0][k] + w4[q] * e[1][k] + 32) >> 6;
+                err += (v - px[i][k]) * (v - px[i][k]);
+            }
+            if (err < be) { be = err; best = q; }
+        }
+        idx[i] = best;
+    }
+    if (idx[0] & 8) {  // (the first weight's top bit is implied 0: swap the endpoints)
+        for (int k = 0; k < 4; k++) { int t = e[0][k]; e[0][k] = e[1][k]; e[1][k] = t; }
+        int t = pb[0]; pb[0] = pb[1]; pb[1] = t;
+        for (int i = 0; i < 16; i++) idx[i] = 15 - idx[i];
+    }
+    memset(b, 0, 16);
+    put_bits(b, 0, 7, 0x40);  // mode 6: six 0 bits, then a 1
+    int at = 7;
+    for (int k = 0; k < 4; k++) { put_bits(b, at, 7, (uint32_t)e[0][k] >> 1); put_bits(b, at + 7, 7, (uint32_t)e[1][k] >> 1); at += 14; }
+    put_bits(b, at, 1, (uint32_t)pb[0]); put_bits(b, at + 1, 1, (uint32_t)pb[1]);
+    at += 2;
+    put_bits(b, at, 3, (uint32_t)idx[0]);
+    at += 3;
+    for (int i = 1; i < 16; i++, at += 4) put_bits(b, at, 4, (uint32_t)idx[i]);
+}
+
 // Level data <-> RGBA8 image (BC5: red, green -> R, G; alpha = green, the glyph's shape)
 static void decode_image(const Ref *r, const uint8_t *src, uint32_t row, uint8_t *img) {
     uint32_t W = r->w, H = r->h, bw = (W + 3) / 4, bh = (H + 3) / 4;
     if (r->kind == K_OTHER) return;  // (identified only: its format isn't one of these)
     if (r->kind == K_RGBA8) { for (uint32_t y = 0; y < H; y++) memcpy(img + y * W * 4, src + y * row, W * 4); return; }
-    if (r->kind == K_ASTC4) {
+    if (r->kind == K_ASTC4 || r->kind == K_BC7) {
         uint8_t *blocks = malloc((size_t)bw * bh * 16);
         for (uint32_t y = 0; y < bh; y++) memcpy(blocks + y * bw * 16, src + y * row, bw * 16);
-        astc_decode_ldr(blocks, W, H, 4, 4, r->srgb, img);
+        if (r->kind == K_BC7) bc_decode(BC7, blocks, W, H, img);
+        else astc_decode_ldr(blocks, W, H, 4, 4, r->srgb, img);
         free(blocks);
         return;
     }
@@ -479,6 +615,8 @@ static void encode_image(const Ref *r, const uint8_t *img, const uint8_t *dirty,
                 uint8_t a[16];
                 for (int i = 0; i < 16; i++) a[i] = px[i][3];
                 bc4_encode(a, b); bc1_encode4(px, b + 8);
+            } else if (r->kind == K_BC7) {
+                bc7_encode6(px, b);
             } else {
                 astc_encode4(px, r->srgb, b);
             }
@@ -1088,9 +1226,10 @@ static void skin_apply(int id, uint32_t lv, uint8_t *blocks, uint32_t w, uint32_
 // = ZL, 'l' 13 / 'r' 15 = L / R (second style), 'z' 17 = ZR); 4 columns of 64x64 cells, rows from the bottom.
 static const int8_t k_sheet_roles[18] = {R_PLUS, R_MINUS, R_A, R_B, 0, 0, R_L, 0, R_R, 0, R_X, R_Y, R_ZL, R_L, 0, R_R, 0, R_ZR};
 
-void texpatch_apply(int id, uint32_t lv, uint8_t *blocks, uint32_t w, uint32_t h, uint32_t row) {
+void texpatch_apply(int id, uint32_t layer, uint32_t lv, uint8_t *blocks, uint32_t w, uint32_t h, uint32_t row) {
     if (id < 0 || id >= g_nrefs) return;
     const Ref *r = &g_refs[id];
+    if (layer && !(game_other() && r->role == R_SHEET)) return;  // (EoW's sheet: its button glyphs are on layer 2)
     if (r->role == R_TUNIC || r->role == R_TUNIC_RED || r->role == R_TUNIC_BLUE) {
         size_t n = (size_t)((h + 3) / 4 - 1) * row + (w + 3) / 4 * 8;  // (the level's blocks)
         uint8_t *orig = tunic_rgb() && skin_rgb() && row >= (w + 3) / 4 * 8 ? malloc(n) : NULL;
@@ -1119,7 +1258,14 @@ void texpatch_apply(int id, uint32_t lv, uint8_t *blocks, uint32_t w, uint32_t h
     uint8_t *img = malloc((size_t)w * h * 4), *dirty = calloc((size_t)bw * ((h + 3) / 4), 1);
     decode_image(r, blocks, row, img);
     int ach = r->kind == K_BC5 ? 1 : 3;
-    if (r->role == R_SHEET) {
+    if (r->role == R_SHEET && game_other()) {
+        int cw = g_eow_sheet.cw + 1, ch = g_eow_sheet.ch + 1;
+        for (int i = 0; i < g_eow_sheet.n; i++) {
+            int c = g_eow_sheet.g[i].cell, x0 = c % g_eow_sheet.cols * cw, y0 = (int)h - (c / g_eow_sheet.cols + 1) * ch;
+            if (g_eow_sheet.g[i].layer == layer && y0 >= 0 && x0 + cw <= (int)w && restyled(g_eow_sheet.g[i].role, style))
+                relabel(img, (int)w, x0, y0, cw, ch, ach, true, g_eow_sheet.g[i].role, style, dirty, bw);
+        }
+    } else if (r->role == R_SHEET) {
         for (int g = 0; g < (int)sizeof k_sheet_roles; g++) {
             int y0 = (int)h - (g / 4 + 1) * 64;
             if (k_sheet_roles[g] && y0 >= 0 && (g % 4 + 1) * 64 <= (int)w && restyled(k_sheet_roles[g], style))
