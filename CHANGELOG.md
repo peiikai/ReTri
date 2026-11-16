@@ -18,6 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 - The Shadows setting changes EoW's shadows (it only knew LA's shadow map).
+- The 3D image is sharp at Match display: EoW draws its 3D at 792 lines, not LA's 1080, and the resolution settings now scale by that (Match display: your screen's pixels; 1x to 4x: 1080 to 4320 lines).
 - The app shows its version as v0.1.0 and looks for updates on EoW Recomp's own releases, not LAS Recomp's.
 - A cold first start is much faster on Mac (shader preparation 19.5 min -> about 1 min on an M3 Max).
 - The underwater area is no longer black (shader builds run at the default priority).

@@ -1184,10 +1184,16 @@ void output_scale(double dw, double dh, bool reshape_allowed, double now, double
         else if (settings_fps_target() != p_fps) pace_settings_changed("FPS target");
     }
     p_mode = mode, p_ups = g_settings.upscaler, p_aa = g_settings.antialias, p_fps = settings_fps_target();
+    // (another game: EoW draws its 3D at 1408x792 docked - its level 8 of 1080 - 36 x level lines - and only its 2D
+    // at 1080 lines. Scaled by the 2D, the 3D was 792/1080 of the setting: soft at Match display, a 5120x1440 screen
+    // got 1056 lines stretched to 1440. Scaled by the 3D, as LA's 1080-line 3D is: Match display puts it at the
+    // window's own pixels, 1x..4x at 1080 x N lines; the 2D is drawn a little larger, then scaled down. The game's
+    // own level stays: patched to 0, its other passes stayed sized for 1408x792 - a broken image.)
+    double game_3d = game_other() ? 1080.0 / 792.0 : 1.0;
     if (forced > 0) h = forced;
-    else if (mode >= 1 && mode <= 8) h = mode == 1 && g_gpu_integrated ? 720 / 1080.0 : mode;
+    else if (mode >= 1 && mode <= 8) h = (mode == 1 && g_gpu_integrated ? 720 / 1080.0 : mode) * game_3d;
     else {
-        h = reshape ? dh / 1080.0 : fit;  // Match display
+        h = (reshape ? dh / 1080.0 : fit) * game_3d;  // Match display
         if (mode == RES_DYNAMIC) {
             static double pinned = -1;
             if (pinned < 0) pinned = getenv("LARECOMP_DYN_TEST") ? atof(getenv("LARECOMP_DYN_TEST")) : 0;
@@ -1205,7 +1211,8 @@ void output_scale(double dw, double dh, bool reshape_allowed, double now, double
     if (cap < 1.0) { ax *= cap; ay *= cap; }
     o->ax = ax; o->ay = ay;
     o->sx = ax * dyn; o->sy = ay * dyn; o->shape = shape;
-    g_render_w = (int)lround(1920.0 * o->sx), g_render_h = (int)lround(1080.0 * o->sy);
+    // (shown in the menu and the FPS counter: the 3D's size - EoW's 2D is drawn larger, see game_3d)
+    g_render_w = (int)lround(1920.0 * o->sx / game_3d), g_render_h = (int)lround(1080.0 * o->sy / game_3d);
     // where the image goes in the window: fills it when reshaped, else a fitted 16:9 box
     if (reshape) { o->vw = dw; o->vh = dh; }
     else { o->vw = 1920.0 * fit; o->vh = 1080.0 * fit; }
