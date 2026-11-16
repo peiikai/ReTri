@@ -92,6 +92,20 @@ const GameVersion *game_version_of(const char *game_dir) {
     return game_version_of_main(path);
 }
 
+const GameVersion *game_other_of(const char *game_dir) {
+    char path[1100];
+    uint8_t id[20];
+    snprintf(path, sizeof path, "%s/exefs/main", game_dir);
+    if (!read_build_id(path, id)) return NULL;
+    for (size_t i = 0; i < sizeof games / sizeof *games; i++) {
+        const char *h = games[i].v.build_id;
+        int k = 0;
+        while (k < 20 && id[k] == (uint8_t)(hexval(h[2 * k]) << 4 | hexval(h[2 * k + 1]))) k++;
+        if (k == 20) return &games[i].v;
+    }
+    return NULL;
+}
+
 bool game_version_select(const char *game_dir, char *why, size_t why_size) {
     uint8_t id[20];
     char exefs[1100], path[1100];

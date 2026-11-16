@@ -47,6 +47,7 @@ static const PlasticTheme &theme_eow(void) {
         t.tab_sel = hex(0x3C302C);
         t.ring = hex(0x4A403A);
         t.ring_sel = hex(0x6A5A50);
+        t.bar = hex(0xE8A85A);  // (the title's gold-orange: the selection's grey-brown was lost in the dark track)
         t.text = hex32(0xF0E8DC);
         t.text_dim = hex32(0x9E9286);
         t.text_sel = hex32(0xF0E8DC);
@@ -98,6 +99,7 @@ const PlasticTheme &plastic_theme(void) {
         t.tab_hot = hex(0xC9A86E);
         t.ring = hex(0xAA9B67);
         t.ring_sel = hex(0xECD78E);
+        t.bar = t.row_sel;
         t.text = hex32(0xFFF3DC);
         t.text_dim = hex32(0xC9B691);
         t.text_sel = hex32(0x3A2410);
@@ -706,7 +708,7 @@ void plastic_progress(ImDrawList *dl, ImVec2 a, ImVec2 b, float frac, float scal
     // (at least as long as it is high: a pill shorter than that has no straight part and looks like a dot)
     float l = ia.x + w * x0, r = fmaxf(ia.x + w * x1, l + ph);
     if (r > ib.x) l -= r - ib.x, r = ib.x;
-    plastic_pill(dl, ImVec2(l, ia.y), ImVec2(r, ib.y), ph * 0.5f, t.row_sel, 4 * scale, 1.0f, scale, true);
+    plastic_pill(dl, ImVec2(l, ia.y), ImVec2(r, ib.y), ph * 0.5f, t.bar, 4 * scale, 1.0f, scale, true);
 }
 
 void plastic_progress_bar(float frac, ImVec2 size, const char *overlay, float scale) {
