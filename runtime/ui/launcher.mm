@@ -1763,11 +1763,26 @@ static void draw_busy_overlay(ImVec2 ds, const std::string &job, bool test_busy,
         ImVec2 qs = g_font_small->CalcTextSizeA(sfs, FLT_MAX, 0, q);
         ImVec2 ys = g_font_small->CalcTextSizeA(sfs, FLT_MAX, 0, yes), ns = g_font_small->CalcTextSizeA(sfs, FLT_MAX, 0, no);
         float bw = fmaxf(ys.x, ns.x) + 64 * sc, bh = line_h + 20 * sc, gap = 24 * sc;
-        float qw = fminf(fmaxf(qs.x, 2 * bw + gap) + 96 * sc, ds.x - 32 * sc), qh = 40 * sc + line_h + 32 * sc + bh + 36 * sc;
+        // (wider than the window, as in a small one: the question in lines, each centred)
+        float qw = fminf(fmaxf(qs.x, 2 * bw + gap) + 96 * sc, fminf(ds.x - 32 * sc, 1100 * sc)), room = qw - 96 * sc;
+        std::vector<std::pair<const char *, const char *>> qlines;
+        for (const char *p = q, *end = q + strlen(q); p < end;) {
+            const char *e = g_font_small->CalcWordWrapPositionA(sfs / g_font_small->FontSize, p, end, room);
+            if (e == p) e = p + 1;  // (a word wider than the room: cut it)
+            const char *t = e;
+            while (t > p && t[-1] == ' ') t--;
+            qlines.push_back({p, t});
+            for (p = e; *p == ' '; p++) {}
+        }
+        float qh = 40 * sc + qlines.size() * line_h + 32 * sc + bh + 36 * sc;
         fg->AddRectFilled(a, b, IM_COL32(0, 0, 0, 120), 14 * sc);  // (the bar behind it dimmed)
         ImVec2 qa(o.x + (ds.x - qw) * 0.5f, o.y + (ds.y - qh) * 0.5f), qb(qa.x + qw, qa.y + qh);
         plastic_panel(fg, qa, qb, sc);
-        fg->AddText(g_font_small, sfs, ImVec2((qa.x + qb.x - qs.x) * 0.5f, qa.y + 40 * sc), pt.text, q);
+        for (size_t i = 0; i < qlines.size(); i++) {
+            float lw = g_font_small->CalcTextSizeA(sfs, FLT_MAX, 0, qlines[i].first, qlines[i].second).x;
+            fg->AddText(g_font_small, sfs, ImVec2((qa.x + qb.x - lw) * 0.5f, qa.y + 40 * sc + i * line_h), pt.text,
+                        qlines[i].first, qlines[i].second);
+        }
         float by = qb.y - 36 * sc - bh, bx = (qa.x + qb.x) * 0.5f;
         ImVec2 ya(bx - gap * 0.5f - bw, by), yb(bx - gap * 0.5f, by + bh), na(bx + gap * 0.5f, by), nb(bx + gap * 0.5f + bw, by + bh);
         bool hy = ImGui::IsMouseHoveringRect(ya, yb, false), hn = ImGui::IsMouseHoveringRect(na, nb, false);
