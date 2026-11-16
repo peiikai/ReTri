@@ -37,7 +37,8 @@ void rt_other_request_holder(uint64_t p) {
     uint64_t r = *(const uint64_t *)(uintptr_t)(p + 0x10);
     g_proc_runs++;
     static uint64_t calls;
-    if (getenv("LARECOMP_LOG_WARP") && !(++calls & (calls - 1)))
+    calls++;
+    if (getenv("LARECOMP_LOG_WARP") && !(calls & (calls - 1)))
         LOG("[warp] processor run #%llu (holder %llx, request %llx, destination length %llu)\n", (unsigned long long)calls,
             (unsigned long long)p, (unsigned long long)r, r ? (unsigned long long)*(const uint64_t *)(uintptr_t)(r + 0x2a0) : 0ull);
     if (getenv("LARECOMP_LOG_WARP")) {
