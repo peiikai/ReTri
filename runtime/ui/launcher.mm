@@ -62,6 +62,7 @@ extern "C" {
 #include "platform/android_storage.h"
 #endif
 #include "settings.h"
+#include "rando.h"
 #include "input_bind.h"
 #include "menu_sfx.h"
 #include "nvn/shader_prep.h"
@@ -151,8 +152,8 @@ extern "C" const char *larecomp_version(void) { return LARECOMP_VERSION; }  // (
 // v0.<n>.<m> the same as beta_<n>.<m>; other tags (the alpha_* ones) are ignored. (Beta 5 and earlier only know
 // beta_<n>: they never offer a hotfix; builds before Beta 5.3 don't know v0.<n>.<m> either.) Offline / no curl /
 // anything unexpected: nothing is shown.
-#define RELEASES_URL "https://api.github.com/repos/peiikai/EoWRecomp/releases?per_page=100"
-#define RELEASE_PAGE "https://github.com/peiikai/EoWRecomp/releases/tag/"
+#define RELEASES_URL "https://api.github.com/repos/peiikai/ReTri/releases?per_page=100"
+#define RELEASE_PAGE "https://github.com/peiikai/ReTri/releases/tag/"
 
 #include "update_tags.h"  // tag_rank, tag_label
 
@@ -1224,7 +1225,7 @@ static bool menu_tip(float s) {
         static const char *const home[] = {LN("Home button"), LN("Xbox button"), LN("PlayStation button")};  // (bind_label_family)
         static const char *const pad[] = {LN("Minus + Plus"), LN("View + Menu"), LN("Create + Options")};
         ImGui::PushTextWrapPos(0);
-        ImGui::TextUnformatted(L("EoW Recomp has its own menu for settings, the randomizer, cosmetics and more."));
+        ImGui::TextUnformatted(L("EoW Recomp has its own menu for settings, cosmetics and more."));
         ImGui::Spacing();
         int fam = bind_label_family() % 3;
         ImGui::Text(L("Open it in game with F1 or Esc, or press the %s or %s together on a controller."), L(home[fam]),
@@ -2285,7 +2286,7 @@ static void load_fonts(void) {
     const char *fonts[] = {getenv("LARECOMP_LAUNCHER_FONT") ? getenv("LARECOMP_LAUNCHER_FONT") : "",  // (test)
                            own.c_str(), "fonts/nintendo_udsgr_std_003.ttf", "/System/Library/Fonts/Avenir Next.ttc",
                            "/System/Library/Fonts/Helvetica.ttc", "C:/Windows/Fonts/segoeui.ttf"};
-    // the menus' language's glyphs (i18n.h), and its script's font merged in; the title only says "EoW Recompiled"
+    // the menus' language's glyphs (i18n.h), and its script's font merged in; the title only says "ReTri" or "EoW Recompiled"
     static const ImWchar title_ranges[] = {0x20, 0x7E, 0};
     for (const char *p : fonts) {
         if (g_font_menu || !*p || !file_exists(p)) continue;
@@ -2298,6 +2299,10 @@ static void load_fonts(void) {
         g_font_title = io.Fonts->AddFontFromFileTTF(p, 92 * (b2 ? 2.3f : 1), NULL, title_ranges);
     }
     if (!g_font_menu) g_font_small = g_font_menu = g_font_title = io.Fonts->AddFontDefault();
+    // the title in Hylia Serif (Omni Jacala, free, not for profit: third_party/fonts/HyliaSerif)
+    char hylia[1024];
+    if (rt_resource("HyliaSerifBeta-Regular.otf", "third_party/fonts/HyliaSerif/HyliaSerifBeta-Regular.otf", hylia, sizeof hylia))
+        if (ImFont *f = io.Fonts->AddFontFromFileTTF(hylia, 150, NULL, title_ranges)) g_font_title = f;
 }
 
 extern "C" void launcher_run(const char *root) {
@@ -2384,7 +2389,7 @@ extern "C" void launcher_run(const char *root) {
     choose(g_settings.rando_last);
     // what the game starts with ("" vanilla): PLAY's, or the row's seed; until one is pressed, the seed of the last
     // start (the test hooks that press PLAY themselves keep booting what they did)
-    std::string start_seed = g_settings.rando_seed;
+    std::string start_seed = RANDO_ON ? g_settings.rando_seed : "";
     Page page = status.empty() ? MAIN : SETUP;
     bool play = false;
     // LARECOMP_LAUNCHER_SHOT=<frame>[:<page>] (test): save build/launcher.png at that frame and exit; page:
@@ -2738,7 +2743,7 @@ extern "C" void launcher_run(const char *root) {
             ImGui::SetCursorPos(ImVec2(x0, 120 * s));
             ImGui::PushFont(g_font_title);
             if (page == MAIN) {  // gold to orange, shadowed (not behind the Settings / System windows)
-                const char *t = game_other() ? "TriCompiled" : "EoW Recompiled";
+                const char *t = game_other() ? "ReTri" : "EoW Recompiled";
                 ImVec2 p = ImGui::GetCursorScreenPos();
                 text_fx(ImGui::GetWindowDrawList(), ImGui::GetFont(), ImGui::GetFontSize(), p,
                         eow_or(IM_COL32(255, 232, 120, 255), IM_COL32(240, 216, 144, 255)),
@@ -2784,84 +2789,88 @@ extern "C" void launcher_run(const char *root) {
                     ImGui::SetWindowFontScale(1.0f);
                 }
 
-                // RANDOMIZER ‹ New Seed / Seed: <name> ›: New Seed opens the Randomizer panel, a seed starts the game with
-                // it. Left / right step through them and stop at either end (keyboard, controller, the mouse on the
-                // arrows, a tap or swipe on phones).
-                bool hov = false;
-                char pick[160];
-                if (choice) snprintf(pick, sizeof pick, L("Seed: %s"), seeds[choice - 1].c_str());
-                else snprintf(pick, sizeof pick, "%s", L("New Seed"));
-                const int n = (int)seeds.size() + 1;
-                ImGui::SetCursorPosX(x0);
-                if (g_refocus == RANDO) ImGui::SetKeyboardFocusHere(), g_refocus = MAIN;
-                int arrow = 0;
-                bool rando_pressed;
-                const int choice0 = choice;  // (a step plays the tab sound, as a ◀ value ▶ row's: below)
+                // RANDOMIZER: hidden until the EoW randomizer (RANDO_ON, runtime/rando.h); the row and its Randomizer
+                // page stay for it
+                if (RANDO_ON) {
+                    // RANDOMIZER ‹ New Seed / Seed: <name> ›: New Seed opens the Randomizer panel, a seed starts the game with
+                    // it. Left / right step through them and stop at either end (keyboard, controller, the mouse on the
+                    // arrows, a tap or swipe on phones).
+                    bool hov = false;
+                    char pick[160];
+                    if (choice) snprintf(pick, sizeof pick, L("Seed: %s"), seeds[choice - 1].c_str());
+                    else snprintf(pick, sizeof pick, "%s", L("New Seed"));
+                    const int n = (int)seeds.size() + 1;
+                    ImGui::SetCursorPosX(x0);
+                    if (g_refocus == RANDO) ImGui::SetKeyboardFocusHere(), g_refocus = MAIN;
+                    int arrow = 0;
+                    bool rando_pressed;
+                    const int choice0 = choice;  // (a step plays the tab sound, as a ◀ value ▶ row's: below)
 #if PLAT_TOUCH
-                rando_pressed = phone_pick_row(L("RANDOMIZER"), pick, choice, n, status.empty(),
-                                               status.empty() && !waiting && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId),
-                                               ds.x, &hov);
-                if (g_pick_step) {  // (an arrow tapped or the choice swiped)
-                    choice = std::max(0, std::min(choice + g_pick_step, n - 1));
-                    g_pick_step = 0;
-                }
+                    rando_pressed = phone_pick_row(L("RANDOMIZER"), pick, choice, n, status.empty(),
+                                                   status.empty() && !waiting && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId),
+                                                   ds.x, &hov);
+                    if (g_pick_step) {  // (an arrow tapped or the choice swiped)
+                        choice = std::max(0, std::min(choice + g_pick_step, n - 1));
+                        g_pick_step = 0;
+                    }
 #else
-                char label[192];
-                snprintf(label, sizeof label, "%s    \xe2\x80\xb9 %s \xe2\x80\xba", L("RANDOMIZER"), pick);
-                // a long seed name may run past the other items (to 80% of the window); beyond that the line shrinks
-                ImGui::PushFont(g_font_menu);
-                float fit = (ds.x * 0.8f - x0) / ImGui::CalcTextSize(label).x;
-                ImGui::PopFont();
-                if (fit < 1) ImGui::SetWindowFontScale(fit < 0.55f ? 0.55f : fit);
-                // the ‹ › arrows are clickable with the mouse: they step the choice instead of pressing the row
-                {
+                    char label[192];
+                    snprintf(label, sizeof label, "%s    \xe2\x80\xb9 %s \xe2\x80\xba", L("RANDOMIZER"), pick);
+                    // a long seed name may run past the other items (to 80% of the window); beyond that the line shrinks
                     ImGui::PushFont(g_font_menu);
-                    ImVec2 at = ImGui::GetCursorScreenPos();
-                    const char *lt = strstr(label, "\xe2\x80\xb9"), *rt = strstr(label, "\xe2\x80\xba");
-                    float h = ImGui::CalcTextSize(label).y, pad = h * 0.35f;
-                    float lx = at.x + ImGui::CalcTextSize(label, lt).x, rx = at.x + ImGui::CalcTextSize(label, rt).x;
-                    float aw = ImGui::CalcTextSize("\xe2\x80\xb9").x;
-                    ImVec2 m = ImGui::GetIO().MousePos;
-                    bool in_y = m.y >= at.y - pad && m.y <= at.y + h + pad;
-                    if (in_y && m.x >= lx - pad && m.x <= lx + aw + pad) arrow = -1;
-                    if (in_y && m.x >= rx - pad && m.x <= rx + aw + pad) arrow = 1;
+                    float fit = (ds.x * 0.8f - x0) / ImGui::CalcTextSize(label).x;
                     ImGui::PopFont();
-                }
-                const char *name = strstr(label, "\xe2\x80\xb9") + 4, *name_end = strstr(label, " \xe2\x80\xba");
-                rando_pressed = menu_item(label, status.empty(), &hov, name,
-                                          choice ? eow_or(IM_COL32(250, 250, 255, 255), IM_COL32(240, 232, 220, 255))
-                                                 : eow_or(IM_COL32(246, 232, 176, 255), IM_COL32(216, 178, 124, 255)),
-                                          name_end);  // (the choice keeps its colour when hovered: a seed white, "New
-                                                      //  Seed" vanilla cream; the arrows stay white)
-                ImGui::SetWindowFontScale(1.0f);
-                // (the press on an arrow: no decide sound, the step plays its own)
-                if (arrow && hov && ImGui::IsMouseClicked(0)) menu_sfx_click_silent();
-                if (rando_pressed && arrow && ImGui::IsMouseReleased(0)) {  // (a mouse click on an arrow: a step, to the ends)
-                    choice = std::max(0, std::min(choice + arrow, n - 1));
-                    rando_pressed = false;
-                }
+                    if (fit < 1) ImGui::SetWindowFontScale(fit < 0.55f ? 0.55f : fit);
+                    // the ‹ › arrows are clickable with the mouse: they step the choice instead of pressing the row
+                    {
+                        ImGui::PushFont(g_font_menu);
+                        ImVec2 at = ImGui::GetCursorScreenPos();
+                        const char *lt = strstr(label, "\xe2\x80\xb9"), *rt = strstr(label, "\xe2\x80\xba");
+                        float h = ImGui::CalcTextSize(label).y, pad = h * 0.35f;
+                        float lx = at.x + ImGui::CalcTextSize(label, lt).x, rx = at.x + ImGui::CalcTextSize(label, rt).x;
+                        float aw = ImGui::CalcTextSize("\xe2\x80\xb9").x;
+                        ImVec2 m = ImGui::GetIO().MousePos;
+                        bool in_y = m.y >= at.y - pad && m.y <= at.y + h + pad;
+                        if (in_y && m.x >= lx - pad && m.x <= lx + aw + pad) arrow = -1;
+                        if (in_y && m.x >= rx - pad && m.x <= rx + aw + pad) arrow = 1;
+                        ImGui::PopFont();
+                    }
+                    const char *name = strstr(label, "\xe2\x80\xb9") + 4, *name_end = strstr(label, " \xe2\x80\xba");
+                    rando_pressed = menu_item(label, status.empty(), &hov, name,
+                                              choice ? eow_or(IM_COL32(250, 250, 255, 255), IM_COL32(240, 232, 220, 255))
+                                                     : eow_or(IM_COL32(246, 232, 176, 255), IM_COL32(216, 178, 124, 255)),
+                                              name_end);  // (the choice keeps its colour when hovered: a seed white, "New
+                                                          //  Seed" vanilla cream; the arrows stay white)
+                    ImGui::SetWindowFontScale(1.0f);
+                    // (the press on an arrow: no decide sound, the step plays its own)
+                    if (arrow && hov && ImGui::IsMouseClicked(0)) menu_sfx_click_silent();
+                    if (rando_pressed && arrow && ImGui::IsMouseReleased(0)) {  // (a mouse click on an arrow: a step, to the ends)
+                        choice = std::max(0, std::min(choice + arrow, n - 1));
+                        rando_pressed = false;
+                    }
 #endif
-                if (hov && status.empty()) {
-                    if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft))
-                        choice = std::max(choice - 1, 0);
-                    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight))
-                        choice = std::min(choice + 1, n - 1);
-                    // left / right are ours while the row is selected: ImGui's navigation would otherwise take them too,
-                    // find nothing beside it and scroll the window (the row loses its highlight, the stepping stops)
-                    ImGuiID own = ImGui::GetID("##rando_lr");
-                    for (ImGuiKey k : {ImGuiKey_LeftArrow, ImGuiKey_RightArrow, ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight})
-                        ImGui::SetKeyOwner(k, own);
+                    if (hov && status.empty()) {
+                        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft))
+                            choice = std::max(choice - 1, 0);
+                        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight))
+                            choice = std::min(choice + 1, n - 1);
+                        // left / right are ours while the row is selected: ImGui's navigation would otherwise take them too,
+                        // find nothing beside it and scroll the window (the row loses its highlight, the stepping stops)
+                        ImGuiID own = ImGui::GetID("##rando_lr");
+                        for (ImGuiKey k : {ImGuiKey_LeftArrow, ImGuiKey_RightArrow, ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight})
+                            ImGui::SetKeyOwner(k, own);
+                    }
+                    if (choice != choice0) menu_sfx_play(MENU_SFX_TAB);
+                    static int logged = -1;
+                    if (choice != logged)
+                        logged = choice, fprintf(stderr, "[launcher] randomizer row: %s\n", choice ? seeds[choice - 1].c_str() : "New Seed");
+                    if (rando_pressed && !choice) {  // New Seed: the Randomizer panel
+                        menu_tabs_focus(false);
+                        page = RANDO;
+                        rando_pressed = false;
+                    }
+                    if (rando_pressed) start_seed = seeds[choice - 1], pressed = true;
                 }
-                if (choice != choice0) menu_sfx_play(MENU_SFX_TAB);
-                static int logged = -1;
-                if (choice != logged)
-                    logged = choice, fprintf(stderr, "[launcher] randomizer row: %s\n", choice ? seeds[choice - 1].c_str() : "New Seed");
-                if (rando_pressed && !choice) {  // New Seed: the Randomizer panel
-                    menu_tabs_focus(false);
-                    page = RANDO;
-                    rando_pressed = false;
-                }
-                if (rando_pressed) start_seed = seeds[choice - 1], pressed = true;
 
                 // first start ever: the aspect ratio question, then how to reach our menu, then the game
                 if (g_play_pending && status.empty()) pressed = true, g_play_pending = false;

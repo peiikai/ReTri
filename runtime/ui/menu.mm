@@ -127,7 +127,8 @@ static void page_open(int page);
 // Another game on the engine: the bar without LA's own pages (Cosmetics, Randomizer, Save Editor, Cheats read LA's
 // state) and without Reset (only LA's reboot is known to work - as Quit's Return to Launcher)
 static bool bar_shown(int e) {
-    return !game_other() || !(e == BAR_COSMETICS || e == BAR_RANDO || e == BAR_EDITOR || e == BAR_CHEATS || e == BAR_RESET);
+    if (e == BAR_RANDO && !RANDO_ON) return false;  // (waiting for the EoW randomizer: runtime/rando.h)
+    return !game_other() || !(e == BAR_COSMETICS || e == BAR_EDITOR || e == BAR_CHEATS || e == BAR_RESET);
 }
 extern "C" void menu_toggle(void) { set_open(!g_open.load()); }  // (the touch controls' menu button)
 static int g_tab = -1000, g_tab_request = -2;  // (-2: no request; -1 is the Prelaunch tab; -1000: the first tab)
@@ -861,13 +862,7 @@ static void tab_display(void) {
     opt_end();
 }
 
-extern "C" bool cosmetics_seed_on(void);      // runtime/cosmetics_seed.c
-extern "C" void cosmetics_seed_apply(void);
-extern "C" bool weather_cycle_on(void);       // runtime/nvn/weather_cycle.c
-
-// Cosmetics: tunic / heart colours, live (runtime/nvn/texpatch.c), and recolours by draw (runtime/nvn/recolour*.c);
-// a seed made with "Random cosmetics" puts its own set into the rows the first time it's played (cosmetics_seed.c),
-// and they stay the player's to change: "Seed's look" puts the seed's back, "Default all" the game's own
+// Cosmetics: tunic / heart colours, live (runtime/nvn/texpatch.c), and recolours by draw (runtime/nvn/recolour*.c)
 // Touch screens, the bar's Cosmetics and Cheats: called right after opt_begin, as the Randomizer's right pane
 // (rando_tab.mm pane_heading): the page's own X at the top right of the rows' panel with the page's name on its line
 // (a title for the whole page, as the Randomizer's column headings: the sections scroll under it), then the rows in a
@@ -909,8 +904,6 @@ static void tab_cosmetics(void) {
         g_settings.screen_filter = 0;
         g_settings.weather = 0;
     }
-    if (cosmetics_seed_on() && opt_button("Seed's look", "Puts everything on this page back to this seed's look."))
-        cosmetics_seed_apply();
     opt_section("Colors");
     opt_colour("Tunic color", &g_settings.tunic, COL_SLOT_TUNIC, "Link's tunic color.");
     opt_colour("Heart color", &g_settings.hearts, COL_SLOT_HEARTS, "The color of the hearts on the HUD.");
@@ -951,15 +944,7 @@ static void tab_cosmetics(void) {
     opt_section("Screen");
     opt_preview("Screen filter", &g_settings.screen_filter, g_screen_filters, N_SCREEN_FILTERS, 0,
                "Puts a filter over the whole screen, HUD included.");
-    {   // (the seed's weather cycle: "Seed", the seed's weather - locked; Metal and Vulkan both draw it: weather_vk.c)
-        const char *names[N_WEATHERS];
-        for (int i = 0; i < N_WEATHERS; i++) names[i] = g_weathers[i];
-        bool cycle = weather_cycle_on();
-        int shown = 0;
-        if (cycle) names[0] = LN("Seed"), opt_disable_next();
-        opt_choice("Weather", cycle ? &shown : &g_settings.weather, names, N_WEATHERS, 0,
-                   cycle ? "This seed picked the weather. Commit to it!" : "Rain, snow, a storm or a blizzard on the overworld.");
-    }
+    opt_choice("Weather", &g_settings.weather, g_weathers, N_WEATHERS, 0, "Rain, snow, a storm or a blizzard on the overworld.");
     if (head) opt_list_end();
     opt_end();
 }
@@ -1190,18 +1175,8 @@ static bool vanilla_popup(float scale, bool seed, bool in_game) {
     return reset;
 }
 
-extern "C" bool inventory_overlay_wanted(void);
-extern "C" bool tracker_overlay_wanted(void);
-extern "C" bool tracker_dungeon_wanted(void);
-extern "C" void tracker_dungeon_draw(ImVec2 display, ImFont *font);
-extern "C" void tracker_overlay_draw(ImVec2 display, ImFont *font);
-extern "C" bool chaos_overlay_wanted(void);
-extern "C" void chaos_overlay_draw(ImVec2 display, ImFont *font);
-extern "C" void inventory_overlay_draw(ImVec2 display, ImFont *font);
 extern "C" bool race_overlay_wanted(void);
 extern "C" void race_overlay_draw(ImVec2 display, ImFont *font, float scale);
-extern "C" bool pickup_flyin_wanted(void);  // (silent pickups: pickup_flyin.mm)
-extern "C" void pickup_flyin_draw(ImVec2 display, ImFont *font, float scale);
 extern "C" bool race_overlay_key(char *out, size_t cap);
 extern "C" bool dpad_overlay_wanted(void);  // (d-pad items' HUD cross: dpad_overlay.mm)
 extern "C" void dpad_overlay_key(char *out, size_t cap);
@@ -2060,11 +2035,10 @@ static void perf_overlay(float scale) {
     ImGui::PopStyleVar(3);
 }
 
-// Whether menu_render draws anything: the menu, the keyboard, an overlay (FPS, inventory, tracker, chaos, race, a
-// pickup card, the d-pad cross, the touch controls).
-static bool render_needed(bool open, bool kbd, bool inv, bool trk, bool trkd, bool chaos, bool race, bool flyin, bool dpad,
-                          bool touch) {
-    return open || kbd || g_settings.show_fps || inv || trk || trkd || chaos || race || flyin || dpad || touch;
+// Whether menu_render draws anything: the menu, the keyboard, an overlay (FPS, run timer, the d-pad cross, the touch
+// controls).
+static bool render_needed(bool open, bool kbd, bool race, bool dpad, bool touch) {
+    return open || kbd || g_settings.show_fps || race || dpad || touch;
 }
 
 #ifdef __APPLE__
@@ -2077,13 +2051,8 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     notice_take();  // (a save failed: the menu opens with it)
     bool open = g_open.load();
     bool la = !game_other();  // (another game on the engine: none of LA's overlays - they read LA's game state)
-    bool inv = la && !open && inventory_overlay_wanted();
-    bool trk = la && !open && tracker_overlay_wanted();
-    bool trkd = la && !open && tracker_dungeon_wanted();
-    bool chaos = la && !open && chaos_overlay_wanted();
     bool kbd = g_kbd.load() == 1;
-    bool race = la && race_overlay_wanted();  // (run timer, race seed hash: race_overlay.mm)
-    bool flyin = la && pickup_flyin_wanted() && !open;  // (a silent pickup's card)
+    bool race = la && race_overlay_wanted();  // (run timer: race_overlay.mm)
     bool dpad = la && !open && dpad_overlay_wanted();
 #ifdef __APPLE__
     plastic_perf_note(cb, open);  // (LARECOMP_UI_PERF test only)
@@ -2095,7 +2064,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     // (the stick / D-pad takes the thumb on the Movement row's preview only: on the others the panel may sit over it)
     touch_preview_play(PLAT_TOUCH && open && preview_active() && g_tab == 10 && g_settings.touch_mode != 2 &&
                        !strcmp(preview_label(), "Movement"));
-    if (!render_needed(open, kbd, inv, trk, trkd, chaos, race, flyin, dpad, touch)) {
+    if (!render_needed(open, kbd, race, dpad, touch)) {
         if (g_inited) { pthread_mutex_lock(&q_lock); q_events.clear(); pthread_mutex_unlock(&q_lock); }
         g_ov_same = 0;  // (shown again: built afresh first)
         return;
@@ -2124,7 +2093,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
         // (only the FPS counter, the run timer and the d-pad cross; input only reaches ImGui while the menu or the name
         // entry is up)
         // (not the advanced overlay: it changes every frame)
-        if (!open && !kbd && !inv && !trk && !trkd && !chaos && !flyin && !touch && !(g_settings.show_fps && g_settings.fps_advanced) &&
+        if (!open && !kbd && !touch && !(g_settings.show_fps && g_settings.fps_advanced) &&
             race_overlay_key(rk, sizeof rk)) {
             pthread_mutex_lock(&q_lock);
             bool events = !q_events.empty();
@@ -2215,13 +2184,6 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
 
     if (race) race_overlay_draw(io.DisplaySize, g_menu_font_big, scale);
     if (dpad) dpad_overlay_draw(io.DisplaySize, g_font_big ? g_font_big : ImGui::GetFont(), scale);
-    if (flyin) pickup_flyin_draw(io.DisplaySize, g_font_big ? g_font_big : ImGui::GetFont(), scale);
-    if (trk) tracker_overlay_draw(io.DisplaySize, g_font_big ? g_font_big : ImGui::GetFont());
-    if (chaos) chaos_overlay_draw(io.DisplaySize, g_font_big ? g_font_big : ImGui::GetFont());
-    if (trkd) tracker_dungeon_draw(io.DisplaySize, g_font_big ? g_font_big : ImGui::GetFont());
-    if (inv) {
-        inventory_overlay_draw(io.DisplaySize, g_font_big ? g_font_big : ImGui::GetFont());
-    }
     if (touch) touch_draw(ImGui::GetBackgroundDrawList(), io.DisplaySize.x, io.DisplaySize.y, g_font_big ? g_font_big : ImGui::GetFont(),
                           g_menu_font_big ? g_menu_font_big : ImGui::GetFont());
 

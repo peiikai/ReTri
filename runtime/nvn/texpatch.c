@@ -34,7 +34,6 @@
 #include "../input_bind.h"
 #include "../paths.h"
 #include "../platform.h"
-#include "../rando.h"
 #include "../settings.h"
 #include "astc.h"
 #include "bc.h"
@@ -47,9 +46,8 @@
 #include "../../third_party/imgui/imstb_truetype.h"
 
 enum { K_BC5, K_BC3, K_ASTC4, K_RGBA8, K_BC1, K_BC7, K_OTHER /* identified only */ };
-enum { R_A = 1, R_B, R_X, R_Y, R_L, R_R, R_ZL, R_ZR, R_PLUS, R_MINUS, R_HERO, R_SHEET, R_BOTTLE, R_BOTTLE_MODEL, R_FAIRY_MODEL,
-       R_ITEM_CURSOR, R_TUNIC, R_TUNIC_RED, R_TUNIC_BLUE, R_HEART, R_POWDER_MODEL, R_DGN_MAP, R_MAP_MODEL, R_POWER_PIECE_MODEL,
-       R_SKIN, R_TITLE_LOGO, R_FILE_FRAME };
+enum { R_A = 1, R_B, R_X, R_Y, R_L, R_R, R_ZL, R_ZR, R_PLUS, R_MINUS, R_HERO, R_SHEET, R_TUNIC, R_TUNIC_RED, R_TUNIC_BLUE,
+       R_HEART, R_SKIN, R_TITLE_LOGO, R_FILE_FRAME };
 enum { STYLE_NINTENDO, STYLE_XBOX, STYLE_PS };
 // labels: R_A..R_MINUS = the button that role is on by default; or these
 enum { L_LS = 32, L_RS, L_DUP, L_DDOWN, L_DLEFT, L_DRIGHT, L_OTHER };
@@ -110,28 +108,13 @@ static int role_of(const char *name) {
         {"BtnA_", R_A}, {"BtnB_", R_B}, {"BtnX_", R_X}, {"BtnY_", R_Y}, {"BtnL_", R_L}, {"BtnR_", R_R},
         {"BtnZL_", R_ZL}, {"BtnZR_", R_ZR}, {"BtnPlus_", R_PLUS}, {"BtnMinus_", R_MINUS},
         {"Spicy_00^t", R_HERO},  // Ld_Spicy (StartUp.arc): the HUD's Hero Mode icon (the file select uses Spicy_00^f)
-        // the empty bottle's item icon and its 3D model's colour map (ItemBottle.bfres): identified only, never edited
-        // (the gold Escape Bottle's draws are tinted: runtime/hle/escape.c)
-        {"ItemBottle_00^w", R_BOTTLE}, {"MI_bottle_alb", R_BOTTLE_MODEL},
-        // the fairy's colour map (ItemFairy.bfres): boss / mini-boss souls are a fairy drawn evil red (runtime/hle/souls.c)
-        {"MI_fairy_alb", R_FAIRY_MODEL},
         // cosmetics: Link's tunics (recoloured on upload: green, and with a colour chosen the red / blue too, so the
         // Color Dungeon's tunics keep it - user 2026-10-11; the red map is also the recolour's mask)
         // and the hearts of Cm_HeartGauge (HUD, file select): Hp_00 = an empty heart (its own draw); each quarter of
         // a full one is one draw of Hp_01 (fill) + Hp_02 (frame, coloured by the layout's material) through the
         // Hp_04 mask; HeartUp = the life-up flash. Their draws are tinted.
         {"MI_body_alb.0", R_TUNIC}, {"MI_body_alb.1", R_TUNIC_RED}, {"MI_body_alb.2", R_TUNIC_BLUE},
-        // the Magic Powder sack's colour map (ItemMagicPowder.bfres; after the tunic's: same name prefix): held up as
-        // the Bomb Bag, tinted bomb blue then (runtime/hle/escape.c bomb_bag_tint)
-        {"MI_body_alb", R_POWDER_MODEL},
-        // the Hint Sheet (runtime/hle/hint_sheet.c): the dungeon map's UI icon (drawn in place of the first bottle's,
-        // texpatch_hint_icon) and its 3D model's colour map (ItemDungeonMap.bfres: Tarin's hand-over, tinted)
-        {"DgnMap_00^q", R_DGN_MAP}, {"MI_dungeonMap_alb", R_MAP_MODEL},
-        // the Piece of Power's colour map (ItemPowerPiece.bfres): Triforce pieces are one drawn gold (runtime/hle/triforce.c)
-        {"MI_powerPiece_alb", R_POWER_PIECE_MODEL},
         {"Hp_00^w", R_HEART}, {"Hp_01^w", R_HEART}, {"Hp_02^w", R_HEART}, {"HeartUp^w", R_HEART},
-        // the Items page's cursor brackets: identified only (hidden while the companion card has the cursor, pets.c)
-        {"ItemCursor_", R_ITEM_CURSOR},
         // the title's logo (Tl_Title) and the file select's frame (Cm_FileOperate): which of them is on screen
         {"Logo_00^f", R_TITLE_LOGO}, {"Logo_01^f", R_TITLE_LOGO}, {"MainFrameLT_03^w", R_FILE_FRAME},
     };
@@ -288,14 +271,8 @@ static void load_refs(void) {
             if (!memcmp(f + i, "BNTX\0\0\0\0", 8)) { scan_bntx(f + i, len - i, true); break; }
         free(f);
     }
-    LOG("[texpatch] %d known textures (button glyphs, pictogram sheet, Hero Mode icon, bottle icon / model, tunic, hearts)\n",
+    LOG("[texpatch] %d known textures (button glyphs, pictogram sheet, Hero Mode icon, tunic, hearts)\n",
         g_nrefs);
-}
-
-int texpatch_bottle_kind(int id) {
-    if (id < 0 || id >= g_nrefs) return 0;
-    return g_refs[id].role == R_BOTTLE ? 1 : g_refs[id].role == R_BOTTLE_MODEL ? 2 : g_refs[id].role == R_FAIRY_MODEL ? 3
-         : g_refs[id].role == R_POWDER_MODEL ? 4 : g_refs[id].role == R_MAP_MODEL ? 5 : g_refs[id].role == R_POWER_PIECE_MODEL ? 6 : 0;
 }
 
 int texpatch_heart_kind(int id) {
@@ -308,40 +285,8 @@ static int ref_of(int role) {
     return -1;
 }
 
-// A seed made with a tunic colour (older seeds: tools/rando/cosmetics.py) ships its own recoloured Playerlink.bfres:
-// its tunic map is recognised too, so the Cosmetics tab's colour wins over it. Read again when the seed changes
-// (seeds switch in place).
-static uint8_t *g_seed_tunic;
-static uint32_t g_seed_tunic_size;
-static char g_seed_tunic_dir[300] = "\1";
-static const uint8_t *seed_tunic(uint32_t *size) {
-    const char *dir = rando_seed_dir();
-    if (strcmp(dir ? dir : "", g_seed_tunic_dir)) {
-        strlcpy(g_seed_tunic_dir, dir ? dir : "", sizeof g_seed_tunic_dir);
-        free(g_seed_tunic);
-        g_seed_tunic = NULL;
-        char p[600];
-        size_t len;
-        uint8_t *f = NULL;
-        if (dir) snprintf(p, sizeof p, "%s/romfs/region_common/actor/Playerlink.bfres", dir), f = read_file(p, &len);
-        int n0 = g_nrefs;
-        for (size_t i = 0; f && i + 8 < len; i += 4)  // (a copy only differing from the game's adds a ref: taken out)
-            if (!memcmp(f + i, "BNTX\0\0\0\0", 8)) { scan_bntx(f + i, len - i, false); break; }
-        free(f);
-        for (int i = n0; i < g_nrefs; i++) {
-            if (g_refs[i].role == R_TUNIC && !g_seed_tunic) { g_seed_tunic = g_refs[i].data; g_seed_tunic_size = g_refs[i].size; }
-            else free(g_refs[i].data);
-        }
-        g_nrefs = n0;
-        if (g_seed_tunic) LOG("[texpatch] seed tunic map (%s)\n", dir);
-    }
-    *size = g_seed_tunic_size;
-    return g_seed_tunic;
-}
-
 static TexLayout g_tunic_layout;  // (the game's tunic texture: its levels' places in the map's data)
 static bool g_tunic_layout_ok;
-bool texpatch_is_item_cursor(int id) { return id >= 0 && id < g_nrefs && g_refs[id].role == R_ITEM_CURSOR; }
 
 static _Atomic uint64_t g_screen_seen[2];  // when the title's logo / the file select's frame was last drawn
 void texpatch_note_draw(int id) {
@@ -363,11 +308,9 @@ int texpatch_identify(const NvnTexture *t) {
     uint64_t total = tegra_total_size(&t->layout);
     for (int i = 0; i < g_nrefs; i++) {
         const Ref *r = &g_refs[i];
-        // (only the bottle model's and the tunic's maps have mip levels: compared in full, all levels)
+        // (only the tunic's and the skin's maps have mip levels: compared in full, all levels)
         bool tunic = r->role == R_TUNIC || r->role == R_TUNIC_RED || r->role == R_TUNIC_BLUE;
-        if (r->w != t->width || r->h != t->height || (r->role != R_POWDER_MODEL && r->role != R_MAP_MODEL &&
-            r->role != R_POWER_PIECE_MODEL &&
-            (t->levels > 1) != (r->role == R_BOTTLE_MODEL || r->role == R_FAIRY_MODEL || tunic || r->role == R_SKIN))) continue;
+        if (r->w != t->width || r->h != t->height || (t->levels > 1) != (tunic || r->role == R_SKIN)) continue;
         uint64_t n = r->size < total ? r->size : total;
         if (!memcmp((const void *)(uintptr_t)t->addr, r->data, n)) {
             static int nlog;
@@ -377,17 +320,6 @@ int texpatch_identify(const NvnTexture *t) {
         }
     }
     if (game_other()) return -1;  // (the rest: LA's)
-    int tu = ref_of(R_TUNIC);
-    if (tu >= 0 && t->levels > 1 && t->width == g_refs[tu].w && t->height == g_refs[tu].h) {
-        uint32_t n;
-        const uint8_t *s = seed_tunic(&n);
-        if (s && n == g_refs[tu].size && n <= total && !memcmp((const void *)(uintptr_t)t->addr, s, n)) {
-            LOG("[texpatch] seed's tunic map uploaded\n");
-            g_tunic_layout = t->layout;
-            g_tunic_layout_ok = true;
-            return tu;
-        }
-    }
     int rc = recolour_identify(t, total);  // (Cosmetics recolours: identified only, runtime/nvn/recolour.c)
     return rc >= 0 ? TEXPATCH_RECOLOUR_BASE + rc : -1;
 }
@@ -1019,7 +951,7 @@ done:
 // ------------------------------------------------------------------ cosmetics (Cosmetics tab): tunic and heart colours
 // The colour rows share one palette (runtime/cosmetic_colour.h): the chosen colour is a target for the thing's typical
 // colour, reached by a hue / saturation / value change that keeps the shading.
-// Tunic: tools/rando/cosmetics.py's recolour (a seed option once, now live): where the green and red tunic maps differ
+// Tunic: the Cosmetics tab's recolour: where the green and red tunic maps differ
 // (cloth, cap, collar ring) the green pixels change (PIL HSV, 0-255) from the green tunic's typical colour (hue 145,
 // saturation 0.75, value 0.55 - its map reads 0.89 / 0.38, lit it looks paler and brighter) to the chosen one. Every
 // mip level is recoloured from the game's own green map, so a seed's own colour is replaced too; "Default" uploads
@@ -1309,9 +1241,7 @@ void texpatch_apply(int id, uint32_t layer, uint32_t lv, uint8_t *blocks, uint32
     }
     if (r->role == R_SKIN) { skin_apply(id, lv, blocks, w, h, row, false, !strncmp(r->name, "MI_mouth_alb", 12), NULL); return; }
     if (lv || r->w != w || r->h != h) return;
-    if (r->role == R_BOTTLE || r->role == R_BOTTLE_MODEL || r->role == R_FAIRY_MODEL || r->role == R_POWDER_MODEL ||
-        r->role == R_ITEM_CURSOR || r->role == R_DGN_MAP || r->role == R_MAP_MODEL || r->role == R_POWER_PIECE_MODEL ||
-        r->role == R_HEART || r->role == R_TITLE_LOGO || r->role == R_FILE_FRAME) return;
+    if (r->role == R_HEART || r->role == R_TITLE_LOGO || r->role == R_FILE_FRAME) return;
     if (r->role == R_HERO) {  // fully transparent (BC5 blocks of zeros)
         if (hide_hero()) for (uint32_t y = 0; y < (h + 3) / 4; y++) memset(blocks + y * row, 0, (w + 3) / 4 * 16);
         return;
@@ -1349,52 +1279,10 @@ void texpatch_apply(int id, uint32_t layer, uint32_t lv, uint8_t *blocks, uint32
     free(dirty);
 }
 
-// The Hint Sheet's icon (runtime/hle/hint_sheet.c): the dungeon map's (120 x 120) centred on a bottle-sized canvas
-// (144 x 144, as ItemBottle_00^w: the same pane draws it at the size the game draws its own item icons), RGBA8 sRGB,
-// made once from the user's own game files. The renderers sample it in place of the bottle icon for the Hint Sheet's
-// draws. NULL: the game files don't have it.
-NvnTexture *texpatch_hint_icon(void) {
-    static NvnTexture t;
-    static int state;  // 0 not made yet, 1 made, -1 none
-    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-    pthread_mutex_lock(&lock);
-    if (!state) {
-        state = -1;
-        pthread_once(&g_once, load_refs);
-        int i = ref_of(R_DGN_MAP);
-        if (i >= 0 && g_refs[i].kind == K_BC3) {
-            const Ref *r = &g_refs[i];
-            uint32_t bw = (r->w + 3) / 4, bh = (r->h + 3) / 4, S = 144;
-            uint8_t *lin = malloc((size_t)bw * bh * 16), *img = malloc((size_t)r->w * r->h * 4), *canvas = calloc((size_t)S * S, 4);
-            tegra_deswizzle(r->data, lin, bw, bh, 1, 16, r->bhl, 0);
-            decode_image(r, lin, bw * 16, img);
-            uint32_t ox = (S - r->w) / 2, oy = (S - r->h) / 2;
-            for (uint32_t y = 0; y < r->h; y++) memcpy(canvas + ((y + oy) * S + ox) * 4, img + y * r->w * 4, r->w * 4);
-            t.target = 1;  // (2D)
-            t.format = r->srgb ? 0x38 : 0x25;  // RGBA8 sRGB / unorm, as the map's own colour space
-            t.width = t.height = S;
-            t.depth = t.levels = 1;
-            t.layout = (TexLayout){.width = S, .height = S, .depth = 1, .layers = 1, .levels = 1, .fmt = nvn_format_info(t.format)};
-            tegra_layout_init(&t.layout);
-            uint64_t total = tegra_total_size(&t.layout);
-            uint8_t *mem = calloc(total, 1);
-            LevelLayout l0 = tegra_level(&t.layout, 0);
-            tegra_swizzle(canvas, mem, l0.wb, l0.hb, 1, 4, l0.block_height_log2, l0.block_depth_log2);
-            t.addr = (uint64_t)(uintptr_t)mem;
-            strlcpy(t.label, "HintSheetIcon", sizeof t.label);
-            free(lin), free(img), free(canvas);
-            state = 1;
-            LOG("[texpatch] Hint Sheet icon made from %s\n", r->name);
-        }
-    }
-    pthread_mutex_unlock(&lock);
-    return state > 0 ? &t : NULL;
-}
-
 // The game's own UI textures, by name (e.g. "MapMark_05^w"), decoded to RGBA8 (w x h, the texture's own colour
 // encoding) from the user's UI archives: out[i] NULL if it isn't there or its format isn't one of ours. Each archive is
 // read once for the whole list. The caller frees them; returns how many were found.
-// (Runtime-made icons for our overlays: runtime/ui/triforce_icons.mm, race_overlay.mm - nothing of the game ships.)
+// (Runtime-made icons for our overlays: runtime/ui/game_icons.mm, race_overlay.mm - nothing of the game ships.)
 int texpatch_ui_rgba_list(const char *const *want, int nwant, uint8_t **out, int *w_out, int *h_out) {
     static const char *const arcs[] = {"region_common/ui/Game.arc", "regionUS/common/ui/GameRegionCommon.arc",
                                        "regionEU/common/ui/GameRegionCommon.arc", "region_common/ui/StartUp.arc"};

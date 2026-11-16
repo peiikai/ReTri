@@ -97,7 +97,7 @@ static bool writable(const char *dir) {
 
 static void fail(const char *msg) {
     fprintf(stderr, "%s\n", msg);
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "EoW Recomp", msg, NULL);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ReTri", msg, NULL);
     exit(1);
 }
 

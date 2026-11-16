@@ -63,10 +63,6 @@ Settings g_settings = {
     .touch_edit_button = true,
     .touch_hide_xy_hud = true,  // (the on-screen X / Y show the items)
     .touch_size = 1.0f,
-    .inv_keys = true,
-    .tracker = true,
-    .tracker_filters = -1,
-    .chaos_letters = CHAOS_LETTERS_MAP,
     .diff_damage = 1.0f,
     .walk_speed = 1.0f,
     .walk_speed_dungeons = false,
@@ -224,10 +220,6 @@ void settings_load(void) {
             strlcpy(g_settings.rando_last, val, sizeof g_settings.rando_last);
             continue;
         }
-        if (!strcmp(key, "cosmetics_seed")) {
-            strlcpy(g_settings.cosmetics_seed, val, sizeof g_settings.cosmetics_seed);
-            continue;
-        }
         if (fields != 2) continue;
         if (!strcmp(key, "aspect")) g_settings.aspect = !strcmp(val, "original") ? ASPECT_ORIGINAL : ASPECT_UNLOCKED;
         else if (!strcmp(key, "fullscreen")) g_settings.fullscreen = atoi(val) != 0;
@@ -281,7 +273,6 @@ void settings_load(void) {
         }
         else if (!strcmp(key, "fps_target")) g_settings.fps_target = !strcmp(val, "30") ? FPS_TARGET_30 : !strcmp(val, "mixed") ? FPS_TARGET_MIXED : FPS_TARGET_60;
         else if (!strcmp(key, "ambient_occlusion")) g_settings.ao_quality = !strcmp(val, "high") ? AO_HIGH : !strcmp(val, "off") ? AO_OFF : AO_SWITCH;
-        else if (!strcmp(key, "inv_keys")) g_settings.inv_keys = atoi(val) != 0;
         else if (!strcmp(key, "dpad_mode")) g_settings.dpad_mode = !strcmp(val, "items") ? DPAD_ITEMS : !strcmp(val, "move") ? DPAD_MOVE : DPAD_NOTHING;
         else if (!strcmp(key, "dpad_move")) g_settings.dpad_mode = atoi(val) ? DPAD_MOVE : DPAD_NOTHING;  // (older settings: a toggle)
         else if (!strcmp(key, "touch_controls")) g_settings.touch_mode = !strcmp(val, "always") ? 1 : !strcmp(val, "off") ? 2 : 0;
@@ -325,13 +316,9 @@ void settings_load(void) {
             for (int i = 1; i < N_LANGUAGES; i++)
                 if (!strcmp(v, g_language_codes[i])) g_settings.language = i;
         }
-        else if (!strcmp(key, "tracker")) g_settings.tracker = atoi(val) != 0;
-        else if (!strcmp(key, "tracker_filters")) g_settings.tracker_filters = atoi(val);
         else if (!strcmp(key, "menu_tip_seen")) g_settings.menu_tip_seen = atoi(val) != 0, tip_key = true;
         else if (!strcmp(key, "aspect_asked")) g_settings.aspect_asked = atoi(val) != 0, aspect_key = true;
         else if (!strcmp(key, "onedrive_kept")) g_settings.onedrive_kept = atoi(val) != 0;
-        else if (!strcmp(key, "chaos_letters"))
-            g_settings.chaos_letters = !strcmp(val, "off") ? CHAOS_LETTERS_OFF : !strcmp(val, "explored") ? CHAOS_LETTERS_EXPLORED : CHAOS_LETTERS_MAP;
         else if (!strcmp(key, "cheat_hearts")) g_settings.cheat_hearts = atoi(val) != 0;
         else if (!strcmp(key, "cheat_ammo")) g_settings.cheat_ammo = atoi(val) != 0;
         else if (!strcmp(key, "cheat_rupees")) g_settings.cheat_rupees = atoi(val) != 0;
@@ -349,11 +336,6 @@ void settings_load(void) {
         else if (!strcmp(key, "timer")) g_settings.timer = atoi(val) != 0;
         else if (!strcmp(key, "timer_position")) g_settings.timer_pos = !strcmp(val, "right") ? TIMER_POS_RIGHT : TIMER_POS_LEFT;
         else if (!strcmp(key, "livesplit")) g_settings.livesplit = atoi(val) != 0;
-        else if (!strcmp(key, "rando_options")) strlcpy(g_settings.rando_options, val, sizeof g_settings.rando_options);
-        else if (!strcmp(key, "rando_preset")) {  // (in order; past the cap: dropped)
-            for (int i = 0; i < RANDO_PRESETS_MAX; i++)
-                if (!g_settings.rando_presets[i][0]) { strlcpy(g_settings.rando_presets[i], val, sizeof g_settings.rando_presets[i]); break; }
-        }
         else if (!strcmp(key, "livesplit_host")) strlcpy(g_settings.livesplit_host, val, sizeof g_settings.livesplit_host);
         else if (!strcmp(key, "tunic")) col_parse(&g_settings.tunic, val);  // (colour rows: runtime/cosmetic_colour.c)
         else if (!strcmp(key, "hearts")) col_parse(&g_settings.hearts, val);
@@ -376,7 +358,9 @@ void settings_load(void) {
         else if (!strcmp(key, "enemy_colours")) {
             for (int i = 0; i < N_ENEMY_COLOUR_MODES; i++) if (!strcmp(val, k_enemy_colour_keys[i])) g_settings.enemy_colours = i;
         }
-        else bind_settings_load(key, val);  // bind_pad_* / bind_key_*: runtime/hle/bindings.c
+        // bind_pad_* / bind_key_*: runtime/hle/bindings.c. Other keys are skipped: those of LA's randomizer (inv_keys,
+        // tracker, tracker_filters, chaos_letters, cosmetics_seed, rando_options, rando_preset) are dropped on save
+        else bind_settings_load(key, val);
     }
     fclose(f);
     if (!tip_key) g_settings.menu_tip_seen = true;  // (a settings file from before the note: not a first launch)
@@ -439,7 +423,6 @@ void settings_save(void) {
     fprintf(f, "dynamic_resolution = %d\n", g_settings.dyn_res);
     fprintf(f, "dynamic_min = %d\n", g_settings.dyn_min);
     fprintf(f, "fps_target = %s\n", g_settings.fps_target == FPS_TARGET_30 ? "30" : g_settings.fps_target == FPS_TARGET_MIXED ? "mixed" : "60");
-    fprintf(f, "inv_keys = %d\n", g_settings.inv_keys);
     fprintf(f, "dpad_mode = %s\n", g_settings.dpad_mode == DPAD_ITEMS ? "items" : g_settings.dpad_mode == DPAD_MOVE ? "move" : "nothing");
     fprintf(f, "touch_controls = %s\n", g_settings.touch_mode == 1 ? "always" : g_settings.touch_mode == 2 ? "off" : "auto");
     fprintf(f, "touch_opacity = %.2f\n", g_settings.touch_opacity);
@@ -470,13 +453,9 @@ void settings_save(void) {
     fprintf(f, "mirror_mode = %d\n", g_settings.mirror_mode);
     fprintf(f, "language = %s\n", g_language_codes[g_settings.language > LANG_AUTO && g_settings.language < N_LANGUAGES
                                                      ? g_settings.language : LANG_AUTO]);
-    fprintf(f, "tracker = %d\n", g_settings.tracker);
-    if (g_settings.tracker_filters >= 0) fprintf(f, "tracker_filters = %d\n", g_settings.tracker_filters);
     fprintf(f, "aspect_asked = %d\n", g_settings.aspect_asked);
     fprintf(f, "menu_tip_seen = %d\n", g_settings.menu_tip_seen);
     fprintf(f, "onedrive_kept = %d\n", g_settings.onedrive_kept);
-    static const char *const letters[] = {"off", "explored", "map"};
-    fprintf(f, "chaos_letters = %s\n", letters[g_settings.chaos_letters]);
     fprintf(f, "cheat_hearts = %d\ncheat_ammo = %d\ncheat_rupees = %d\n", g_settings.cheat_hearts, g_settings.cheat_ammo,
             g_settings.cheat_rupees);
     fprintf(f, "cheat_hookshot = %d\n", g_settings.cheat_hookshot);
@@ -503,13 +482,9 @@ void settings_save(void) {
     fprintf(f, "enemy_colours = %s\n", k_enemy_colour_keys[g_settings.enemy_colours]);
     fprintf(f, "screen_filter = %s\n", k_screen_filter_keys[g_settings.screen_filter]);
     fprintf(f, "weather = %s\n", k_weather_keys[g_settings.weather]);
-    if (g_settings.cosmetics_seed[0]) fprintf(f, "cosmetics_seed = %s\n", g_settings.cosmetics_seed);
     bind_settings_save(f);
     fprintf(f, "rando_seed = %s\n", g_settings.rando_seed);
     if (g_settings.rando_last[0]) fprintf(f, "rando_last = %s\n", g_settings.rando_last);
-    if (g_settings.rando_options[0]) fprintf(f, "rando_options = %s\n", g_settings.rando_options);
-    for (int i = 0; i < RANDO_PRESETS_MAX; i++)
-        if (g_settings.rando_presets[i][0]) fprintf(f, "rando_preset = %s\n", g_settings.rando_presets[i]);
 #if PLAT_TOUCH
     if (fclose(f) != 0 || rename(tmp, SETTINGS_FILE) != 0) LOG("[settings] cannot write %s\n", SETTINGS_FILE);
     atomic_flag_clear(&lock);

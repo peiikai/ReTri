@@ -1,7 +1,7 @@
-// Dungeon rooms for the Warp tab's maps (warp_rooms.h). The level files are FixedHash containers (the layout is in
-// tools/rando/fixedhash.py); a room (.leb) holds its actors and, for a top-down room, a 10 x 8 tile grid (1.5 units a
-// tile, origin = the cell's corner: a cell is 15 x 12 units, column -> x, row -> z). How tiles, doors and joined cells
-// are read follows tools/rando/rooms.py (load_room / catalog).
+// Dungeon rooms for the Warp tab's maps (warp_rooms.h). The level files are FixedHash containers; a room (.leb) holds
+// its actors and, for a top-down room, a 10 x 8 tile grid (1.5 units a tile, origin = the cell's corner: a cell is
+// 15 x 12 units, column -> x, row -> z). How tiles, doors and joined cells are read follows LAS Recomp's
+// tools/rando/rooms.py (load_room / catalog).
 #include "warp_rooms.h"
 
 #include <dirent.h>

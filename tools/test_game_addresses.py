@@ -3,11 +3,8 @@
 Optional:
   --game KEY=FOLDER (repeatable, e.g. --game v1_0_0=extracted --game v1_0_1=/path/to/1.0.1): extracted game files of
     that version. Every RomFS file must be one of that version's (romfs_files.h), every patch's instruction check and
-    every hook word then runs on that version's main program, the
-    randomizer's patch sites (tools/rando/patch_variants.json, and --seeds) must hold the same original bytes in every
-    given version, the start screen's release label is checked, and with v1_0_0 and another version the committed
-    tables must equal tools/version_map.py's output.
-  --seeds FOLDER: randomizer seeds (rando/), whose exefs/1.0.0.pchtxt patch sites are checked like patch_variants.json.
+    every hook word then runs on that version's main program, the start screen's release label is checked, and with
+    v1_0_0 and another version the committed tables must equal tools/version_map.py's output.
   --compare-generated BEFORE AFTER: compares two complete generation directories made from the same player-provided
     exefs before/after a change.
 """
@@ -36,7 +33,6 @@ MAIN_BASE = 0x7000000000
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument('--compare-generated', type=Path, nargs=2, metavar=('BEFORE', 'AFTER'))
 parser.add_argument('--game', action='append', default=[], metavar='KEY=FOLDER')
-parser.add_argument('--seeds', type=Path)
 args = parser.parse_args()
 
 # ---- every version: the same names, one header each, distinct values
@@ -81,7 +77,7 @@ for address, expected in fixture['patches'].items():
     code = patches.PATCHES[address](gen, address)
     assert hashlib.sha256(code.encode()).hexdigest() == expected['sha256'], f'Patch output changed at {address:x}'
 assert hashlib.sha256(json.dumps(patches.HOOKS, sort_keys=True).encode()).hexdigest() == fixture['hooks_sha256']
-assert addr_text('f_@HAS_ITEM@(c);') == f'f_{ADDRESS.HAS_ITEM:x}(c);'
+assert addr_text('f_@NO_HANDLER_CATCH@(c);') == f'f_{ADDRESS.NO_HANDLER_CATCH:x}(c);'
 try:
     addr_text('@UNKNOWN_ADDRESS@')
 except AttributeError:
@@ -278,10 +274,10 @@ shutil.copyfile(TABLE_DIR/'versions.h', bundled/'versions.h')
 for key in VERSIONS:
     shutil.copyfile(table_path(key), bundled/table_path(key).name)
 check = ('import sys; sys._MEIPASS=sys.argv[1]; sys.path.insert(0,sys.argv[2]); '
-         'import game_addresses as g; g.select_build_id(sys.argv[3]); print(g.ADDRESS.HAS_ITEM)')
+         'import game_addresses as g; g.select_build_id(sys.argv[3]); print(g.ADDRESS.NO_HANDLER_CATCH)')
 for key, (label, bid) in VERSIONS.items():
     output = subprocess.check_output([sys.executable, '-c', check, str(tmp/'bundle'), str(ROOT/'tools'), bid])
-    assert int(output) == tables[key][0]['HAS_ITEM']
+    assert int(output) == tables[key][0]['NO_HANDLER_CATCH']
 bad = tmp/'bad.h'
 for content in ('', 'GA_ADDR(BAD, 123)\n', 'GA_ADDR(DUP, 0x123)\n'*2):
     bad.write_text(content)
@@ -364,28 +360,6 @@ if games:
         print(f'{key}: {len(p.PATCHES)} patch checks and {len(p.HOOKS)} hook words pass on {folder}')
     select_version('v1_0_0')
     patches = importlib.reload(patches)
-    # the randomizer: the same original bytes at every patch site (rando.c reads 1.0.0.pchtxt on every version)
-    variants = json.loads((ROOT/'tools/rando/patch_variants.json').read_text())
-    sites = {int(a, 16): 4 for a in variants['code']} | {int(a, 16): 16 for a in variants['data']}
-    if args.seeds:
-        for pch in sorted(args.seeds.glob('*/exefs/1.0.0.pchtxt')):
-            enabled = False
-            for line in pch.read_text(encoding='utf-8', errors='replace').splitlines():
-                if line.startswith('@enabled'):
-                    enabled = True
-                elif line.startswith('@stop'):
-                    enabled = False
-                elif enabled and re.match(r'[0-9A-Fa-f]{8} ', line):
-                    off, data = line.split(None, 1)
-                    n = len(data.split('"')[1]) + 1 if data.startswith('"') else len(bytes.fromhex(data.split()[0]))
-                    sites[int(off, 16)] = max(sites.get(int(off, 16), 0), n)
-    first = next(iter(images.values()))
-    for key, n in images.items():
-        for off, size in sorted(sites.items()):
-            assert bytes(first.image[off:off + size]) == bytes(n.image[off:off + size]), \
-                f'{key}: the randomizer patch site main+{off:#x} differs'
-    if len(images) > 1:
-        print(f'{len(sites)} randomizer patch sites hold the same bytes in {", ".join(images)}')
     # the start screen's release label from the real files
     for key, folder in games.items():
         label = ' '.join(native('label', folder/'exefs'))
