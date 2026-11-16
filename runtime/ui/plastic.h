@@ -8,6 +8,7 @@
 struct PlasticTheme {
     ImVec4 panel, panel2, inset, frame, frame_inner, row, row_sel, row_mark, row_hot, button, danger, tab, tab_sel, tab_hot;
     ImVec4 ring, ring_sel;  // the rims round rows, buttons and tabs (ring_sel: on the selection)
+    ImVec4 bar;  // a progress bar's done part
     ImU32 text, text_dim, text_sel, text_button, section, value, value_changed, warn, title, arrow;
     ImU32 text_tab_sel;  // the selected tab's name
     float ring_w;   // a rim's width (design pixels)

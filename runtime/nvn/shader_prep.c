@@ -644,6 +644,6 @@ static bool prep_run_locked(const char *romfs, void (*progress)(int done, int to
 
 void shader_prep_boot(const char *romfs) {
     const char *e = getenv("LARECOMP_SHADER_PREP");
-    if (e ? !atoi(e) : !game_other()) return;  // (another game: always - it has no start screen to prepare them)
+    if (!e || !atoi(e)) return;  // (the start screen prepares them, EoW's too)
     shader_prep_run(romfs, NULL, NULL);
 }

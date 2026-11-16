@@ -1,7 +1,7 @@
 // Start screen, shown before the game boots (user 2026-10-08, styled after Dusklight's launcher): PLAY (the vanilla
 // game), RANDOMIZER (‹ New Seed / a seed ›: user 2026-11-09), SETTINGS, QUIT, game-files status at the lower left.
 // Nothing of the game ships with EoW Recomp: on first launch the user picks the folder with their own game files (1.0.0, 1.0.1 or 1.1.0), we check
-// the main module's build id (runtime/game_addresses/versions.h), copy the files and build the game's data image; PLAY stays disabled until that worked. The background is a frame of the game's own title movie (from the user's files) once extracted.
+// the main module's build id (runtime/game_addresses/versions.h), copy the files and build the game's data image; PLAY stays disabled until that worked. The background is the game's own title movie (from the user's files) once extracted: a frame of it, or for EoW on Metal the movie playing.
 //
 // Skipped with --play, LARECOMP_NO_LAUNCHER=1, or any scripted test run (LARECOMP_INPUT): tests boot straight in
 // (with LARECOMP_NO_LAUNCHER, set by tools/game_slot.sh, the app exits rather than show it: runtime/main.c).
@@ -352,14 +352,20 @@ static std::string version_hint(const std::string &exefs) {
 // The copied game files alone ("" = there), without the game code built from them
 static std::string check_copied_files(const std::string &root) {
     if (!file_exists(root + "/exefs/main")) return LN("No game files yet");
-    if (!game_version_of(root.c_str())) {
+    // another game on the engine (EoW): selected now, so the start screen and its Settings know it (game_other)
+    const GameVersion *other = game_version_of(root.c_str()) ? NULL : game_other_of(root.c_str());
+    if (other && !game_other()) {
+        char why[512];
+        game_version_select(root.c_str(), why, sizeof why);
+    }
+    if (!game_version_of(root.c_str()) && !other) {
         refused_main(root + "/exefs");  // (the log line)
         return LN("Wrong version of the game");
     }
     if (!file_exists(root + "/romfs/region_common")) return incomplete(0);
     if (g_romfs_count < 0) {
         g_romfs_bytes = 0;
-        const GameVersion *v = game_version_of(root.c_str());
+        const GameVersion *v = game_version_of(root.c_str());  // (another game: NULL, no file list or totals)
         RomfsCheckWalk check = {game_romfs_check_begin(v), root.size() + strlen("/romfs/"), 0, root.c_str(), 0};
         g_romfs_count = count_files(root + "/romfs", 0, &g_romfs_bytes, &check);
         int missing = game_romfs_check_end(check.check);
@@ -505,9 +511,10 @@ static void find_game(const std::string &dir, std::string &exefs, std::string &r
 static bool build_id_ok(const std::string &exefs) {
     char label[32];
     const char *v = game_release_label(exefs.c_str(), label, sizeof label);
-    if (v) fprintf(stderr, "[launcher] game files: version %s\n", v);
+    const GameVersion *o = v ? NULL : game_other_of(exefs.substr(0, exefs.rfind('/')).c_str());  // (EoW)
+    if (v || o) fprintf(stderr, "[launcher] game files: version %s\n", v ? v : o->label);
     else refused_main(exefs);
-    return v != NULL;
+    return v || o;
 }
 // Wrong version: the failure, its hint with the build ID
 static void set_version_failure(const std::string &exefs) {
@@ -563,7 +570,9 @@ static void start_background_prep(void) {
     pthread_detach(th);
 }
 // Before the game files change (setup, delete): the background preparation stops reading them
+static void bg_movie_stop(void);
 static void stop_background_prep(void) {
+    bg_movie_stop();  // (the title movie behind the start screen reads them too)
     if (!g_bg_prep) return;
     g_prep_skip = 1;
     while (g_bg_prep) SDL_Delay(5);
@@ -907,7 +916,8 @@ static void remove_fonts() {
     g_font_msg = L("Imported fonts removed. You're back on the substitute fonts.");
 }
 
-// ------------------------------------------------------------------ background: a title movie frame
+// ------------------------------------------------------------------ background: the title movie (a frame of it;
+// EoW's plays on Metal, below)
 #ifdef __APPLE__
 static id<MTLTexture> g_bg;
 #define BG_TEXID ((ImTextureID)(__bridge void *)g_bg)
@@ -919,8 +929,13 @@ typedef void *GpuDevice;
 #endif
 static int g_bg_w, g_bg_h;
 
+static void bg_movie_start(GpuDevice dev, const std::string &path, double from);
+// EoW's title screen is this movie with the logo drawn over it (LA's is title.webm)
+static std::string bg_movie_path(void) {
+    return g_root + (game_other() ? "/romfs/region_common/movie/rd000_Title.webm" : "/romfs/region_common/movie/title.webm");
+}
 static void load_background(GpuDevice dev) {
-    std::string path = g_root + "/romfs/region_common/movie/title.webm";
+    std::string path = bg_movie_path();
     AVFormatContext *fmt = NULL;
     if (avformat_open_input(&fmt, path.c_str(), NULL, NULL) < 0) return;
     int si = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
@@ -960,12 +975,127 @@ static void load_background(GpuDevice dev) {
 #endif
                 g_bg_w = w, g_bg_h = h;
             }
+            if (got && game_other()) bg_movie_start(dev, path, 6.0);  // (on from the still)
             av_frame_free(&fr);
             av_packet_free(&pkt);
         }
         avcodec_free_context(&cc);
     }
     avformat_close_input(&fmt);
+}
+
+// EoW: the title movie plays behind the start screen, as on the game's own title screen. A thread decodes it in a
+// loop, on the clock, and keeps the newest frame (30 a second, 1280x720: the movie is 1080p60, and the start screen
+// is a backdrop); the start screen puts it in one of three textures in turn, never the one the GPU may still read.
+// Metal only: Vulkan keeps the still frame (an image updated each frame needs its own upload there).
+static struct {
+    pthread_t th;
+    bool running;
+    std::atomic<bool> stop{false};
+    pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    std::vector<uint8_t> frame;  // (lock) the newest frame, RGBA
+    bool fresh;                  // (lock) not shown yet
+    std::string path;
+    double from;
+    int w = 1280, h = 720;
+#ifdef __APPLE__
+    id<MTLTexture> tex[3];
+    int next;
+#endif
+} g_mv;
+
+static void *bg_movie_thread(void *) {
+    AVFormatContext *fmt = NULL;
+    if (avformat_open_input(&fmt, g_mv.path.c_str(), NULL, NULL) < 0) return NULL;
+    int si = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+    AVCodecContext *cc = NULL;
+    const AVCodec *codec = si >= 0 && avformat_find_stream_info(fmt, NULL) >= 0
+                               ? avcodec_find_decoder(fmt->streams[si]->codecpar->codec_id) : NULL;
+    if (codec && (cc = avcodec_alloc_context3(codec))) {
+        avcodec_parameters_to_context(cc, fmt->streams[si]->codecpar);
+        cc->thread_count = 2;  // (VP9 1080p60 in real time, leaving the cores to the shader preparation)
+        if (avcodec_open2(cc, codec, NULL) != 0) avcodec_free_context(&cc);
+    }
+    if (!cc) { avformat_close_input(&fmt); return NULL; }
+    double tb = av_q2d(fmt->streams[si]->time_base);
+    AVPacket *pkt = av_packet_alloc();
+    AVFrame *fr = av_frame_alloc();
+    SwsContext *sws = NULL;
+    std::vector<uint8_t> rgba((size_t)g_mv.w * g_mv.h * 4);
+    double start = g_mv.from, due = start, t0 = SDL_GetTicksNS() / 1e9 - start;  // (movie time t: shown at t0 + t)
+    av_seek_frame(fmt, si, (int64_t)(start / tb), AVSEEK_FLAG_BACKWARD);
+    while (!g_mv.stop) {
+        int r = av_read_frame(fmt, pkt);
+        if (r < 0) {  // the end: again from the start, as the game loops it
+            av_seek_frame(fmt, si, 0, AVSEEK_FLAG_BACKWARD);
+            avcodec_flush_buffers(cc);
+            t0 = SDL_GetTicksNS() / 1e9, due = 0;
+            continue;
+        }
+        if (pkt->stream_index == si && avcodec_send_packet(cc, pkt) == 0)
+            while (!g_mv.stop && avcodec_receive_frame(cc, fr) == 0) {
+                double t = fr->best_effort_timestamp * tb;
+                if (t + 1e-3 < due) continue;  // (before the seek point, or between the 30 a second)
+                due = t + 1.0 / 30;
+                for (double wait; !g_mv.stop && (wait = t0 + t - SDL_GetTicksNS() / 1e9) > 0;)
+                    SDL_Delay((Uint32)fmin(wait * 1000 + 1, 50));
+                sws = sws_getCachedContext(sws, fr->width, fr->height, (AVPixelFormat)fr->format, g_mv.w, g_mv.h,
+                                           AV_PIX_FMT_RGBA, SWS_BILINEAR, NULL, NULL, NULL);
+                uint8_t *dst[1] = {rgba.data()};
+                int dst_ls[1] = {g_mv.w * 4};
+                if (sws) sws_scale(sws, fr->data, fr->linesize, 0, fr->height, dst, dst_ls);
+                pthread_mutex_lock(&g_mv.lock);
+                g_mv.frame.swap(rgba), g_mv.fresh = true;
+                pthread_mutex_unlock(&g_mv.lock);
+                if (rgba.size() != g_mv.frame.size()) rgba.resize(g_mv.frame.size());
+            }
+        av_packet_unref(pkt);
+    }
+    sws_freeContext(sws);
+    av_frame_free(&fr);
+    av_packet_free(&pkt);
+    avcodec_free_context(&cc);
+    avformat_close_input(&fmt);
+    return NULL;
+}
+
+static void bg_movie_start(GpuDevice dev, const std::string &path, double from) {
+#ifdef __APPLE__
+    if (g_mv.running) return;
+    MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                                  width:g_mv.w height:g_mv.h mipmapped:NO];
+    for (auto &t : g_mv.tex) if (!(t = [dev newTextureWithDescriptor:td])) return;
+    g_mv.path = path, g_mv.from = from, g_mv.stop = false, g_mv.fresh = false;
+    g_mv.running = pthread_create(&g_mv.th, NULL, bg_movie_thread, NULL) == 0;
+#else
+    (void)dev, (void)path, (void)from;
+#endif
+}
+
+static void bg_movie_stop(void) {
+    if (!g_mv.running) return;
+    g_mv.stop = true;
+    pthread_join(g_mv.th, NULL);
+    g_mv.running = false;
+#ifdef __APPLE__
+    for (auto &t : g_mv.tex) t = nil;
+#endif
+}
+
+// (each frame, before the background is drawn) the newest movie frame, if there's one, becomes the background
+static void bg_movie_update(void) {
+#ifdef __APPLE__
+    if (!g_mv.running || !g_bg) return;
+    pthread_mutex_lock(&g_mv.lock);
+    if (g_mv.fresh) {
+        id<MTLTexture> t = g_mv.tex[g_mv.next];
+        g_mv.next = (g_mv.next + 1) % 3;
+        [t replaceRegion:MTLRegionMake2D(0, 0, g_mv.w, g_mv.h) mipmapLevel:0 withBytes:g_mv.frame.data()
+             bytesPerRow:g_mv.w * 4];
+        g_bg = t, g_bg_w = g_mv.w, g_bg_h = g_mv.h, g_mv.fresh = false;
+    }
+    pthread_mutex_unlock(&g_mv.lock);
+#endif
 }
 
 // ------------------------------------------------------------------ seeds
@@ -1280,11 +1410,16 @@ static void draw_folder_example(float w) {
 }
 #endif
 
+// Another game on the engine (game_other) gets its own look on the start screen: the settings menu's palette
+// (runtime/ui/plastic.mm theme_eow) - plum-brown shade, cream text, gold to orange highlights
+static ImU32 eow_or(ImU32 la, ImU32 other) { return game_other() ? other : la; }
+
 // Start-screen text: a soft drop shadow, then the text with a top-to-bottom colour gradient (top == bottom: flat)
 static void text_fx(ImDrawList *dl, ImFont *font, float size, ImVec2 p, ImU32 top, ImU32 bottom, const char *t,
                     float shadow) {
     if (shadow > 0)
-        for (float d : {shadow, shadow * 0.5f}) dl->AddText(font, size, ImVec2(p.x + d, p.y + d), IM_COL32(4, 8, 30, 110), t);
+        for (float d : {shadow, shadow * 0.5f})
+            dl->AddText(font, size, ImVec2(p.x + d, p.y + d), eow_or(IM_COL32(4, 8, 30, 110), IM_COL32(20, 12, 16, 130)), t);
     int v0 = dl->VtxBuffer.Size;
     dl->AddText(font, size, p, top, t);
     if (top == bottom) return;
@@ -1324,7 +1459,8 @@ static void menu_band(ImDrawList *dl, ImVec2 at, ImVec2 sz) {
         float half = sz.y * 0.62f;
         y1 = c - half, y2 = c + half, y0 = y1 - f, y3 = y2 + f;
     }
-    ImU32 c = IM_COL32(6, 10, 34, 150), g = IM_COL32(255, 190, 80, 34), n = IM_COL32(6, 10, 34, 0), ng = IM_COL32(255, 190, 80, 0);
+    ImU32 c = eow_or(IM_COL32(6, 10, 34, 150), IM_COL32(26, 18, 22, 150)), g = IM_COL32(255, 190, 80, 34),
+          n = c & ~IM_COL32_A_MASK, ng = IM_COL32(255, 190, 80, 0);
     for (int pass = 0; pass < 2; pass++) {  // dark band, then the glow over it
         ImU32 a = pass ? g : c, z = pass ? ng : n;
         dl->AddRectFilledMultiColor(ImVec2(x0, y1), ImVec2(x1, y2), a, a, a, a);
@@ -1351,10 +1487,12 @@ static bool menu_item(const char *label, bool enabled, bool *hovered = NULL, con
     bool hot = ImGui::IsItemFocused() || ImGui::IsItemHovered();
     ImGui::PopID();
     if (hovered) *hovered = hot;
-    ImU32 col = !enabled ? IM_COL32(170, 175, 200, 140) : hot ? IM_COL32(255, 214, 64, 255) : IM_COL32(250, 250, 255, 255);
+    ImU32 col = !enabled ? eow_or(IM_COL32(170, 175, 200, 140), IM_COL32(158, 146, 134, 140))
+              : hot ? eow_or(IM_COL32(255, 214, 64, 255), IM_COL32(240, 208, 112, 255))
+                    : eow_or(IM_COL32(250, 250, 255, 255), IM_COL32(240, 232, 220, 255));
     ImDrawList *dl = ImGui::GetWindowDrawList();
     if (hot && enabled) menu_band(dl, at, sz);
-    ImU32 col_b = hot && enabled ? IM_COL32(255, 160, 50, 255) : col;
+    ImU32 col_b = hot && enabled ? eow_or(IM_COL32(255, 160, 50, 255), IM_COL32(232, 150, 74, 255)) : col;
     if (split && enabled) {
         std::string head(label, split - label);
         text_fx(dl, ImGui::GetFont(), ImGui::GetFontSize(), at, col, col_b, head.c_str(), sz.y * 0.05f);
@@ -1636,10 +1774,11 @@ static void ios_export_wire(void) {
 #endif
 
 // A button of the progress overlay, drawn as the menus' buttons are (hot: lit, dark text) - the overlay is drawn on
-// the foreground over everything, not as ImGui items
+// the foreground over everything, not as ImGui items. Idle: the button colour, which text_button is made for (EoW's
+// rows are dark and its button text dark: Skip on a row was unreadable)
 static void busy_button(ImDrawList *dl, ImVec2 a, ImVec2 b, const char *label, float fs, bool hot, float sc) {
     const PlasticTheme &t = plastic_theme();
-    plastic_pill(dl, a, b, (b.y - a.y) * 0.5f, hot ? t.row_hot : t.row, (hot ? 6 : 4.5f) * sc, hot ? 1.0f : 0.7f, sc, hot);
+    plastic_pill(dl, a, b, (b.y - a.y) * 0.5f, hot ? t.row_hot : t.button, (hot ? 6 : 4.5f) * sc, hot ? 1.0f : 0.7f, sc, hot);
     ImVec2 ls = g_font_small->CalcTextSizeA(fs, FLT_MAX, 0, label);
     dl->AddText(g_font_small, fs, ImVec2((a.x + b.x - ls.x) * 0.5f, (a.y + b.y - ls.y) * 0.5f),
                 hot ? t.text_sel : t.text_button, label);
@@ -1747,11 +1886,26 @@ static void draw_busy_overlay(ImVec2 ds, const std::string &job, bool test_busy,
         ImVec2 qs = g_font_small->CalcTextSizeA(sfs, FLT_MAX, 0, q);
         ImVec2 ys = g_font_small->CalcTextSizeA(sfs, FLT_MAX, 0, yes), ns = g_font_small->CalcTextSizeA(sfs, FLT_MAX, 0, no);
         float bw = fmaxf(ys.x, ns.x) + 64 * sc, bh = line_h + 20 * sc, gap = 24 * sc;
-        float qw = fminf(fmaxf(qs.x, 2 * bw + gap) + 96 * sc, ds.x - 32 * sc), qh = 40 * sc + line_h + 32 * sc + bh + 36 * sc;
+        // (wider than the window, as in a small one: the question in lines, each centred)
+        float qw = fminf(fmaxf(qs.x, 2 * bw + gap) + 96 * sc, fminf(ds.x - 32 * sc, 1100 * sc)), room = qw - 96 * sc;
+        std::vector<std::pair<const char *, const char *>> qlines;
+        for (const char *p = q, *end = q + strlen(q); p < end;) {
+            const char *e = g_font_small->CalcWordWrapPositionA(sfs / g_font_small->FontSize, p, end, room);
+            if (e == p) e = p + 1;  // (a word wider than the room: cut it)
+            const char *t = e;
+            while (t > p && t[-1] == ' ') t--;
+            qlines.push_back({p, t});
+            for (p = e; *p == ' '; p++) {}
+        }
+        float qh = 40 * sc + qlines.size() * line_h + 32 * sc + bh + 36 * sc;
         fg->AddRectFilled(a, b, IM_COL32(0, 0, 0, 120), 14 * sc);  // (the bar behind it dimmed)
         ImVec2 qa(o.x + (ds.x - qw) * 0.5f, o.y + (ds.y - qh) * 0.5f), qb(qa.x + qw, qa.y + qh);
         plastic_panel(fg, qa, qb, sc);
-        fg->AddText(g_font_small, sfs, ImVec2((qa.x + qb.x - qs.x) * 0.5f, qa.y + 40 * sc), pt.text, q);
+        for (size_t i = 0; i < qlines.size(); i++) {
+            float lw = g_font_small->CalcTextSizeA(sfs, FLT_MAX, 0, qlines[i].first, qlines[i].second).x;
+            fg->AddText(g_font_small, sfs, ImVec2((qa.x + qb.x - lw) * 0.5f, qa.y + 40 * sc + i * line_h), pt.text,
+                        qlines[i].first, qlines[i].second);
+        }
         float by = qb.y - 36 * sc - bh, bx = (qa.x + qb.x) * 0.5f;
         ImVec2 ya(bx - gap * 0.5f - bw, by), yb(bx - gap * 0.5f, by + bh), na(bx + gap * 0.5f, by), nb(bx + gap * 0.5f + bw, by + bh);
         bool hy = ImGui::IsMouseHoveringRect(ya, yb, false), hn = ImGui::IsMouseHoveringRect(na, nb, false);
@@ -2318,7 +2472,7 @@ extern "C" void launcher_run(const char *root) {
         game_files_changed();
         status = check_game_files(g_root);
         fprintf(stderr, "[launcher] delete %.1f GB: %s -> %s\n", gb, ok ? "ok" : "refused", status.c_str());
-        if (!status.empty()) { g_bg = 0; page = SETUP; }
+        if (!status.empty()) { bg_movie_stop(); g_bg = 0; page = SETUP; }
     }
     if (g_onedrive < 0) {  // (once per launch: a "Title screen" reboot keeps it)
         if (PLAT_IOS) fprintf(stderr, "[launcher] data folder shown as: %s\n", data_root_shown().c_str());
@@ -2373,7 +2527,7 @@ extern "C" void launcher_run(const char *root) {
         if (g_files_deleted) {  // (Settings > Prelaunch deleted them)
             g_files_deleted = false;
             status = check_game_files(g_root);
-            if (!status.empty()) { g_bg = 0; bind_capture_cancel(); settings_save(); page = SETUP; }
+            if (!status.empty()) { bg_movie_stop(); g_bg = 0; bind_capture_cancel(); settings_save(); page = SETUP; }
         }
 #if PLAT_TOUCH
         if (char qs[128]; plat_touch_play_request(qs, sizeof qs)) launcher_play_seed(qs);
@@ -2529,6 +2683,7 @@ extern "C" void launcher_run(const char *root) {
             // an update by itself: only its bar, on the start screen's background (gray without it; a failure or
             // Cancel then shows the System page)
             const bool update_only = g_auto_update && busy;
+            bg_movie_update();
             if (g_bg && (status.empty() || update_only)) {  // cover the window, keep the aspect
                 float ia = (float)g_bg_w / g_bg_h, wa = ds.x / ds.y;
                 ImVec2 uv0(0, 0), uv1(1, 1);
@@ -2537,6 +2692,19 @@ extern "C" void launcher_run(const char *root) {
                 bg->AddImage(BG_TEXID, ImVec2(0, 0), ds, uv0, uv1);
             } else if (update_only) {
                 bg->AddRectFilled(ImVec2(0, 0), ds, IM_COL32(40, 40, 40, 255));
+            } else if (game_other()) {  // plum-brown, a bronze glow at the upper right with slow echoes rippling out
+                bg->AddRectFilledMultiColor(ImVec2(0, 0), ds, IM_COL32(58, 42, 48, 255), IM_COL32(90, 66, 50, 255),
+                                            IM_COL32(31, 24, 26, 255), IM_COL32(36, 26, 30, 255));
+                ImVec2 c(ds.x * 0.78f, ds.y * 0.3f);
+                float r = ds.y * 0.75f;
+                for (int i = 0; i < 48; i++)  // (soft: stacked faint discs, thin steps so no bands show)
+                    bg->AddCircleFilled(c, r * (1 - i / 48.0f), IM_COL32(232, 168, 90, 3), 96);
+                float t = (float)ImGui::GetTime();
+                for (int i = 0; i < 5; i++) {
+                    float k = fmodf(t / 9.0f + i / 5.0f, 1.0f);  // 0..1: an echo's life
+                    int a = (int)(46 * sinf(k * 3.14159265f));
+                    bg->AddCircle(c, r * (0.12f + 1.1f * k), IM_COL32(240, 216, 144, a), 128, 1.5f * s);
+                }
             } else {
                 bg->AddRectFilledMultiColor(ImVec2(0, 0), ds, IM_COL32(18, 34, 40, 255), IM_COL32(40, 70, 64, 255),
                                             IM_COL32(12, 20, 24, 255), IM_COL32(8, 12, 16, 255));
@@ -2544,11 +2712,12 @@ extern "C" void launcher_run(const char *root) {
             if (!update_only) {  // a shadow banner fading in from the left behind the menu, and one from the right behind the version
                 const float stops[][2] = {{0.0f, 225}, {0.3f, 215}, {0.44f, 165}, {0.55f, 95}, {0.64f, 35}, {0.74f, 0}};
                 for (int i = 0; i + 1 < (int)(sizeof stops / sizeof stops[0]); i++) {
-                    ImU32 a = IM_COL32(6, 10, 34, (int)stops[i][1]), b = IM_COL32(6, 10, 34, (int)stops[i + 1][1]);
+                    ImU32 sh = eow_or(IM_COL32(6, 10, 34, 0), IM_COL32(26, 18, 22, 0));
+                    ImU32 a = sh | (ImU32)stops[i][1] << IM_COL32_A_SHIFT, b = sh | (ImU32)stops[i + 1][1] << IM_COL32_A_SHIFT;
                     bg->AddRectFilledMultiColor(ImVec2(ds.x * stops[i][0], 0), ImVec2(ds.x * stops[i + 1][0], ds.y), a, b, b, a);
                 }
                 float y0 = ds.y - 190 * s, y1 = ds.y - 135 * s, y2 = ds.y - 40 * s, y3 = ds.y, x0r = ds.x * 0.5f;
-                ImU32 c0 = IM_COL32(6, 10, 34, 0), c1 = IM_COL32(6, 10, 34, 235);
+                ImU32 c0 = eow_or(IM_COL32(6, 10, 34, 0), IM_COL32(26, 18, 22, 0)), c1 = c0 | IM_COL32(0, 0, 0, 235);
                 bg->AddRectFilledMultiColor(ImVec2(x0r, y0), ImVec2(ds.x, y1), c0, c0, c1, c0);  // (feathered top)
                 bg->AddRectFilledMultiColor(ImVec2(x0r, y1), ImVec2(ds.x, y2), c0, c1, c1, c0);
                 bg->AddRectFilledMultiColor(ImVec2(x0r, y2), ImVec2(ds.x, y3), c0, c1, c0, c0);  // (feathered bottom)
@@ -2569,10 +2738,11 @@ extern "C" void launcher_run(const char *root) {
             ImGui::SetCursorPos(ImVec2(x0, 120 * s));
             ImGui::PushFont(g_font_title);
             if (page == MAIN) {  // gold to orange, shadowed (not behind the Settings / System windows)
-                const char *t = "EoW Recompiled";
+                const char *t = game_other() ? "TriCompiled" : "EoW Recompiled";
                 ImVec2 p = ImGui::GetCursorScreenPos();
-                text_fx(ImGui::GetWindowDrawList(), ImGui::GetFont(), ImGui::GetFontSize(), p, IM_COL32(255, 232, 120, 255),
-                        IM_COL32(255, 138, 48, 255), t, 3 * s);
+                text_fx(ImGui::GetWindowDrawList(), ImGui::GetFont(), ImGui::GetFontSize(), p,
+                        eow_or(IM_COL32(255, 232, 120, 255), IM_COL32(240, 216, 144, 255)),
+                        eow_or(IM_COL32(255, 138, 48, 255), IM_COL32(232, 150, 74, 255)), t, 3 * s);
                 ImGui::Dummy(ImGui::CalcTextSize(t));
             }
             ImGui::PopFont();
@@ -2659,7 +2829,8 @@ extern "C" void launcher_run(const char *root) {
                 }
                 const char *name = strstr(label, "\xe2\x80\xb9") + 4, *name_end = strstr(label, " \xe2\x80\xba");
                 rando_pressed = menu_item(label, status.empty(), &hov, name,
-                                          choice ? IM_COL32(250, 250, 255, 255) : IM_COL32(246, 232, 176, 255),
+                                          choice ? eow_or(IM_COL32(250, 250, 255, 255), IM_COL32(240, 232, 220, 255))
+                                                 : eow_or(IM_COL32(246, 232, 176, 255), IM_COL32(216, 178, 124, 255)),
                                           name_end);  // (the choice keeps its colour when hovered: a seed white, "New
                                                       //  Seed" vanilla cream; the arrows stay white)
                 ImGui::SetWindowFontScale(1.0f);
@@ -2933,7 +3104,7 @@ extern "C" void launcher_run(const char *root) {
                             status = check_game_files(g_root);
                             if (ok) set_job(LN("Game files deleted."));
                             else set_job(LN("Couldn't delete the game files. They aren't in EoW Recomp's data folder."), true);
-                            if (!status.empty()) g_bg = 0;
+                            if (!status.empty()) bg_movie_stop(), g_bg = 0;
                             g_confirm_delete = false, files_gb = -1;
                         }
                         if (opt_action("Cancel", "", "Keeps the game files.", true)) g_confirm_delete = false;
@@ -3051,7 +3222,7 @@ extern "C" void launcher_run(const char *root) {
                     const char *v = game_release_label((g_root + "/exefs").c_str(), label, sizeof label);
                     version_label = v ? v : "?";
                 }
-                ImGui::TextColored(ImVec4(0.66f, 0.76f, 0.98f, 1), L("Nintendo Switch  \xc2\xb7  v%s"), version_label.c_str());
+                ImGui::TextColored(game_other() ? ImVec4(0.85f, 0.70f, 0.49f, 1) : ImVec4(0.66f, 0.76f, 0.98f, 1), L("Nintendo Switch  \xc2\xb7  v%s"), version_label.c_str());
             } else {
                 ImGui::TextColored(ImVec4(1, 0.72f, 0.4f, 1), "!  %s", busy ? L("Setting up the game files...") : shown(status).c_str());
                 ImGui::SetCursorPosX(x0);
@@ -3084,14 +3255,14 @@ extern "C" void launcher_run(const char *root) {
                 ImFont *font = ImGui::GetFont();
                 float fs = ImGui::GetFontSize(), right = ImGui::GetWindowPos().x + ds.x - fmaxf(60 * s, safe_r + 30 * s);
                 auto text = [&](ImVec2 p, float size, ImU32 col, const char *t, bool bold) {
-                    for (float d : {2.5f, 1.5f, 0.8f}) dl->AddText(font, size, ImVec2(p.x + d * s, p.y + d * s), IM_COL32(4, 8, 30, 150), t);
+                    for (float d : {2.5f, 1.5f, 0.8f}) dl->AddText(font, size, ImVec2(p.x + d * s, p.y + d * s), eow_or(IM_COL32(4, 8, 30, 150), IM_COL32(20, 12, 16, 150)), t);
                     dl->AddText(font, size, p, col, t);
                     if (bold) dl->AddText(font, size, ImVec2(p.x + 0.7f * s, p.y), col, t);
                 };
                 std::string ver = tag_label(LARECOMP_VERSION, true);
                 float vs = fs * 1.4f, y = ImGui::GetWindowPos().y + ds.y - 134 * s - safe_b;
                 ImVec2 vsz = font->CalcTextSizeA(vs, FLT_MAX, 0, ver.c_str());
-                text(ImVec2(right - vsz.x, y), vs, IM_COL32(255, 255, 255, 255), ver.c_str(), false);
+                text(ImVec2(right - vsz.x, y), vs, eow_or(IM_COL32(255, 255, 255, 255), IM_COL32(240, 232, 220, 255)), ver.c_str(), false);
                 pthread_mutex_lock(&g_update_lock);
                 std::string upd = g_update_tag;
                 pthread_mutex_unlock(&g_update_lock);
@@ -3103,13 +3274,15 @@ extern "C" void launcher_run(const char *root) {
                     float wp = font->CalcTextSizeA(fs, FLT_MAX, 0, pre.c_str()).x;
                     ImVec2 lsz = font->CalcTextSizeA(fs, FLT_MAX, 0, link.c_str());
                     ImVec2 lp(right - lsz.x, y + vsz.y + 2 * s);
-                    text(ImVec2(lp.x - wp, lp.y), fs, IM_COL32(200, 214, 250, 255), pre.c_str(), false);
+                    text(ImVec2(lp.x - wp, lp.y), fs, eow_or(IM_COL32(200, 214, 250, 255), IM_COL32(216, 178, 124, 255)), pre.c_str(), false);
                     ImGui::SetCursorScreenPos(lp);
                     bool click = ImGui::InvisibleButton("update", lsz);
                     bool hover = ImGui::IsItemHovered();
                     // the menu's hover colours (yellow to orange), lighter while the link itself is hovered
-                    ImU32 col = hover ? IM_COL32(255, 238, 150, 255) : IM_COL32(255, 214, 64, 255);
-                    ImU32 col_b = hover ? IM_COL32(255, 196, 110, 255) : IM_COL32(255, 160, 50, 255);
+                    ImU32 col = hover ? eow_or(IM_COL32(255, 238, 150, 255), IM_COL32(248, 228, 160, 255))
+                                      : eow_or(IM_COL32(255, 214, 64, 255), IM_COL32(240, 208, 112, 255));
+                    ImU32 col_b = hover ? eow_or(IM_COL32(255, 196, 110, 255), IM_COL32(240, 184, 120, 255))
+                                        : eow_or(IM_COL32(255, 160, 50, 255), IM_COL32(232, 150, 74, 255));
                     text_fx(dl, font, fs, lp, col, col_b, link.c_str(), 1.5f * s);
                     text_fx(dl, font, fs, ImVec2(lp.x + 0.7f * s, lp.y), col, col_b, link.c_str(), 0);  // (faux bold)
                     if (hover) {
@@ -3202,6 +3375,7 @@ extern "C" void launcher_run(const char *root) {
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext(ctx);
     ImGui::SetCurrentContext(prev_ctx);
+    bg_movie_stop();
     g_bg = 0;
     g_start_screen = 0;
 }
