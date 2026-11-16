@@ -257,6 +257,29 @@ int weather_snow_tree(const float pos[3]) {
     return 0;
 }
 
+// (a sample of the vertex data - its start and middle - hashed each frame it is drawn; changed within the last 2 s:
+// animated. Unknown at first: still, until it has moved)
+bool weather_snow_animated(uint64_t key, const void *vtx, uint64_t size, uint64_t frame) {
+    enum { N = 256, PART = 512 };
+    static struct { uint64_t key, hash, seen, moved; } t[N];
+    if (!key || !vtx || !size) return false;
+    uint32_t k = (uint32_t)(key * 0x9E3779B97F4A7C15ull >> 56);
+    int i = 0;
+    while (i < 8 && t[(k + i) & (N - 1)].key && t[(k + i) & (N - 1)].key != key) i++;
+    if (i == 8) i = 0, t[k & (N - 1)].key = 0;  // (full here: the first slot taken over)
+    k = (k + i) & (N - 1);
+    const uint8_t *p = vtx;
+    uint64_t n = size < PART ? size : PART, h = 0xcbf29ce484222325ull;
+    for (uint64_t j = 0; j < n; j++) h = (h ^ p[j]) * 0x100000001b3ull;
+    for (uint64_t j = size / 2, e = size / 2 + n < size ? size / 2 + n : size; j < e; j++) h = (h ^ p[j]) * 0x100000001b3ull;
+    if (t[k].key != key) t[k].key = key, t[k].hash = h, t[k].seen = frame, t[k].moved = 0;
+    else if (t[k].seen != frame) {
+        if (h != t[k].hash) t[k].moved = frame;
+        t[k].hash = h, t[k].seen = frame;
+    }
+    return t[k].moved && frame - t[k].moved < 120;
+}
+
 static void shake_tree(float x, float z, float within) {  // (the tree nearest x, z: its snow off, a burst falling)
     int best = -1;
     float bd = within * within;
@@ -376,7 +399,7 @@ float weather_snow_now(void) { return (float)t; }
 bool weather_snow_on(void) { return g_outdoors && g_cover > 0.002f; }
 
 bool weather_snow_cover(SnowFrame *s, const float vp[16]) {
-    static int dbg = -1;  // LARECOMP_SNOW_DEBUG=1 (test): the cover's mask in flat red
+    static int dbg = -1;  // LARECOMP_SNOW_DEBUG=1 (test): the cover's mask in flat red (2: its stencil marks, 3: the game's cast shadows it reads)
     if (dbg < 0) dbg = (int)env_f("LARECOMP_SNOW_DEBUG", 0);
     if (!g_outdoors || g_cover <= 0.002f) return false;
     memcpy(s->vp, vp, sizeof s->vp);
@@ -392,6 +415,17 @@ bool weather_snow_cover(SnowFrame *s, const float vp[16]) {
         if (e) sscanf(e, "%f,%f,%f,%f", &tone[0], &tone[1], &tone[2], &tone[3]);
     }
     memcpy(s->tone, tone, sizeof tone);
+    // in a cast shadow: lit by the sky only - darker and bluer, never black. About the contrast the game's shadows
+    // have on grass once tone mapped (lit snow ~223 sRGB, its shadow ~135 grey-blue: the trees and the signpost north
+    // of Mabe Village). The renderer fills the rest of the shadow fields
+    static float shade[4] = {-1};
+    if (shade[0] < 0) {
+        shade[0] = 0.21f, shade[1] = 0.25f, shade[2] = 0.36f, shade[3] = 0;
+        const char *e = getenv("LARECOMP_SNOW_SHADE");  // r,g,b (test)
+        if (e) sscanf(e, "%f,%f,%f", &shade[0], &shade[1], &shade[2]);
+    }
+    memcpy(s->shade, shade, sizeof shade);
+    s->shz[2] = env_f("LARECOMP_SNOW_SHADOW_BIAS", 0.002f);
     s->shake[7] = 1;  // (slot 7: the face trees, never shaken - renderer.m's sc_tree)
     for (int i = 1; i < 7; i++) {  // (a shaken tree grows its snow back at the rate it fell, from none)
         if (g_shaken[i].at <= 0) continue;
@@ -559,7 +593,7 @@ static bool link_free(Cpu *c, uint64_t link) {
         uint64_t so = id < 0x40 ? LD64(link + 0x1340 + 8 * (uint64_t)id) : 0, vt = so ? LD64(so) : 0, ti = vt ? LD64(vt - 8) : 0;
         const char *name = ti ? (const char *)(uintptr_t)LD64(ti + 8) : NULL;
         LOG("[weather] link state %u (%s) vt main+%llx iframes %g nohit %u filter %#x\n", id, name ? name : "?",
-            (unsigned long long)(vt ? vt - 0x7000000000ull : 0), *(const float *)(uintptr_t)(link + 0x1e80),
+            (unsigned long long)(vt ? vt - MAIN_BASE : 0), *(const float *)(uintptr_t)(link + 0x1e80),
             LD8(link + 0x1b8c) & 1, link_hit(c, link, false));
     }
     return id < 32 && ((1u << id) & (1u << 0 | 1u << 1 | 1u << 2 | 1u << 10 | 1u << 26));

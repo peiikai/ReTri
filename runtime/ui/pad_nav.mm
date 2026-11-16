@@ -1,15 +1,16 @@
 // Controller buttons into our ImGui menus: see pad_nav.h.
 #include "pad_nav.h"
 #include "i18n.h"
+#include "imgui_internal.h"  // (ImGuiKey_Gamepad_BEGIN / END)
 #include <atomic>
 #include "input_bind.h"
 #include "../settings.h"
 
 static std::atomic<SDL_JoystickID> g_last_pad{0};
 
-// Does the bottom button confirm for a pad of layout family `fam`? Game layout (the default): never - the right one
-// confirms, as in the game. Controller convention: Xbox / PlayStation / generic pads (#172).
-static bool south_confirms(int fam) { return g_settings.menu_confirm == MENU_CONFIRM_CONTROLLER && fam != 0; }
+// Does the bottom button confirm for a pad of layout family `fam`? Button layout "Switch" (the default): never - the
+// right one confirms, as in the game. "Xbox / PlayStation": Xbox / PlayStation / generic pads (#172), as the game's A then is.
+static bool south_confirms(int fam) { return g_settings.face_by_label && fam != 0; }
 
 ImGuiKey ui_pad_key(SDL_JoystickID which, Uint8 button, bool down) {
     static ImGuiKey held[SDL_GAMEPAD_BUTTON_COUNT];  // (the layout can change while a button is held: its release)
@@ -35,6 +36,12 @@ ImGuiKey ui_pad_key(SDL_JoystickID which, Uint8 button, bool down) {
     }
     if (down) held[button] = k;
     return k;
+}
+
+void ui_pad_release_all(ImGuiIO &io) {
+    io.ClearEventsQueue();  // (presses / releases not applied yet: from before)
+    io.ClearInputKeys();
+    for (int k = ImGuiKey_Gamepad_BEGIN; k < ImGuiKey_Gamepad_END; k++) io.KeysData[k - ImGuiKey_NamedKey_BEGIN].AnalogValue = 0;
 }
 
 int ui_pad_family(void) { return input_menu_family(g_last_pad.load()) % 3; }

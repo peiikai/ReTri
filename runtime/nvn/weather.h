@@ -80,6 +80,11 @@ typedef struct {
     float tone[4];     // the snow's colour in the scene's (linear, pre-tone-map) units (rgb), w: their reference white
     float shake[8];    // trees shaken bare (a bonk): slot 1..6's share of the cover now (stencil bits 1-3; [0] unused;
                        // [7] 1: the face trees by Crazy Tracy's, no wall for the alcoves' test)
+    float lvp[16];     // the light's view-projection from the game's shadow pass (rows), read by the cover with its
+                       // shadow map: the snow in a cast shadow is shaded as the ground under it was
+    float shd[4];      // x: 1 the shadow map is there this frame, y: its depth -1..1, z / w: its drawn size (texels)
+    float shz[4];      // x / y: its depth range (near, far - near), z: the compare's bias (depth units)
+    float shade[4];    // the snow's colour in a cast shadow, as a share of the lit snow's (rgb: lit by the sky only)
 } SnowFrame;
 // The cover for this frame (false: none - not snowing / nothing settled / not the overworld). vp: the scene pass's
 // view-projection (rows). The renderer fills screen, flags.xy and zr.xy.
@@ -98,6 +103,10 @@ float weather_snow_now(void);  // (their time base: the weather's time)
 // A tree drawn this frame (the renderer: a scenery actor with canopy maps; its model's world position): which shaken
 // tree slot it is (1..6, its snow regrowing after a bonk), 0: none
 int weather_snow_tree(const float pos[3]);
+// A scenery-looking actor drawn this frame (one drawn with the level's own shaders): whether it is animated - an
+// animal (its vertex data, posed for each frame, keeps changing), not a prop or a rock (still). key: its vertex
+// buffer's address, vtx / size: the data there. Render thread
+bool weather_snow_animated(uint64_t key, const void *vtx, uint64_t size, uint64_t frame);
 // Game thread, every frame: Link's position for the footprints and the kicked-up snow (snow on the overworld only),
 // and for a storm's lightning (it aims at him now and then; it shocks him if he is still there when it strikes)
 struct Cpu;
