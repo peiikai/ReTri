@@ -10,7 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Unlocked aspect ratio: the camera fills wide windows.
 - Logging of shader records the shipped list lacks, once per run.
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
-- Android (arm64): the app TriCompiled (`com.tricompiled.android`), which installs next to LAS Recomp. The game code
+- Android (arm64): the app ReTri (`com.retri.android`), which installs next to LAS Recomp. The game code
   is built on the device from your own game files, as in LAS Recomp's Android port.
 - Touch controls for EoW: the whole Switch pad on screen (stick, D-pad, A B X Y, L R ZL ZR, + and -), each
   control movable and resizable in the layout editor. A controller hides them, a touch brings them back.

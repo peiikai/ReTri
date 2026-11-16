@@ -6,15 +6,15 @@ plugins {
 
 val repo: File = rootDir.resolve("..").canonicalFile
 val deps: File = repo.resolve("android/deps/out")  // android/deps/build_deps.sh
-val gen = layout.buildDirectory.dir("generated/tricompiled")
+val gen = layout.buildDirectory.dir("generated/retri")
 
 android {
-    namespace = "com.tricompiled"
+    namespace = "com.retri"
     compileSdk = 36
     ndkVersion = "30.0.16248370"
 
     defaultConfig {
-        applicationId = "com.tricompiled.android"
+        applicationId = "com.retri.android"
         minSdk = 30
         targetSdk = 36
         // (experimental builds: .github/workflows/experimental.yml sets the build's version and a code that grows)
@@ -79,7 +79,7 @@ android {
 
 // What the APK carries from the repository besides libmain.so: the prebuilt libraries and the shipped resources the
 // desktop builds put next to the executable (the start screen's font, the fallback fonts, the icon; their licences).
-val prepareTriCompiled by tasks.registering {
+val prepareReTri by tasks.registering {
     val res = mapOf(
         "Baloo2-SemiBold.ttf" to "third_party/fonts/Baloo2/Baloo2-SemiBold.ttf",
         "Baloo2-OFL.txt" to "third_party/fonts/Baloo2/OFL.txt",
@@ -143,4 +143,4 @@ val genZip by tasks.registering(Zip::class) {
     from(repo.resolve("tools")) { include("hot_functions*.txt"); into("gamelib-src") }
     includeEmptyDirs = false
 }
-tasks.named("preBuild") { dependsOn(prepareTriCompiled, genZip) }
+tasks.named("preBuild") { dependsOn(prepareReTri, genZip) }

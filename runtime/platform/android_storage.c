@@ -113,7 +113,7 @@ void android_pick_files(void (*done)(void *, const char *const *, int)) {
     if (!android_call("pickFiles")) done(NULL, NULL, -1);
 }
 
-JNIEXPORT void JNICALL Java_com_tricompiled_TriCompiledActivity_nativeFilesPicked(JNIEnv *env, jclass cls, jobjectArray paths) {
+JNIEXPORT void JNICALL Java_com_retri_ReTriActivity_nativeFilesPicked(JNIEnv *env, jclass cls, jobjectArray paths) {
     (void)cls;
     void (*done)(void *, const char *const *, int) = g_files_done;
     if (!done) return;
@@ -138,7 +138,7 @@ JNIEXPORT void JNICALL Java_com_tricompiled_TriCompiledActivity_nativeFilesPicke
 static void (*g_driver_done)(const char *);
 void android_on_driver(void (*done)(const char *)) { g_driver_done = done; }
 
-JNIEXPORT void JNICALL Java_com_tricompiled_TriCompiledActivity_nativeDriverPicked(JNIEnv *env, jclass cls, jstring result) {
+JNIEXPORT void JNICALL Java_com_retri_ReTriActivity_nativeDriverPicked(JNIEnv *env, jclass cls, jstring result) {
     (void)cls;
     void (*done)(const char *) = g_driver_done;
     if (!done) return;
@@ -147,7 +147,7 @@ JNIEXPORT void JNICALL Java_com_tricompiled_TriCompiledActivity_nativeDriverPick
     if (r) (*env)->ReleaseStringUTFChars(env, result, r);
 }
 
-JNIEXPORT void JNICALL Java_com_tricompiled_TriCompiledActivity_nativeFolderPicked(JNIEnv *env, jclass cls, jstring uri) {
+JNIEXPORT void JNICALL Java_com_retri_ReTriActivity_nativeFolderPicked(JNIEnv *env, jclass cls, jstring uri) {
     (void)cls;
     void (*done)(const char *) = g_done;
     if (!done) return;
@@ -156,13 +156,13 @@ JNIEXPORT void JNICALL Java_com_tricompiled_TriCompiledActivity_nativeFolderPick
     if (u) (*env)->ReleaseStringUTFChars(env, uri, u);
 }
 
-JNIEXPORT void JNICALL Java_com_tricompiled_TriCompiledActivity_nativeImportProgress(JNIEnv *env, jclass cls, jlong done,
+JNIEXPORT void JNICALL Java_com_retri_ReTriActivity_nativeImportProgress(JNIEnv *env, jclass cls, jlong done,
                                                                                  jlong total) {
     (void)env, (void)cls;
     if (g_progress) g_progress((uint64_t)done, (uint64_t)total);
 }
 
-JNIEXPORT jboolean JNICALL Java_com_tricompiled_TriCompiledActivity_nativeImportCancelled(JNIEnv *env, jclass cls) {
+JNIEXPORT jboolean JNICALL Java_com_retri_ReTriActivity_nativeImportCancelled(JNIEnv *env, jclass cls) {
     (void)env, (void)cls;
     return g_cancelled && g_cancelled() ? JNI_TRUE : JNI_FALSE;
 }
@@ -232,7 +232,7 @@ void plat_touch_prompt_cancel(void) {
     android_call("closePrompt");
 }
 
-JNIEXPORT void JNICALL Java_com_tricompiled_TriCompiledActivity_nativePromptDone(JNIEnv *env, jclass cls, jint serial, jbyteArray text) {
+JNIEXPORT void JNICALL Java_com_retri_ReTriActivity_nativePromptDone(JNIEnv *env, jclass cls, jint serial, jbyteArray text) {
     (void)cls;
     if (!text) { prompt_answer(serial, -1, NULL, 0); return; }
     jsize n = (*env)->GetArrayLength(env, text);

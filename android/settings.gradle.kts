@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "TriCompiled"
+rootProject.name = "ReTri"
 include(":app")

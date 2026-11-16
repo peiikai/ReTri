@@ -208,7 +208,7 @@ Where files live (game files, saves, seeds, settings and logs):
 - macOS: `~/Library/Application Support/com.peiikai.eowrecomp/`
 - Windows: next to `eowrecomp.exe`, so keep the `EoW Recomp` folder somewhere writable (not Program Files).
 - Linux: `~/.local/share/eowrecomp/`
-- Android: `Android/data/com.tricompiled.android/files` in the phone's storage.
+- Android: `Android/data/com.retri.android/files` in the phone's storage.
 - iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > EoW Recomp).
 - You can move it to another folder or drive in Settings > System > Data folder.
 - `LARECOMP_DATA_ROOT=<dir>` overrides all of these.

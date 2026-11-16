@@ -2,7 +2,7 @@
 
 The Android port is coming in pieces, from [mamcjr's LASRecompAndroid](https://github.com/mamcjr/LASRecompAndroid)
 (MIT), with parts from [Nycolazs's LASRecomp-Android-Plus](https://github.com/Nycolazs/LASRecomp-Android-Plus)
-(MIT), by way of LAS Recomp's Android port. The app is TriCompiled (`com.tricompiled.android`), so it installs next to
+(MIT), by way of LAS Recomp's Android port. The app is ReTri (`com.retri.android`), so it installs next to
 LAS Recomp. The player picks their game files folder with Android's own folder picker, the setup copies them in and
 builds the game code on the device, and the game plays with a controller or touch controls.
 
@@ -34,11 +34,11 @@ fails (or, worse, Gradle quietly keeps the old library).
 
 ## How it differs from Linux
 
-- `runtime/platform/linux.c` builds for Android too (`__ANDROID__` parts): the log goes to logcat (tag `TriCompiled`)
+- `runtime/platform/linux.c` builds for Android too (`__ANDROID__` parts): the log goes to logcat (tag `ReTri`)
   as well as `eowrecomp.log`, backtraces come from the unwinder, and the process can't restart itself.
 - The guest window moves (`LARECOMP_DYN_BASE`, `runtime/rt.h`): an app process is forked with its libraries already
   mapped, so `runtime/main.c` picks a free spot from `/proc/self/maps`.
-- The data folder is `Android/data/com.tricompiled.android/files`, in internal storage or on an SD card (Settings >
+- The data folder is `Android/data/com.retri.android/files`, in internal storage or on an SD card (Settings >
   Storage, and the first row of the setup window): the app's own folder on each, the only places it can use by path
   without a permission. The SD card's is named in `data_root.txt` as on the desktop, and the data moves with the
   desktop's move (`runtime/paths.c`); the activity starts the app again after it. The fonts and icon are copied from
@@ -79,12 +79,12 @@ An arm64 system image (API 35, Google APIs) with host GPU runs the start screen 
 
 ```
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-adb shell am start -n com.tricompiled.android/com.tricompiled.TriCompiledActivity
-adb logcat -s TriCompiled
+adb shell am start -n com.retri.android/com.retri.ReTriActivity
+adb logcat -s ReTri
 ```
 
 The desktop's debug switches ([debug-hooks.md](debug-hooks.md)) are passed with the launch (debug builds only):
-`adb shell am start -n com.tricompiled.android/com.tricompiled.TriCompiledActivity --es LARECOMP_LOG_SKIPS 1`.
+`adb shell am start -n com.retri.android/com.retri.ReTriActivity --es LARECOMP_LOG_SKIPS 1`.
 
 The emulator draws the start screen and the movies, but not the game's world: its Vulkan goes to the Mac through
 gfxstream and MoltenVK, whose translation of the game's shaders to Metal fails to compile ("call to 'fmin' is
@@ -106,13 +106,13 @@ changes (`android/app/.cxx/RelWithDebInfo/*/arm64-v8a/build.ninja` names it), so
 Launch switches work only in debuggable builds. A muted test launch with its own settings and saves:
 
 ```
-adb shell am start -S -n com.tricompiled.android/com.tricompiled.TriCompiledActivity \
+adb shell am start -S -n com.retri.android/com.retri.ReTriActivity \
   --es LARECOMP_SETTINGS <ini> --es LARECOMP_SAVE_DIR <dir> \
   --es LARECOMP_NO_AUDIO 1 --es LARECOMP_NO_MOVIE_AUDIO 1 --es LARECOMP_NO_LAUNCHER 1
 ```
 
 `adb shell input keyevent` doesn't reach the game. `eowrecomp.log` is in the data folder (on an SD card:
-`/storage/<card>/Android/data/com.tricompiled.android/files/EoW Recomp`); its `[dynres]` and `[pace]` lines say what
+`/storage/<card>/Android/data/com.retri.android/files/EoW Recomp`); its `[dynres]` and `[pace]` lines say what
 Dynamic and the frame pacer did and why.
 
 ## Tested devices
