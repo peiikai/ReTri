@@ -28,6 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   colours.
 
 ### Fixed
+- Retroid Pocket: the face buttons match their labels (A and B, X and Y were swapped).
 - Vulkan (Windows, Linux, Android): the hearts show as red hearts, not dark hearts in a red box.
 - Building the game code no longer stalls for half an hour or more on two very large functions the game barely
   runs: they are built without optimisation (every platform).
