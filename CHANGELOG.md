@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
 - Android (arm64): the app TriCompiled (`com.tricompiled.android`), which installs next to LAS Recomp. The game code
   is built on the device from your own game files, as in LAS Recomp's Android port.
+- Touch controls for EoW: the whole Switch pad on screen (stick, D-pad, A B X Y, L R ZL ZR, + and -), each
+  control movable and resizable in the layout editor. A controller hides them, a touch brings them back.
 
 ### Changed
 - The window and error dialogs are titled "TriCompiled", the project's new name.

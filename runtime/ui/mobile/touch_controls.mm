@@ -21,6 +21,9 @@
 // Layout editor (Controls tab, "Edit touch layout"): over the game, drag a control to move it, tap it to select it; the
 // bar sets the selected one's size, hides / shows it (hidden ones are drawn faint while editing), puts every control
 // back, cancels or saves. Each control: settings touch_ctl_<name> = x, y (share of the screen), size, hidden.
+// Echoes of Wisdom (game_other()): the game has no context known here, so play shows the whole Switch pad - the stick,
+// A B X Y, L R ZL ZR, Plus / Minus and a D-pad (the echo list, accessories) - from the moment the game runs, with
+// the Switch letters on them; nothing reads LA's save and no tap on the game's screen turns into presses.
 // A quick tap still reaches the game (a button is held at least 80 ms). LARECOMP_TOUCH_SHOW_INPUT=1 (videos, tests):
 // scripted input (LARECOMP_INPUT) lights the buttons and moves the stick as a thumb would.
 #include <SDL3/SDL.h>
@@ -46,28 +49,34 @@ bool tracker_map_page_shown(void);   // runtime/ui/tracker_overlay.mm
 bool chaos_dgnmap_shown(void);       // runtime/ui/chaos_overlay.mm
 bool pause_menu_shown(void);         // runtime/ui/inventory_overlay.mm
 int texpatch_title_screen(void);     // runtime/nvn/texpatch.c
+extern int g_start_screen;           // runtime/hle/warp.c
 }
 ImTextureID ui_game_icon(const char *name);  // runtime/ui/triforce_icons.mm
 
 enum { BTN_A = 0, BTN_B, BTN_X, BTN_Y, BTN_L = 6, BTN_R, BTN_ZL, BTN_ZR, BTN_PLUS, BTN_MINUS,
        BTN_LEFT, BTN_UP, BTN_RIGHT, BTN_DOWN };  // (input.c's bits)
 #define BIT(b) (1ull << (b))
-enum { C_STICK = 0, C_A, C_B, C_X, C_Y, C_L, C_R, C_ZL, C_ZR, C_PLUS, C_MINUS, C_MENU, C_START, C_EDIT, C_COUNT };
+enum { C_STICK = 0, C_A, C_B, C_X, C_Y, C_L, C_R, C_ZL, C_ZR, C_PLUS, C_MINUS, C_MENU, C_START, C_EDIT, C_DPAD, C_COUNT };
 static_assert(C_COUNT == TOUCH_NCTL, "settings.h TOUCH_NCTL");
 // (the ini names: settings.c's touch_control_name, this order)
 
 // what the game shows: the controls each screen can have (play's are narrowed further by what Link has: wanted)
-enum { X_PLAY = 0, X_TITLE, X_ITEMS, X_MAP, X_COUNT };
+enum { X_PLAY = 0, X_TITLE, X_ITEMS, X_MAP, X_EOW, X_COUNT };
 #define M(c) (1u << (c))
 static const uint32_t kShown[X_COUNT] = {
     M(C_STICK) | M(C_A) | M(C_B) | M(C_X) | M(C_Y) | M(C_L) | M(C_R) | M(C_PLUS) | M(C_MINUS) | M(C_MENU) | M(C_EDIT),
     M(C_STICK) | M(C_A) | M(C_B) | M(C_MENU),  // (Start only where the player put it: a tap anywhere does its work)
     M(C_STICK) | M(C_A) | M(C_B) | M(C_X) | M(C_Y) | M(C_L) | M(C_R) | M(C_PLUS) | M(C_MINUS) | M(C_MENU),
     M(C_STICK) | M(C_A) | M(C_B) | M(C_L) | M(C_R) | M(C_PLUS) | M(C_MINUS) | M(C_MENU),
+    M(C_STICK) | M(C_A) | M(C_B) | M(C_X) | M(C_Y) | M(C_L) | M(C_R) | M(C_ZL) | M(C_ZR) | M(C_PLUS) | M(C_MINUS) |
+        M(C_DPAD) | M(C_MENU) | M(C_EDIT),  // (EoW: every button the game has, all the time in play)
 };
+// EoW: the game is running (past the start screen) - it has no LA state to tell its screens apart
+static bool eow(void) { return game_other() != NULL; }
+static bool in_game(void) { return eow() ? !g_start_screen : game_in_play(); }
 // (the editor: play's controls; the editor's own button while the setting shows it. ZL / ZR do nothing in the game:
 // never shown, their slots kept for the settings file)
-#define EDITABLE (kShown[X_PLAY] & (g_settings.touch_edit_button ? ~0u : ~M(C_EDIT)))
+#define EDITABLE (kShown[eow() ? X_EOW : X_PLAY] & (g_settings.touch_edit_button ? ~0u : ~M(C_EDIT)))
 
 typedef struct {
     float x, y, r;       // centre and radius (round) / half height (pills: width 2.2 * r)
@@ -132,6 +141,19 @@ static void defaults(float w, float h) {
     g_ctl[C_EDIT] = {w * 0.5f + 0.11f * s, 0.06f * s, mr, 0, "", false};  // (the menu's size, a gap of 0.03 between them)
     g_ctl[C_START] = {w * 0.5f, h - 0.07f * s, 0.05f * s, BIT(BTN_L) | BIT(BTN_R) | BIT(BTN_A), "Start", true};
     g_ctl[C_STICK] = {0.25f * s, h - 0.27f * s, 0.14f * s, 0, "", false};
+    g_ctl[C_DPAD] = {0.25f * s, h - 0.27f * s, 0.11f * s, 0, "", false};  // (LA: never shown)
+    if (eow()) {
+        // EoW uses all four shoulders and the D-pad: ZL / ZR above L / R, out at the screen's sides where an index
+        // finger or a thumb stretched up finds them; the D-pad above the stick, its own control (the stick moves
+        // Zelda, the D-pad picks from the echo list), and Minus beside Plus at the top of the face buttons
+        g_ctl[C_ZR] = {w - 0.08f * s, fy - 0.40f * s, sr, BIT(BTN_ZR), "ZR", false};
+        g_ctl[C_ZL] = {0.08f * s, h - 0.70f * s, sr, BIT(BTN_ZL), "ZL", false};
+        g_ctl[C_L] = {0.30f * s, h - 0.74f * s, sr, BIT(BTN_L), "L", false};
+        g_ctl[C_PLUS] = {w - 0.22f * s, fy - 0.42f * s, mr, BIT(BTN_PLUS), "+", false};
+        g_ctl[C_DPAD] = {0.25f * s, h - 0.52f * s, 0.11f * s, 0, "", false};
+        g_ctl[C_STICK] = {0.25f * s, h - 0.22f * s, 0.14f * s, 0, "", false};
+        g_ctl[C_MINUS] = {g_ctl[C_PLUS].x - 0.13f * s, g_ctl[C_PLUS].y, mr, BIT(BTN_MINUS), "-", false};
+    }
 }
 
 // the player's own places and sizes over the defaults (the editor's draft while editing)
@@ -180,7 +202,8 @@ static int hit(float x, float y) {
         if (shown(i) && inside(g_ctl[i], x, y, 1.3f)) return i;
     if (shown(C_STICK) && g_settings.touch_stick_fixed)  // (fixed: its own circle, a little beyond its rim)
         return inside(g_ctl[C_STICK], x, y, 1.6f) ? C_STICK : -1;
-    if (shown(C_STICK) && x < g_w * 0.42f && y > g_h * 0.30f) return C_STICK;
+    if (shown(C_STICK) && x < g_w * 0.42f && y > (shown(C_DPAD) ? g_ctl[C_DPAD].y + g_ctl[C_DPAD].r * 1.3f : g_h * 0.30f))
+        return C_STICK;
     return -1;
 }
 
@@ -230,12 +253,23 @@ static void stick_down(float x, float y) {
     if (!g_settings.touch_stick_fixed)
         // (a whole radius plus a thumb's width clear of the edges: a base at the rim left no room to push the knob out
         // that way)
-        g_stick_cx = clampf(x, r * 1.45f, g_w * 0.42f), g_stick_cy = clampf(y, g_h * 0.30f + r * 0.5f, g_h - r * 1.45f);
+        g_stick_cx = clampf(x, r * 1.45f, g_w * 0.42f),
+        g_stick_cy = clampf(y, (shown(C_DPAD) ? g_ctl[C_DPAD].y + g_ctl[C_DPAD].r : g_h * 0.30f) + r * 0.5f, g_h - r * 1.45f);
     stick_to(x, y);
 }
 static void stick_up(void) {
     g_lx = 0, g_ly = 0;
     g_knob_x = g_stick_cx = g_ctl[C_STICK].x, g_knob_y = g_stick_cy = g_ctl[C_STICK].y;
+}
+
+// the D-pad under a finger: the arm it's on (four ways, as the Switch's buttons; the middle presses none)
+static void dpad_to(float x, float y) {
+    const Control &c = g_ctl[C_DPAD];
+    float dx = x - c.x, dy = y - c.y;
+    uint64_t b = 0;
+    if (dx * dx + dy * dy > c.r * c.r * 0.04f)
+        b = fabsf(dx) > fabsf(dy) ? (dx > 0 ? BIT(BTN_RIGHT) : BIT(BTN_LEFT)) : (dy > 0 ? BIT(BTN_DOWN) : BIT(BTN_UP));
+    g_ctl[C_DPAD].bits = b;
 }
 
 static void release_all(void) {
@@ -401,7 +435,7 @@ extern "C" bool touch_preview_event(const SDL_Event *e) {
 }
 
 // ---- the editor
-extern "C" bool touch_edit_available(void) { return g_w > 0 && game_in_play(); }
+extern "C" bool touch_edit_available(void) { return g_w > 0 && in_game(); }
 static void edit_begin(void) {  // (g_lock held)
     for (int i = 0; i < C_COUNT; i++) {
         g_epos[i][0] = g_settings.touch_moved[i] ? g_settings.touch_pos[i][0] : -1;
@@ -517,6 +551,7 @@ static bool handle(const SDL_Event *e, bool *toggle_menu) {
         if (c > C_STICK) g_held_until[c] = now_s() + 0.08;
         if (g_ctx.load() == X_TITLE && c == C_B) g_file_picked = false;  // (B backs out of "load this file?")
         if (c == C_STICK) stick_down(x, y);
+        else if (c == C_DPAD) dpad_to(x, y);
         else if (c == C_MENU) {
             g_menu_down = true;
         } else if (c == C_EDIT) {
@@ -529,6 +564,7 @@ static bool handle(const SDL_Event *e, bool *toggle_menu) {
     int c = g_fingers[slot].ctl;
     if (e->type == SDL_EVENT_FINGER_MOTION) {
         if (c == C_STICK) stick_to(x, y);
+        else if (c == C_DPAD) { dpad_to(x, y); g_held_until[C_DPAD] = 0; }  // (a slide: the new arm only)
         else if (c >= C_A && c <= C_Y) {  // sliding across the face buttons presses the one under the thumb
             int n = hit(x, y);
             if (n >= C_A && n <= C_Y && n != c) g_fingers[slot].ctl = n, g_held_until[n] = now_s() + 0.08;
@@ -545,7 +581,7 @@ static bool handle(const SDL_Event *e, bool *toggle_menu) {
     }
     if (c == C_EDIT && g_edit_down) {  // (let go on it: the layout editor, over the game)
         g_edit_down = false;
-        if (e->type == SDL_EVENT_FINGER_UP && game_in_play()) { edit_begin(); return true; }
+        if (e->type == SDL_EVENT_FINGER_UP && in_game()) { edit_begin(); return true; }
     }
     recompute();
     return true;
@@ -556,6 +592,7 @@ extern "C" void touch_stick(int32_t *lx, int32_t *ly) { *lx = g_editing ? 0 : g_
 
 // ---- what the game shows, what Link has
 static int context(void) {
+    if (eow()) return X_EOW;
     if (!game_in_play()) return X_TITLE;
     if (inventory_items_cursor() >= 0) return X_ITEMS;
     // (the Map and System pages, and the turn between pages: the menu's buttons - L / R turn pages, their letters)
@@ -576,6 +613,7 @@ static uint32_t g_items_word, g_upgrades;  // (the live save's: the items owned;
 static int g_slot_x, g_slot_y;  // (0 / 1, the sword's and shield's slots, never sit on X / Y: an empty one reads 0)
 static uint32_t wanted(int ctx) {
     uint32_t m = kShown[ctx] & (g_settings.touch_edit_button ? ~0u : ~M(C_EDIT));
+    if (eow()) return m;  // (LA's save: not this game's)
     if (ctx == X_PLAY || ctx == X_ITEMS) {  // (the items page too: X / Y show what's just been equipped)
         g_items_word = LD32(GA(LIVE_SAVE) + 0x5568), g_upgrades = LD8(GA(LIVE_SAVE) + 0x555C);
         g_slot_y = LD8(GA(LIVE_SAVE) + 0x5562), g_slot_x = LD8(GA(LIVE_SAVE) + 0x5563);
@@ -774,13 +812,13 @@ extern "C" void touch_draw(ImDrawList *dl, float w, float h, ImFont *font, ImFon
         if (!g_editing) release_all();
         layout(w, h);
     }
-    int ctx = g_editing ? X_PLAY : context();
+    int ctx = g_editing ? (eow() ? X_EOW : X_PLAY) : context();
     if (ctx != g_ctx.load()) {
         g_ctx = ctx;
         release_all();
     }
     g_want = g_editing ? EDITABLE : wanted(ctx);
-    if (g_editing) wanted(X_PLAY);  // (the icons)
+    if (g_editing && !eow()) wanted(X_PLAY);  // (the icons)
     nav_tick();
     float a = clampf(g_settings.touch_opacity, 0.15f, 1.0f);
     uint64_t b = g_buttons | g_nav;
@@ -809,6 +847,13 @@ extern "C" void touch_draw(ImDrawList *dl, float w, float h, ImFont *font, ImFon
         bool sel = g_editing && i == g_sel;
         ImVec2 p(c.x, c.y);
         float r = on ? c.r * 0.95f : c.r;
+        if (i == C_DPAD) {
+            uint64_t db = g_editing ? 0 : b & (BIT(BTN_LEFT) | BIT(BTN_UP) | BIT(BTN_RIGHT) | BIT(BTN_DOWN));
+            int32_t dx = db & BIT(BTN_RIGHT) ? 32767 : db & BIT(BTN_LEFT) ? -32767 : 0;
+            int32_t dy = db & BIT(BTN_UP) ? 32767 : db & BIT(BTN_DOWN) ? -32767 : 0;
+            if (!dpad_disc(dl, p, c.r, dx, dy, fa, th, sel)) dpad(dl, p, c.r, dx, dy, fa, th, sel);
+            continue;
+        }
         if (c.pill) {  // (Start: a teal pill)
             ImVec2 p0(c.x - c.r * 2.2f, c.y - c.r * 1.2f), p1(c.x + c.r * 2.2f, c.y + c.r * 1.2f);
             dl->AddRectFilled(p0, p1, col(40 + (on ? 60 : 0), 178, 160, (on ? 0.85f : 0.6f) * fa), c.r * 1.2f);
@@ -833,7 +878,7 @@ extern "C" void touch_draw(ImDrawList *dl, float w, float h, ImFont *font, ImFon
                 dl->AddLine(ImVec2(c.x - u, c.y + k * u * 0.6f), ImVec2(c.x + u, c.y + k * u * 0.6f), ink, 3 * th);
             continue;
         }
-        const char *in = g_editing && i != C_X && i != C_Y ? icon_of(X_PLAY, i) : icon_of(ctx, i);
+        const char *in = eow() ? NULL : g_editing && i != C_X && i != C_Y ? icon_of(X_PLAY, i) : icon_of(ctx, i);
         ImTextureID tex = in ? ui_game_icon(in) : (ImTextureID)0;
         if (tex) {
             icon(dl, tex, p, r, fa);

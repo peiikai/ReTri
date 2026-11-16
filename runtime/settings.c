@@ -41,7 +41,7 @@ static const char *const k_text_speed_keys[N_TEXT_SPEEDS] = {"normal", "fast", "
 
 // the on-screen controls' ini names (touch_ctl_<name>; runtime/ui/mobile/touch_controls.mm's order)
 const char *touch_control_name(int i) {
-    static const char *const names[TOUCH_NCTL] = {"stick", "a", "b", "x", "y", "l", "r", "zl", "zr", "plus", "minus", "menu", "start", "edit"};
+    static const char *const names[TOUCH_NCTL] = {"stick", "a", "b", "x", "y", "l", "r", "zl", "zr", "plus", "minus", "menu", "start", "edit", "dpad"};
     return i >= 0 && i < TOUCH_NCTL ? names[i] : "";
 }
 
