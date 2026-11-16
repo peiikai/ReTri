@@ -12,14 +12,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
 
 ### Changed
-- The window and error dialogs are titled "TriCompiled", the project's new name.
+- The window and error dialogs are titled "ReTri", the project's new name (a play on recomp and Tri).
 - The app is named EoW Recomp: binaries `eowrecomp` and `eowgame.dylib`, logs `eowrecomp.log`, and the name in
   menus, window titles and docs. Env vars stay `LARECOMP_*`.
 - A new app icon of EoW Recomp's own: a staff with a glowing orb on a hill at dusk, a small rift on a far hill,
   in plum and bronze (macOS, Windows, iOS and Android).
 - Indirect draws run on the GPU by default (no CPU waits, shadows kept).
 - LA's 30 fps hold is off for EoW.
-- The start screen has EoW's own look: the title "TriCompiled", the game's title movie playing behind it (a still
+- The start screen has EoW's own look: the title "ReTri", the game's title movie playing behind it (a still
   of it on Vulkan; a plum and bronze background before the game files are set up), and text in the settings menu's
   colours.
 
