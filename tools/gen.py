@@ -590,6 +590,9 @@ def main():
             # (OPTNONE) a 25 500-line function behind a data table at main+0x3d85e90, never entered in 4 200 frames of
             # start, file load and play (LARECOMP_FNPROF); at -O1 it took 30+ minutes to compile
             OPTNONE[0x7001390b70] = 0xa9ba7bfd  # stp x29, x30, [sp, #-0x60]!
+            # a 27 300-line function called once while the game starts (LARECOMP_FNPROF: once in boot to the overworld);
+            # at -O2 it took 8 minutes on a Mac and 30+ on a Snapdragon 865 (Android builds it on the phone)
+            OPTNONE[0x70020e7fa0] = 0xa9ba7bfd  # stp x29, x30, [sp, #-0x60]!
             for _a, _w in OPTNONE.items():
                 _got = struct.unpack_from('<I', m.nso.image, _a - m.base)[0]
                 assert _got == _w, f'OPTNONE {_a:#x}: {_got:#x}, not {_w:#x}'
