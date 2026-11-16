@@ -1246,15 +1246,20 @@ NvnTexture *texpatch_hint_icon(void) {
 }
 
 // The game's own UI textures, by name (e.g. "MapMark_05^w"), decoded to RGBA8 (w x h, the texture's own colour
-// encoding) from the user's UI archives: out[i] NULL if it isn't there or its format isn't one of ours. Each archive is
-// read once for the whole list. The caller frees them; returns how many were found.
-// (Runtime-made icons for our overlays: runtime/ui/triforce_icons.mm, race_overlay.mm - nothing of the game ships.)
+// encoding) from the user's UI archives: out[i] NULL if it isn't there or its format isn't one of ours (BC3, ASTC, and
+// BC5 masks as grey + alpha: red, green). Each archive is read once for the whole list. The caller frees them; returns
+// how many were found. Link's Awakening's archives first, then Echoes of Wisdom's (GameMain.arc: the HUD and menus).
+// (Runtime-made icons for our overlays: runtime/ui/triforce_icons.mm, race_overlay.mm, the touch controls - nothing of
+// the game ships.)
 int texpatch_ui_rgba_list(const char *const *want, int nwant, uint8_t **out, int *w_out, int *h_out) {
     static const char *const arcs[] = {"region_common/ui/Game.arc", "regionUS/common/ui/GameRegionCommon.arc",
-                                       "regionEU/common/ui/GameRegionCommon.arc", "region_common/ui/StartUp.arc"};
+                                       "regionEU/common/ui/GameRegionCommon.arc", "region_common/ui/StartUp.arc",
+                                       "region_common/ui/GameMain.arc"};
+    static const uint8_t astc_blocks[][3] = {{0x2d, 4, 4}, {0x2e, 5, 4}, {0x2f, 5, 5}, {0x30, 6, 5}, {0x31, 6, 6},
+                                             {0x32, 8, 5}, {0x33, 8, 6}, {0x34, 8, 8}};  // (format: block w, h)
     int found = 0;
     for (int i = 0; i < nwant; i++) out[i] = NULL;
-    for (int a = 0; a < 4 && found < nwant; a++) {
+    for (int a = 0; a < (int)(sizeof arcs / sizeof *arcs) && found < nwant; a++) {
         size_t len;
         uint8_t *d = read_all(arcs[a], &len);
         if (!d) continue;
@@ -1284,14 +1289,20 @@ int texpatch_ui_rgba_list(const char *const *want, int nwant, uint8_t **out, int
                     if (wi < 0 || ptrs + 8 > blen) continue;
                     uint32_t fmt = rd32(t + 12), w = rd32(t + 20), h = rd32(t + 24), size = rd32(t + 64);
                     uint64_t data = rd64(b + ptrs);
-                    int kind = (fmt >> 8) == 0x1c ? K_BC3 : (fmt >> 8) == 0x2d ? K_ASTC4 : -1;
+                    uint32_t hi = fmt >> 8, xb = 4, yb = 4;
+                    int kind = hi == 0x1c ? K_BC3 : hi == 0x1e ? K_BC5 : -1;
+                    for (size_t q = 0; q < sizeof astc_blocks / sizeof *astc_blocks; q++)
+                        if (astc_blocks[q][0] == hi) kind = K_ASTC4, xb = astc_blocks[q][1], yb = astc_blocks[q][2];
                     if (kind < 0 || data + size > blen) continue;
                     Ref r = {0, (uint8_t)kind, (uint8_t)((fmt & 0xff) == 6), 0, (uint16_t)w, (uint16_t)h, 1, size, NULL, ""};
-                    uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4;
+                    uint32_t bw = (w + xb - 1) / xb, bh = (h + yb - 1) / yb;
                     uint8_t *lin = calloc((size_t)bw * bh, 16);
                     tegra_deswizzle(b + data, lin, bw, bh, 1, 16, rd32(t + 36) & 7, 0);
                     out[wi] = malloc((size_t)w * h * 4);
-                    decode_image(&r, lin, bw * 16, out[wi]);
+                    if (kind == K_ASTC4) astc_decode_ldr(lin, w, h, xb, yb, r.srgb, out[wi]);
+                    else decode_image(&r, lin, bw * 16, out[wi]);
+                    if (kind == K_BC5)  // (a mask: red the shade, green the coverage)
+                        for (size_t p = 0; p < (size_t)w * h; p++) out[wi][p * 4 + 1] = out[wi][p * 4 + 2] = out[wi][p * 4];
                     free(lin);
                     w_out[wi] = (int)w, h_out[wi] = (int)h;
                     found++;
