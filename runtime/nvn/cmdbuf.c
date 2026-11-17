@@ -4,7 +4,9 @@
 // A command handle is the guest address of a list's first record.
 #include "../game_addresses.h"
 #include <pthread.h>
-#include <sys/mman.h>
+#ifndef _WIN32
+#include <sys/mman.h>  // (check mode)
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,19 +41,26 @@ static HostChunk *hc_live, *hc_free;
 static uint64_t hc_count, hc_live_n, hc_overflows;
 static int hc_log = -1;  // LARECOMP_LOG_CMDMEM: overflows and reuse
 // (test) LARECOMP_CMDMEM_CHECK=1: released chunks are made unreadable instead of reused, so anything still reading one
-// (the render thread replaying a list) crashes on it. Leaks by design.
+// (the render thread replaying a list) crashes on it. Leaks by design. Not on Windows.
 static int hc_check = -1;
 #define HC_BYTES (sizeof(HostChunk) + HOST_CHUNK)
 
 static HostChunk *hc_get(NvnCmdBuf *cb) {
+#ifdef _WIN32
+    hc_check = 0;  // (no check mode on Windows)
+#else
     if (hc_check < 0) hc_check = getenv("LARECOMP_CMDMEM_CHECK") != NULL;
+#endif
     pthread_mutex_lock(&hc_lock);
     HostChunk *h = hc_free;
     if (h) hc_free = h->next;
+#ifndef _WIN32
     else if (hc_check) {
         h = mmap(NULL, HC_BYTES, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
         if (h == MAP_FAILED) h = NULL; else hc_count++;
-    } else if ((h = malloc(HC_BYTES))) hc_count++;
+    }
+#endif
+    else if ((h = malloc(HC_BYTES))) hc_count++;
     if (h) {
         h->owner = cb, h->lo = cb->origin_lo, h->hi = cb->origin_hi;
         h->dead = cb->host && cb->host->dead;  // (chained from a chunk that waits for the buffer to move on)
@@ -70,7 +79,9 @@ static void hc_release_locked(HostChunk **pp) {
     HostChunk *h = *pp;
     *pp = h->next;
     hc_live_n--;
+#ifndef _WIN32
     if (hc_check == 1) { mprotect(h, HC_BYTES, PROT_NONE); return; }
+#endif
     h->next = hc_free, hc_free = h;
 }
 // The game gives [lo, hi) to `cb`: host chunks extending memory in that range are done.
