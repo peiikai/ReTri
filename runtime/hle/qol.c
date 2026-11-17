@@ -8,7 +8,6 @@
 #include <string.h>
 
 #include "../hle.h"
-#include "../rando.h"
 #include "../settings.h"
 
 
@@ -66,115 +65,19 @@ float rt_walk_speed(uint64_t player, float m, int site) {
     return m * k;
 }
 
-// No Guardian Acorns / Pieces of Power (randomizer option no-buff-drops). Enemy kills count up two bytes of PlayerStatus
-// (+0xa4, +0xa5, saturating at 255; shared death code main+0x7c6950). The drop roll main+0x89b960 takes the dropper's
-// ItemDrop row; a row with mAllowBuffReplace (+0x38: NormalLow / NormalMid / RupeeMid...) first checks the
+// No Guardian Acorns / Pieces of Power (Gameplay tab, setting no_buff_drops). Enemy kills count up two bytes of
+// PlayerStatus (+0xa4, +0xa5, saturating at 255; shared death code main+0x7c6950). The drop roll main+0x89b960 takes the
+// dropper's ItemDrop row; a row with mAllowBuffReplace (+0x38: NormalLow / NormalMid / RupeeMid...) first checks the
 // kill counters in PlayerStatus (+0xa5 >= 14: "DefenceUp" = Guardian Acorn; +0xa4 past a threshold: "PowerUp" =
 // Piece of Power; the counter is then wrapped) and drops that item symbol directly - the ItemDrop rows GuardianAcorn /
-// PowerPiece (emptied by LAS-Randomizer item_drops.py) aren't involved, which is why the option alone didn't work.
-// tools/patches.py BUFF_REPLACE_SITE reads the flag as false here: the counters are never consumed (they stay at 255) and
-// the row's own lot table is rolled as usual. Anything else that would make one (ItemPowerPiece 0xb2 / ItemGuardianAcorn 0xb3) is
-// held back at the actor factory (souls.c).
-// a seed folder's settings.json says "no-buff-drops": true
-static int dir_no_buff(const char *dir) {
-    char p[512];
-    snprintf(p, sizeof p, "%s/settings.json", dir);
-    FILE *f = fopen(p, "rb");
-    if (!f) return 0;
-    static char buf[1 << 16];
-    size_t n = fread(buf, 1, sizeof buf - 1, f);
-    buf[n] = 0;
-    fclose(f);
-    return strstr(buf, "\"no-buff-drops\": true") != NULL;
-}
-
-static int g_no_buff = -1;  // the running seed has it (per seed: read again after an in-place reboot)
-static bool seed_no_buff(void) {
-    if (g_no_buff < 0) {
-        const char *dir = rando_seed_dir();
-        g_no_buff = dir ? dir_no_buff(dir) : 0;
-        LOG("[qol] no Guardian Acorns / Pieces of Power by the seed: %s\n", g_no_buff ? "ON" : "off");
-    }
-    return g_no_buff;
-}
-// on: the Gameplay tab's lever, or the seed was made with it
+// PowerPiece aren't involved. tools/patches.py BUFF_REPLACE_SITE reads the flag as false here: the counters are never
+// consumed (they stay at 255) and the row's own lot table is rolled as usual. Anything else that would make one
+// (ItemPowerPiece 0xb2 / ItemGuardianAcorn 0xb3) is held back at the actor factory (rt_actor_create_fn).
 static bool no_buff(void) {
     const char *e = getenv("LARECOMP_NO_BUFF");  // test: 1 / 0 forces it
     if (e) return atoi(e) != 0;
-    return g_settings.no_buff_drops || seed_no_buff();
+    return g_settings.no_buff_drops;
 }
-// The seed forces it (the Gameplay toggle is greyed out). On the start screen: the seed PLAY would start, from its
-// folder (rando_seed_dir() would apply its patches before the game is loaded) - as rt_hookshot_seed_forced.
-extern int g_start_screen;  // warp.c
-int rt_no_buff_seed_forced(void) {
-    if (!g_start_screen) return seed_no_buff();
-    static char last[128] = "\x01";
-    static int on;
-    if (strcmp(last, g_settings.rando_seed)) {
-        snprintf(last, sizeof last, "%s", g_settings.rando_seed);
-        char dir[256];
-        snprintf(dir, sizeof dir, "rando/%s", g_settings.rando_seed);
-        on = g_settings.rando_seed[0] && dir_no_buff(dir);
-    }
-    return on;
-}
-RT_ON_RESET(no_buff_reset) { g_no_buff = -1; }  // (seed switch)
-
-// Treat Tunics as Upgrades (seed option "tunic-upgrades"): the game's add-item code sets the new tunic's bit in the
-// tunics byte (save +0x555C: 0x40 red, 0x80 blue) and clears the other one (tools/patches.py TUNIC_CLEAR_SITES); with
-// the option the other one stays. The game applies each tunic's effect from its own bit (attack: main+0xd1f580, red
-// or a Piece of Power; damage halved after main+0xd4c738 etc: blue or a Guardian Acorn), so with both Link has both.
-static int g_tunic_up = -1;  // (per seed)
-int rt_tunic_upgrades(void) {
-    if (g_tunic_up < 0) {
-        g_tunic_up = 0;
-        const char *dir = rando_seed_dir();
-        char p[512];
-        FILE *f = dir ? (snprintf(p, sizeof p, "%s/settings.json", dir), fopen(p, "rb")) : NULL;
-        if (f) {
-            static char buf[1 << 16];
-            size_t n = fread(buf, 1, sizeof buf - 1, f);
-            buf[n] = 0;
-            fclose(f);
-            g_tunic_up = strstr(buf, "\"tunic-upgrades\": true") != NULL;
-        }
-        LOG("[qol] tunics as upgrades: %s\n", g_tunic_up ? "ON" : "off");
-    }
-    return g_tunic_up;
-}
-RT_ON_RESET(tunic_up_reset) { g_tunic_up = -1; }
-
-// Underwater checks (tools/rando/underwater.py, settings.json "underwater-items"): the sunken heart-piece actors hold
-// randomized items and hide by their own flag, so their "do you own this heart piece already?" check is skipped
-// (tools/patches.py UNDERWATER_OWNED_SITE, x20 = the item actor) and their pickup adds no heart piece
-// (UNDERWATER_PICKUP_SITE, x19 = its event actor, which keeps the name at +0x398: "ItemHeartPiece-<id>"). The item
-// actor is told by its class (vtable): its name is often not filled in yet when it asks whether to appear, and with
-// the check not skipped a sunken spot whose heart-piece index the player owns was deleted on load (found 2026-10-24:
-// the Eagle's Tower exit cave's item, index 7, gone in most loads - nothing to see or dive for).
-static int g_underwater = -1;  // (per seed)
-int rt_underwater_items(void) {
-    if (g_underwater < 0) {
-        g_underwater = 0;
-        const char *dir = rando_seed_dir();
-        char p[512];
-        FILE *f = dir ? (snprintf(p, sizeof p, "%s/settings.json", dir), fopen(p, "rb")) : NULL;
-        if (f) {
-            static char buf[1 << 16];
-            size_t n = fread(buf, 1, sizeof buf - 1, f);
-            buf[n] = 0;
-            fclose(f);
-            g_underwater = strstr(buf, "\"underwater-items\": true") != NULL;
-        }
-        LOG("[qol] underwater items: %s\n", g_underwater ? "ON" : "off");
-    }
-    return g_underwater;
-}
-
-int rt_underwater_skip_owned(uint64_t actor) {
-    return rt_underwater_items() && actor && (LD64(actor) == GA(ITEM_HEART_PIECE_VTABLE) ||
-                                              !memcmp((const void *)(uintptr_t)(actor + 0x398), "ItemHeartPiece-", 15));
-}
-RT_ON_RESET(underwater_reset) { g_underwater = -1; }
 
 int rt_buff_replace(int allow) {
     // LARECOMP_BUFF_PRIME=1 (test): every roll finds the Guardian Acorn counter full; =2: and every row allows buffs
@@ -190,10 +93,12 @@ int rt_buff_replace(int allow) {
     return allow && !no_buff();
 }
 
-bool rt_no_buff_actor(uint32_t type) {
-    if ((type != 0xb2 && type != 0xb3) || !no_buff()) return false;
+// The actor factory's create function for an actor type (tools/patches.py BOSS_SPAWN_SITE); 0: the factory's own path
+// for a type without a class (the caller gets an empty handle)
+uint64_t rt_actor_create_fn(uint64_t fn, uint32_t type) {
+    if ((type != 0xb2 && type != 0xb3) || !no_buff()) return fn;
     LOG("[qol] %s held back (no-buff-drops)\n", type == 0xb2 ? "Piece of Power" : "Guardian Acorn");
-    return true;
+    return 0;
 }
 
 // Blur removal: the post-process's tilt-shift object (post-process manager +0x620, set up once at boot by

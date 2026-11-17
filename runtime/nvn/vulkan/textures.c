@@ -751,7 +751,7 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
                 uint8_t *blocks = malloc((uint64_t)brow * l.hb);
                 if (linear) for (uint32_t y = 0; y < l.hb; y++) memcpy(blocks + (uint64_t)y * brow, src + (uint64_t)y * t->stride, brow);
                 else tegra_deswizzle(src, blocks, l.wb, l.hb, 1, bpb, l.block_height_log2, l.block_depth_log2);
-                if (b->tp > 0 && layer == 0) texpatch_apply(b->tp - 1, lv, blocks, l.w, l.h, brow);
+                if (b->tp > 0) texpatch_apply(b->tp - 1, layer, lv, blocks, l.w, l.h, brow);
                 VkSpan s = vk_transient((uint64_t)l.w * l.h * (b->cpu_bc ? bc_texel_bytes(b->cpu_bc) : 4), 16);
                 if (b->cpu_bc) bc_decode(b->cpu_bc, blocks, l.w, l.h, s.ptr);
                 else astc_decode_ldr(blocks, l.w, l.h, b->astc_bw, b->astc_bh, b->astc_srgb, s.ptr);
@@ -775,7 +775,7 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
             } else {
                 tegra_deswizzle(src, lin, l.wb, l.hb, l.d, fi->bpb, l.block_height_log2, l.block_depth_log2);
             }
-            if (b->tp > 0 && layer == 0) texpatch_apply(b->tp - 1, lv, lin, l.w, l.h, row);
+            if (b->tp > 0) texpatch_apply(b->tp - 1, layer, lv, lin, l.w, l.h, row);
             if (expand) {  // RGB8 -> RGBA8
                 uint8_t *o = s.ptr;
                 uint64_t n = (uint64_t)l.wb * l.hb * l.d;

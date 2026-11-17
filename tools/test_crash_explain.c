@@ -32,12 +32,12 @@ static const char *const drivers[] = {
     "/System/Library/Extensions/AGXMetalG13X.bundle/Contents/MacOS/AGXMetalG13X",
 };
 static const char *const not_drivers[] = {
-    "C:\\Users\\Rigdon\\Desktop\\EoW Recomp\\extracted\\eowgame.dll",
-    "D:\\Games\\BigDrive\\EoW Recomp\\extracted\\eowgame.dll",
+    "C:\\Users\\Rigdon\\Desktop\\ReTri\\extracted\\eowgame.dll",
+    "D:\\Games\\BigDrive\\ReTri\\extracted\\eowgame.dll",
     "/home/rigdon/libvulkan_builds/eowgame.so",
     "/mnt/vulkan.games/eowgame.so",
-    "C:\\Users\\Sam\\Desktop\\EoW Recomp\\extracted\\eowgame.dll",
-    "/home/rigdon/EoW Recomp/eowrecomp",
+    "C:\\Users\\Sam\\Desktop\\ReTri\\extracted\\eowgame.dll",
+    "/home/rigdon/ReTri/eowrecomp",
     "/usr/lib/libvulkan.so.1",           // the Vulkan loader, not a driver
     "/system/lib64/libvulkan.so",
     "C:\\Windows\\System32\\vulkan-1.dll",
@@ -67,7 +67,7 @@ int main(void) {
     for (size_t i = 0; i < sizeof drivers / sizeof *drivers; i++) check(drivers[i], true);
     for (size_t i = 0; i < sizeof not_drivers / sizeof *not_drivers; i++) check(not_drivers[i], false);
     char dialog[1600];
-    driver_crash("C:\\Users\\Rigdon\\EoW Recomp\\extracted\\eowgame.dll", dialog, sizeof dialog);
+    driver_crash("C:\\Users\\Rigdon\\ReTri\\extracted\\eowgame.dll", dialog, sizeof dialog);
     if (strncmp(dialog, "The game crashed", 16)) fails++, printf("FAIL game code under Rigdon: \"%.40s\"\n", dialog);
     printf("%s\n", fails ? "crash explain: FAILED" : "crash explain: all passed");
     return fails != 0;

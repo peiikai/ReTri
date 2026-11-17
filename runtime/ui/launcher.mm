@@ -1,6 +1,6 @@
 // Start screen, shown before the game boots (user 2026-10-08, styled after Dusklight's launcher): PLAY (the vanilla
 // game), RANDOMIZER (‹ New Seed / a seed ›: user 2026-11-09), SETTINGS, QUIT, game-files status at the lower left.
-// Nothing of the game ships with EoW Recomp: on first launch the user picks the folder with their own game files (1.0.0, 1.0.1 or 1.1.0), we check
+// Nothing of the game ships with ReTri: on first launch the user picks the folder with their own game files (1.0.0, 1.0.1 or 1.1.0), we check
 // the main module's build id (runtime/game_addresses/versions.h), copy the files and build the game's data image; PLAY stays disabled until that worked. The background is the game's own title movie (from the user's files) once extracted: a frame of it, or for EoW on Metal the movie playing.
 //
 // Skipped with --play, LARECOMP_NO_LAUNCHER=1, or any scripted test run (LARECOMP_INPUT): tests boot straight in
@@ -62,6 +62,7 @@ extern "C" {
 #include "platform/android_storage.h"
 #endif
 #include "settings.h"
+#include "rando.h"
 #include "input_bind.h"
 #include "menu_sfx.h"
 #include "nvn/shader_prep.h"
@@ -151,8 +152,8 @@ extern "C" const char *larecomp_version(void) { return LARECOMP_VERSION; }  // (
 // v0.<n>.<m> the same as beta_<n>.<m>; other tags (the alpha_* ones) are ignored. (Beta 5 and earlier only know
 // beta_<n>: they never offer a hotfix; builds before Beta 5.3 don't know v0.<n>.<m> either.) Offline / no curl /
 // anything unexpected: nothing is shown.
-#define RELEASES_URL "https://api.github.com/repos/peiikai/TriCompiled/releases?per_page=100"
-#define RELEASE_PAGE "https://github.com/peiikai/TriCompiled/releases/tag/"
+#define RELEASES_URL "https://api.github.com/repos/peiikai/ReTri/releases?per_page=100"
+#define RELEASE_PAGE "https://github.com/peiikai/ReTri/releases/tag/"
 
 #include "update_tags.h"  // tag_rank, tag_label
 
@@ -176,7 +177,7 @@ static void *update_thread(void *) {
                                                               cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
                                                           timeoutInterval:15];
             [rq setValue:@"application/vnd.github+json" forHTTPHeaderField:@"Accept"];
-            [rq setValue:@"EoWRecomp/" LARECOMP_VERSION forHTTPHeaderField:@"User-Agent"];
+            [rq setValue:@"ReTri/" LARECOMP_VERSION forHTTPHeaderField:@"User-Agent"];
             dispatch_semaphore_t done = dispatch_semaphore_create(0);
             __block NSData *got = nil;
             [[[NSURLSession sharedSession] dataTaskWithRequest:rq completionHandler:^(NSData *d, NSURLResponse *r, NSError *err) {
@@ -198,10 +199,10 @@ static void *update_thread(void *) {
         mkdir((std::string(rt_data_root()) + "/cache").c_str(), 0755);
 #ifdef __ANDROID__
         (void)curl;  // (Android has no curl: the activity fetches it, runtime/platform/android_storage.c)
-        if (!android_fetch(RELEASES_URL, out.c_str(), "EoWRecomp/" LARECOMP_VERSION)) { remove(out.c_str()); return NULL; }
+        if (!android_fetch(RELEASES_URL, out.c_str(), "ReTri/" LARECOMP_VERSION)) { remove(out.c_str()); return NULL; }
 #else
         const char *av[] = {curl.c_str(), "-fsSL", "--max-time", "15", "-H", "Accept: application/vnd.github+json",
-                            "-A", "EoWRecomp/" LARECOMP_VERSION, RELEASES_URL, NULL};
+                            "-A", "ReTri/" LARECOMP_VERSION, RELEASES_URL, NULL};
         PlatProc p = plat_spawn(av, out.c_str(), false);
         if (!p || plat_proc_wait(p, true) != 0) { remove(out.c_str()); return NULL; }
 #endif
@@ -337,8 +338,8 @@ static std::string refused_main(const std::string &exefs) {
     return k == GAME_MAIN_NSO ? std::string(hex, 16) : std::string();
 }
 // (with the build ID's first 16 hex digits; without one, the line alone)
-static const char *const VERSION_HINT = LN("EoW Recomp needs version 1.0.0, 1.0.1 or 1.1.0 of the game.");
-static const char *const VERSION_ID_HINT = LN("EoW Recomp needs version 1.0.0, 1.0.1 or 1.1.0 of the game. These game "
+static const char *const VERSION_HINT = LN("ReTri needs version 1.0.0, 1.0.1 or 1.1.0 of the game.");
+static const char *const VERSION_ID_HINT = LN("ReTri needs version 1.0.0, 1.0.1 or 1.1.0 of the game. These game "
                                               "files have build ID %s.");
 // (English, as the setup lines: shown() puts it in the menus' language)
 static std::string version_hint(const std::string &exefs) {
@@ -483,7 +484,7 @@ static void set_failure(int k, int have = -1, const char *reason = NULL) {
     static const char *const hint[] = {
         "",
         PICK_FOLDER_HINT,
-        LN("EoW Recomp needs the extracted exefs and romfs folders, not .xci, .nsp or .nca files."),
+        LN("ReTri needs the extracted exefs and romfs folders, not .xci, .nsp or .nca files."),
         LN("Make sure there's about 12 GB free and try again."),
         VERSION_HINT,
         LN("Some of the game's files are missing, usually from a copy or unzip that stopped partway. Copy them again "
@@ -657,7 +658,7 @@ static void *extract_thread(void *) {
         goto done;
     }
     {
-        // (the picked folder can't be EoW Recomp's own copy: setting up again deletes that first)
+        // (the picked folder can't be ReTri's own copy: setting up again deletes that first)
         char a[4096], b[4096];
         mkdir(g_root.c_str(), 0755);
         if (realpath(exefs.c_str(), a) && realpath(g_root.c_str(), b) && !strncmp(a, b, strlen(b)) &&
@@ -716,7 +717,7 @@ static std::string picker_hint(const char *what) {
     fprintf(stderr, "[launcher] %s window: %s\n", what, err.c_str());
 #if defined(__linux__) && !defined(__ANDROID__)
     char b[256];  // (what: "folder" / "file")
-    snprintf(b, sizeof b, LN("EoW Recomp needs xdg-desktop-portal or zenity to open the %s window. Install one and try "
+    snprintf(b, sizeof b, LN("ReTri needs xdg-desktop-portal or zenity to open the %s window. Install one and try "
                              "again."), what);
     return b;
 #else
@@ -1144,7 +1145,7 @@ extern "C" void launcher_play_seed(const char *seed) {
 }
 static float g_menu_gap = 0.35f;  // space under each item, in line heights
 
-// The first PLAY ever (settings.menu_tip_seen): a note on opening the EoW Recomp menu in game (it isn't obvious),
+// The first PLAY ever (settings.menu_tip_seen): a note on opening the ReTri menu in game (it isn't obvious),
 // OK starts the game. Returns true once OK is pressed.
 static bool g_tip_test;  // (LARECOMP_LAUNCHER_SHOT=<frame>:tip)
 // Something the player should know before playing (iPhone: the data folder offloaded to iCloud), in the menus' look
@@ -1224,7 +1225,7 @@ static bool menu_tip(float s) {
         static const char *const home[] = {LN("Home button"), LN("Xbox button"), LN("PlayStation button")};  // (bind_label_family)
         static const char *const pad[] = {LN("Minus + Plus"), LN("View + Menu"), LN("Create + Options")};
         ImGui::PushTextWrapPos(0);
-        ImGui::TextUnformatted(L("EoW Recomp has its own menu for settings, the randomizer, cosmetics and more."));
+        ImGui::TextUnformatted(L("ReTri has its own menu for settings, cosmetics and more."));
         ImGui::Spacing();
         int fam = bind_label_family() % 3;
         ImGui::Text(L("Open it in game with F1 or Esc, or press the %s or %s together on a controller."), L(home[fam]),
@@ -1976,7 +1977,7 @@ static void df_restart(void) {
     g_df = DF_RESTART;  // (no exec on iOS: the app ends on OK, the player opens it again)
 #else
     rt_paths_restart();
-    snprintf(g_df_err, sizeof g_df_err, "%s", LN("Couldn't restart EoW Recomp. Start it again to use the new folder."));
+    snprintf(g_df_err, sizeof g_df_err, "%s", LN("Couldn't restart ReTri. Start it again to use the new folder."));
     g_df = DF_FAILED;
 #endif
 }
@@ -2047,7 +2048,7 @@ static void data_folder_popup(float s) {
             ImGui::Spacing();
             close = ImGui::Button(L("OK"), bw) || esc;
         } else if (t.has_data) {
-            ImGui::TextUnformatted(L("This folder already has EoW Recomp data. Use it?"));
+            ImGui::TextUnformatted(L("This folder already has ReTri data. Use it?"));
             ImGui::Spacing();
             if (ImGui::Button(L("Use it"), bw) || g_df_auto_fresh) g_df_auto_fresh = false, use_it();
             ImGui::SameLine();
@@ -2096,7 +2097,7 @@ static void data_folder_popup(float s) {
         else if (r == -1) g_df = DF_FAILED;
         if (r != 0) g_df_cancelling = false;
     } else if (g_df == DF_RESTART) {
-        ImGui::TextUnformatted(L("EoW Recomp needs to restart to use the new folder. It closes now; open it again."));
+        ImGui::TextUnformatted(L("ReTri needs to restart to use the new folder. It closes now; open it again."));
         ImGui::Spacing();
         if (ImGui::Button(L("OK"), bw)) { fflush(stderr); exit(0); }
     } else {
@@ -2116,7 +2117,7 @@ static void data_folder_popup(float s) {
 // picked goes through the same question as on the desktop (move the data there, or start fresh).
 static void storage_rows(bool busy) {
     const char *fixed = rt_data_root_fixed() ? L(rt_data_root_fixed()) : NULL;
-    std::string d = std::string(L("Where EoW Recomp keeps game files, saves, seeds and settings.")) + "\n\n" +
+    std::string d = std::string(L("Where ReTri keeps game files, saves, seeds and settings.")) + "\n\n" +
                     data_root_shown() + (fixed ? std::string("\n\n") + fixed : "");
     opt_section("Storage");
 #ifdef __ANDROID__
@@ -2183,7 +2184,7 @@ static void driver_rows(void) {
     if (opt_action("Vulkan driver", used.empty() ? LN("Phone's own") : used.c_str(), d.c_str(), true))
         android_call("pickDriver");
     if (!want.empty() && opt_action("Use the phone's own driver", "", "Goes back to the phone's own Vulkan driver. "
-                                    "EoW Recomp restarts to use it.", true))
+                                    "ReTri restarts to use it.", true))
         android_call("useSystemDriver");
 }
 #endif
@@ -2210,12 +2211,12 @@ static void prelaunch_tab(float sc) {
 #else
     const char *show = LN("Show in Finder");
 #endif
-    if (opt_action(show, "", "Opens the folder with EoW Recomp's copy of the game files.")) reveal_folder(g_root);
+    if (opt_action(show, "", "Opens the folder with ReTri's copy of the game files.")) reveal_folder(g_root);
 #endif
     static bool shot_del = getenv("LARECOMP_LAUNCHER_SHOT") && strstr(getenv("LARECOMP_LAUNCHER_SHOT"), ":askdelete");
     if (shot_del) confirm_delete = true, shot_del = false;  // (test: :askdelete)
     if (!confirm_delete) {
-        if (opt_action("Delete game files", gbs, "Frees up the space EoW Recomp's copy of the game files uses. Your saves, "
+        if (opt_action("Delete game files", gbs, "Frees up the space ReTri's copy of the game files uses. Your saves, "
                        "seeds and settings stay.", true))
             confirm_delete = true;
     } else {
@@ -2232,7 +2233,7 @@ static void prelaunch_tab(float sc) {
             stop_background_prep();
             bool ok = rt_remove_game_files(g_root.c_str());  // (runtime/paths.c: only what the extraction made)
             game_files_changed();
-            set_job(ok ? LN("Game files deleted.") : LN("Couldn't delete the game files. They aren't in EoW Recomp's data folder."),
+            set_job(ok ? LN("Game files deleted.") : LN("Couldn't delete the game files. They aren't in ReTri's data folder."),
                     !ok);
             g_files_deleted = true, gb = -1, confirm_delete = false;
         }
@@ -2285,7 +2286,7 @@ static void load_fonts(void) {
     const char *fonts[] = {getenv("LARECOMP_LAUNCHER_FONT") ? getenv("LARECOMP_LAUNCHER_FONT") : "",  // (test)
                            own.c_str(), "fonts/nintendo_udsgr_std_003.ttf", "/System/Library/Fonts/Avenir Next.ttc",
                            "/System/Library/Fonts/Helvetica.ttc", "C:/Windows/Fonts/segoeui.ttf"};
-    // the menus' language's glyphs (i18n.h), and its script's font merged in; the title only says "EoW Recompiled"
+    // the menus' language's glyphs (i18n.h), and its script's font merged in; the title only says "ReTri" or "EoW Recompiled"
     static const ImWchar title_ranges[] = {0x20, 0x7E, 0};
     for (const char *p : fonts) {
         if (g_font_menu || !*p || !file_exists(p)) continue;
@@ -2298,6 +2299,10 @@ static void load_fonts(void) {
         g_font_title = io.Fonts->AddFontFromFileTTF(p, 92 * (b2 ? 2.3f : 1), NULL, title_ranges);
     }
     if (!g_font_menu) g_font_small = g_font_menu = g_font_title = io.Fonts->AddFontDefault();
+    // the title in Hylia Serif (Omni Jacala, free, not for profit: third_party/fonts/HyliaSerif)
+    char hylia[1024];
+    if (rt_resource("HyliaSerifBeta-Regular.otf", "third_party/fonts/HyliaSerif/HyliaSerifBeta-Regular.otf", hylia, sizeof hylia))
+        if (ImFont *f = io.Fonts->AddFontFromFileTTF(hylia, 150, NULL, title_ranges)) g_font_title = f;
 }
 
 extern "C" void launcher_run(const char *root) {
@@ -2384,7 +2389,7 @@ extern "C" void launcher_run(const char *root) {
     choose(g_settings.rando_last);
     // what the game starts with ("" vanilla): PLAY's, or the row's seed; until one is pressed, the seed of the last
     // start (the test hooks that press PLAY themselves keep booting what they did)
-    std::string start_seed = g_settings.rando_seed;
+    std::string start_seed = RANDO_ON ? g_settings.rando_seed : "";
     Page page = status.empty() ? MAIN : SETUP;
     bool play = false;
     // LARECOMP_LAUNCHER_SHOT=<frame>[:<page>] (test): save build/launcher.png at that frame and exit; page:
@@ -2407,7 +2412,7 @@ extern "C" void launcher_run(const char *root) {
         if (pg && !strcmp(pg + 1, "tip")) g_settings.menu_tip_seen = false, g_tip_test = true;
         if (pg && !strcmp(pg + 1, "recompiling")) page = SETUP, g_build_frac = 0.42f, set_job(LN("Recompiling the game"));
         if (pg && !strcmp(pg + 1, "notice"))  // (the iPhone's iCloud notice, anywhere)
-            g_notice = std::string(L("Some of EoW Recomp's files aren't on this iPhone. They download as the game reads "
+            g_notice = std::string(L("Some of ReTri's files aren't on this iPhone. They download as the game reads "
                                      "them, so it may be very slow or close.")) + "\n\n" + L(KEEP_DOWNLOADED);
         if (pg && !strcmp(pg + 1, "aspect")) g_settings.aspect_asked = g_settings.menu_tip_seen = false, g_tip_test = true;
     }
@@ -2484,7 +2489,7 @@ extern "C" void launcher_run(const char *root) {
 #if PLAT_IOS
         if (g_onedrive && plat_ios_cloud_offloaded(rt_data_root())) {
             char msg[700];
-            snprintf(msg, sizeof msg, "%s\n\n%s", L("Some of EoW Recomp's files aren't on this iPhone. They download as the "
+            snprintf(msg, sizeof msg, "%s\n\n%s", L("Some of ReTri's files aren't on this iPhone. They download as the "
                                                   "game reads them, so it may be very slow or close."), L(KEEP_DOWNLOADED));
             g_notice = msg;  // (notice_popup: in the menus' look)
         }
@@ -2738,7 +2743,7 @@ extern "C" void launcher_run(const char *root) {
             ImGui::SetCursorPos(ImVec2(x0, 120 * s));
             ImGui::PushFont(g_font_title);
             if (page == MAIN) {  // gold to orange, shadowed (not behind the Settings / System windows)
-                const char *t = ui_eow_look() ? "TriCompiled" : "EoW Recompiled";
+                const char *t = ui_eow_look() ? "ReTri" : "EoW Recompiled";
                 ImVec2 p = ImGui::GetCursorScreenPos();
                 text_fx(ImGui::GetWindowDrawList(), ImGui::GetFont(), ImGui::GetFontSize(), p,
                         eow_or(IM_COL32(255, 232, 120, 255), IM_COL32(240, 216, 144, 255)),
@@ -2784,84 +2789,88 @@ extern "C" void launcher_run(const char *root) {
                     ImGui::SetWindowFontScale(1.0f);
                 }
 
-                // RANDOMIZER ‹ New Seed / Seed: <name> ›: New Seed opens the Randomizer panel, a seed starts the game with
-                // it. Left / right step through them and stop at either end (keyboard, controller, the mouse on the
-                // arrows, a tap or swipe on phones).
-                bool hov = false;
-                char pick[160];
-                if (choice) snprintf(pick, sizeof pick, L("Seed: %s"), seeds[choice - 1].c_str());
-                else snprintf(pick, sizeof pick, "%s", L("New Seed"));
-                const int n = (int)seeds.size() + 1;
-                ImGui::SetCursorPosX(x0);
-                if (g_refocus == RANDO) ImGui::SetKeyboardFocusHere(), g_refocus = MAIN;
-                int arrow = 0;
-                bool rando_pressed;
-                const int choice0 = choice;  // (a step plays the tab sound, as a ◀ value ▶ row's: below)
+                // RANDOMIZER: hidden until the EoW randomizer (RANDO_ON, runtime/rando.h); the row and its Randomizer
+                // page stay for it
+                if (RANDO_ON) {
+                    // RANDOMIZER ‹ New Seed / Seed: <name> ›: New Seed opens the Randomizer panel, a seed starts the game with
+                    // it. Left / right step through them and stop at either end (keyboard, controller, the mouse on the
+                    // arrows, a tap or swipe on phones).
+                    bool hov = false;
+                    char pick[160];
+                    if (choice) snprintf(pick, sizeof pick, L("Seed: %s"), seeds[choice - 1].c_str());
+                    else snprintf(pick, sizeof pick, "%s", L("New Seed"));
+                    const int n = (int)seeds.size() + 1;
+                    ImGui::SetCursorPosX(x0);
+                    if (g_refocus == RANDO) ImGui::SetKeyboardFocusHere(), g_refocus = MAIN;
+                    int arrow = 0;
+                    bool rando_pressed;
+                    const int choice0 = choice;  // (a step plays the tab sound, as a ◀ value ▶ row's: below)
 #if PLAT_TOUCH
-                rando_pressed = phone_pick_row(L("RANDOMIZER"), pick, choice, n, status.empty(),
-                                               status.empty() && !waiting && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId),
-                                               ds.x, &hov);
-                if (g_pick_step) {  // (an arrow tapped or the choice swiped)
-                    choice = std::max(0, std::min(choice + g_pick_step, n - 1));
-                    g_pick_step = 0;
-                }
+                    rando_pressed = phone_pick_row(L("RANDOMIZER"), pick, choice, n, status.empty(),
+                                                   status.empty() && !waiting && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId),
+                                                   ds.x, &hov);
+                    if (g_pick_step) {  // (an arrow tapped or the choice swiped)
+                        choice = std::max(0, std::min(choice + g_pick_step, n - 1));
+                        g_pick_step = 0;
+                    }
 #else
-                char label[192];
-                snprintf(label, sizeof label, "%s    \xe2\x80\xb9 %s \xe2\x80\xba", L("RANDOMIZER"), pick);
-                // a long seed name may run past the other items (to 80% of the window); beyond that the line shrinks
-                ImGui::PushFont(g_font_menu);
-                float fit = (ds.x * 0.8f - x0) / ImGui::CalcTextSize(label).x;
-                ImGui::PopFont();
-                if (fit < 1) ImGui::SetWindowFontScale(fit < 0.55f ? 0.55f : fit);
-                // the ‹ › arrows are clickable with the mouse: they step the choice instead of pressing the row
-                {
+                    char label[192];
+                    snprintf(label, sizeof label, "%s    \xe2\x80\xb9 %s \xe2\x80\xba", L("RANDOMIZER"), pick);
+                    // a long seed name may run past the other items (to 80% of the window); beyond that the line shrinks
                     ImGui::PushFont(g_font_menu);
-                    ImVec2 at = ImGui::GetCursorScreenPos();
-                    const char *lt = strstr(label, "\xe2\x80\xb9"), *rt = strstr(label, "\xe2\x80\xba");
-                    float h = ImGui::CalcTextSize(label).y, pad = h * 0.35f;
-                    float lx = at.x + ImGui::CalcTextSize(label, lt).x, rx = at.x + ImGui::CalcTextSize(label, rt).x;
-                    float aw = ImGui::CalcTextSize("\xe2\x80\xb9").x;
-                    ImVec2 m = ImGui::GetIO().MousePos;
-                    bool in_y = m.y >= at.y - pad && m.y <= at.y + h + pad;
-                    if (in_y && m.x >= lx - pad && m.x <= lx + aw + pad) arrow = -1;
-                    if (in_y && m.x >= rx - pad && m.x <= rx + aw + pad) arrow = 1;
+                    float fit = (ds.x * 0.8f - x0) / ImGui::CalcTextSize(label).x;
                     ImGui::PopFont();
-                }
-                const char *name = strstr(label, "\xe2\x80\xb9") + 4, *name_end = strstr(label, " \xe2\x80\xba");
-                rando_pressed = menu_item(label, status.empty(), &hov, name,
-                                          choice ? eow_or(IM_COL32(250, 250, 255, 255), IM_COL32(240, 232, 220, 255))
-                                                 : eow_or(IM_COL32(246, 232, 176, 255), IM_COL32(216, 178, 124, 255)),
-                                          name_end);  // (the choice keeps its colour when hovered: a seed white, "New
-                                                      //  Seed" vanilla cream; the arrows stay white)
-                ImGui::SetWindowFontScale(1.0f);
-                // (the press on an arrow: no decide sound, the step plays its own)
-                if (arrow && hov && ImGui::IsMouseClicked(0)) menu_sfx_click_silent();
-                if (rando_pressed && arrow && ImGui::IsMouseReleased(0)) {  // (a mouse click on an arrow: a step, to the ends)
-                    choice = std::max(0, std::min(choice + arrow, n - 1));
-                    rando_pressed = false;
-                }
+                    if (fit < 1) ImGui::SetWindowFontScale(fit < 0.55f ? 0.55f : fit);
+                    // the ‹ › arrows are clickable with the mouse: they step the choice instead of pressing the row
+                    {
+                        ImGui::PushFont(g_font_menu);
+                        ImVec2 at = ImGui::GetCursorScreenPos();
+                        const char *lt = strstr(label, "\xe2\x80\xb9"), *rt = strstr(label, "\xe2\x80\xba");
+                        float h = ImGui::CalcTextSize(label).y, pad = h * 0.35f;
+                        float lx = at.x + ImGui::CalcTextSize(label, lt).x, rx = at.x + ImGui::CalcTextSize(label, rt).x;
+                        float aw = ImGui::CalcTextSize("\xe2\x80\xb9").x;
+                        ImVec2 m = ImGui::GetIO().MousePos;
+                        bool in_y = m.y >= at.y - pad && m.y <= at.y + h + pad;
+                        if (in_y && m.x >= lx - pad && m.x <= lx + aw + pad) arrow = -1;
+                        if (in_y && m.x >= rx - pad && m.x <= rx + aw + pad) arrow = 1;
+                        ImGui::PopFont();
+                    }
+                    const char *name = strstr(label, "\xe2\x80\xb9") + 4, *name_end = strstr(label, " \xe2\x80\xba");
+                    rando_pressed = menu_item(label, status.empty(), &hov, name,
+                                              choice ? eow_or(IM_COL32(250, 250, 255, 255), IM_COL32(240, 232, 220, 255))
+                                                     : eow_or(IM_COL32(246, 232, 176, 255), IM_COL32(216, 178, 124, 255)),
+                                              name_end);  // (the choice keeps its colour when hovered: a seed white, "New
+                                                          //  Seed" vanilla cream; the arrows stay white)
+                    ImGui::SetWindowFontScale(1.0f);
+                    // (the press on an arrow: no decide sound, the step plays its own)
+                    if (arrow && hov && ImGui::IsMouseClicked(0)) menu_sfx_click_silent();
+                    if (rando_pressed && arrow && ImGui::IsMouseReleased(0)) {  // (a mouse click on an arrow: a step, to the ends)
+                        choice = std::max(0, std::min(choice + arrow, n - 1));
+                        rando_pressed = false;
+                    }
 #endif
-                if (hov && status.empty()) {
-                    if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft))
-                        choice = std::max(choice - 1, 0);
-                    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight))
-                        choice = std::min(choice + 1, n - 1);
-                    // left / right are ours while the row is selected: ImGui's navigation would otherwise take them too,
-                    // find nothing beside it and scroll the window (the row loses its highlight, the stepping stops)
-                    ImGuiID own = ImGui::GetID("##rando_lr");
-                    for (ImGuiKey k : {ImGuiKey_LeftArrow, ImGuiKey_RightArrow, ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight})
-                        ImGui::SetKeyOwner(k, own);
+                    if (hov && status.empty()) {
+                        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft))
+                            choice = std::max(choice - 1, 0);
+                        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight))
+                            choice = std::min(choice + 1, n - 1);
+                        // left / right are ours while the row is selected: ImGui's navigation would otherwise take them too,
+                        // find nothing beside it and scroll the window (the row loses its highlight, the stepping stops)
+                        ImGuiID own = ImGui::GetID("##rando_lr");
+                        for (ImGuiKey k : {ImGuiKey_LeftArrow, ImGuiKey_RightArrow, ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight})
+                            ImGui::SetKeyOwner(k, own);
+                    }
+                    if (choice != choice0) menu_sfx_play(MENU_SFX_TAB);
+                    static int logged = -1;
+                    if (choice != logged)
+                        logged = choice, fprintf(stderr, "[launcher] randomizer row: %s\n", choice ? seeds[choice - 1].c_str() : "New Seed");
+                    if (rando_pressed && !choice) {  // New Seed: the Randomizer panel
+                        menu_tabs_focus(false);
+                        page = RANDO;
+                        rando_pressed = false;
+                    }
+                    if (rando_pressed) start_seed = seeds[choice - 1], pressed = true;
                 }
-                if (choice != choice0) menu_sfx_play(MENU_SFX_TAB);
-                static int logged = -1;
-                if (choice != logged)
-                    logged = choice, fprintf(stderr, "[launcher] randomizer row: %s\n", choice ? seeds[choice - 1].c_str() : "New Seed");
-                if (rando_pressed && !choice) {  // New Seed: the Randomizer panel
-                    menu_tabs_focus(false);
-                    page = RANDO;
-                    rando_pressed = false;
-                }
-                if (rando_pressed) start_seed = seeds[choice - 1], pressed = true;
 
                 // first start ever: the aspect ratio question, then how to reach our menu, then the game
                 if (g_play_pending && status.empty()) pressed = true, g_play_pending = false;
@@ -3039,12 +3048,12 @@ extern "C" void launcher_run(const char *root) {
                     dl->AddLine(ImVec2(x + u * 0.35f, cy + u * 0.35f), ImVec2(x + u, cy - u * 0.4f), g, fs * 0.11f);
                 };
                 // (the descriptions put together here in the menus' language: the row finds no English for them)
-                std::string src_d = L("Pick the folder with your extracted exefs and romfs from The Legend of Zelda: Echoes of "
-                                      "Wisdom for Switch. ReTri doesn't include the game.");
+                std::string src_d = L("Pick the folder with your extracted exefs and romfs from The Legend of Zelda: Echoes "
+                                      "of Wisdom for Switch. ReTri doesn't include the game.");
                 if (!src.empty()) src_d += std::string("\n\n") + L("Chosen:") + " " + folder_shown(src.c_str());
                 // the step that's running / its result, under the rows and in the Set up row's explanation
                 const std::string &job_line = job;
-                std::string ex_d = L("Copies the files EoW Recomp needs and recompiles the game from them. You only do this "
+                std::string ex_d = L("Copies the files ReTri needs and recompiles the game from them. You only do this "
                                      "once, and it takes a while.");
                 if (!job.empty()) ex_d += "\n\n" + shown(job) + (job_hint.empty() ? "" : ".\n" + shown(job_hint));
 
@@ -3085,14 +3094,14 @@ extern "C" void launcher_run(const char *root) {
                     }
                     files_gb = -1;  // (re-measured after a setup)
                 } else {
-                    // DELETE: frees EoW Recomp's copy (runtime/paths.c removes only what the setup made, only inside
+                    // DELETE: frees ReTri's copy (runtime/paths.c removes only what the setup made, only inside
                     // the data root). Saves, seeds, settings and the user's own files stay.
                     if (files_gb < 0) files_gb = rt_game_files_size(g_root.c_str()) / 1e9;
                     char gb[32];
                     snprintf(gb, sizeof gb, "%.1f GB", files_gb);
                     opt_section("Game files");
                     if (!g_confirm_delete) {
-                        if (opt_action("Delete game files", gb, "Frees up the space EoW Recomp's copy of the game files "
+                        if (opt_action("Delete game files", gb, "Frees up the space ReTri's copy of the game files "
                                        "uses. Your saves, seeds and settings stay.", true))
                             g_confirm_delete = true;
                         first_row();
@@ -3103,7 +3112,7 @@ extern "C" void launcher_run(const char *root) {
                             game_files_changed();
                             status = check_game_files(g_root);
                             if (ok) set_job(LN("Game files deleted."));
-                            else set_job(LN("Couldn't delete the game files. They aren't in EoW Recomp's data folder."), true);
+                            else set_job(LN("Couldn't delete the game files. They aren't in ReTri's data folder."), true);
                             if (!status.empty()) bg_movie_stop(), g_bg = 0;
                             g_confirm_delete = false, files_gb = -1;
                         }

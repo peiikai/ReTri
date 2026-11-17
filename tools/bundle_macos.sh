@@ -1,9 +1,8 @@
 #!/bin/bash
-# make app: build/EoW Recomp.app from <exe> (default build/mac15/eowrecomp). Contents/MacOS: the executable;
+# make app: build/ReTri.app from <exe> (default build/mac15/eowrecomp). Contents/MacOS: the executable;
 # Contents/Frameworks: every non-system dylib it loads (SDL3, FFmpeg; from build/deps, else Homebrew), load
-# paths rewritten to @rpath; Contents/Resources: the icon, the seed generator helper (build/helper/rando-gen, when
-# built: runtime/ui/rando_tab.mm generator_cmd) and what the start screen builds the game code with on the player's
-# machine (runtime/gamebuild.c): the generator helper (build/helper/lasgen), the compiler (build/zig, tools/fetch_zig.sh)
+# paths rewritten to @rpath; Contents/Resources: the icon and what the start screen builds the game code with on the
+# player's machine (runtime/gamebuild.c): the generator helper (build/helper/lasgen), the compiler (build/zig, tools/fetch_zig.sh)
 # and the headers the code is compiled against (gamelib-src/). Ad-hoc signed. No game files, game code or fonts: the
 # app keeps those in ~/Library/Application Support/<bundle id> (runtime/paths.h).
 # MACOS_MIN=<x.y>: LSMinimumSystemVersion, and every Mach-O inside must be built for it or older (else it fails and
@@ -11,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 EXE=${1:-build/mac15/eowrecomp}
-APP="build/EoW Recomp.app"
+APP="build/ReTri.app"
 DEPS=$PWD/build/deps
 BUNDLE_ID=$(sed -n 's/^#define RT_BUNDLE_ID "\(.*\)"/\1/p' runtime/paths.h)
 TAG=$(sed -n 's/^#define LARECOMP_VERSION "\(.*\)"/\1/p' runtime/ui/launcher.mm)
@@ -22,7 +21,6 @@ read -r VERSION BUILD_NUMBER <<EOF_V
 $(tools/bundle_version.sh "$TAG" "$TEST_OF")
 EOF_V
 [ -n "$BUILD_NUMBER" ] || { echo "no bundle version for $TAG"; exit 1; }
-HELPER=build/helper/rando-gen
 GEN_HELPER=build/helper/lasgen
 ZIG=build/zig
 [ -x "$EXE" ] || { echo "no $EXE"; exit 1; }
@@ -37,7 +35,6 @@ C="$APP/Contents"
 mkdir -p "$C/MacOS" "$C/Frameworks" "$C/Resources"
 cp "$EXE" "$C/MacOS/eowrecomp"
 strip -S "$C/MacOS/eowrecomp"  # (debug-map entries only: the symbols crash reports name functions by stay)
-if [ -x "$HELPER/rando-gen" ]; then cp -R "$HELPER" "$C/Resources/rando-gen"; else echo "note: no $HELPER (make rando-helper)"; fi
 cp -R "$GEN_HELPER" "$C/Resources/lasgen"
 cp -R "$ZIG" "$C/Resources/zig"
 mkdir "$C/Resources/gamelib-src"
@@ -47,6 +44,8 @@ cp docs/icon/icon.icns "$C/Resources/icon.icns"
 cp docs/icon/icon_1024.png "$C/Resources/icon.png"  # (window / Dock icon at run time)
 cp third_party/fonts/Baloo2/Baloo2-SemiBold.ttf "$C/Resources/Baloo2-SemiBold.ttf"  # (start screen; OFL, README "License")
 cp third_party/fonts/Baloo2/OFL.txt "$C/Resources/Baloo2-OFL.txt"
+cp third_party/fonts/HyliaSerif/HyliaSerifBeta-Regular.otf "$C/Resources/"  # (start screen title; README "Credits")
+cp third_party/fonts/HyliaSerif/README.md "$C/Resources/HyliaSerif-README.md"
 cp third_party/fonts/DejaVu/DejaVuSans.ttf third_party/fonts/DejaVu/DejaVuSans-Bold.ttf "$C/Resources/"  # (last-resort fonts)
 cp third_party/fonts/DejaVu/LICENSE "$C/Resources/DejaVu-LICENSE.txt"
 
@@ -116,8 +115,8 @@ cat > "$C/Info.plist" <<EOF
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleExecutable</key><string>eowrecomp</string>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-    <key>CFBundleName</key><string>EoW Recomp</string>
-    <key>CFBundleDisplayName</key><string>EoW Recomp</string>
+    <key>CFBundleName</key><string>ReTri</string>
+    <key>CFBundleDisplayName</key><string>ReTri</string>
     <key>CFBundleIconFile</key><string>icon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>

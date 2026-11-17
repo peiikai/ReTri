@@ -77,7 +77,7 @@ static bool child_of_hud(uint64_t p) {
     return mapped(up) && name_is(up, "N_HUD_00");
 }
 
-// breadth first from the HUD over pointers into guest data, as runtime/ui/tracker_overlay.mm finds its panes
+// breadth first from the HUD over pointers into guest data
 static void find_panes(uint64_t hud) {
     enum { MAX_SEEN = 1 << 15, TAB = 1 << 17 };
     static uint64_t q[MAX_SEEN], tab[TAB];
