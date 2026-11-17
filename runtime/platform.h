@@ -153,7 +153,7 @@ void plat_exec(char *const argv[]);  // replace the process (NULL = same command
 void plat_terminate(void);  // end the process now, skipping DLL teardown (exit status 0)
 #endif
 
-// Child processes (seed generator, game-file extraction). stdout + stderr go to log_path (NULL = /dev/null).
+// Child processes (game code generator, game-file extraction). stdout + stderr go to log_path (NULL = /dev/null).
 typedef intptr_t PlatProc;  // 0 = failed to start
 PlatProc plat_spawn(const char *const argv[], const char *log_path, bool append_log);
 int plat_proc_wait(PlatProc p, bool block);  // exit code, or -1 while still running (block = false)
@@ -208,7 +208,7 @@ static inline bool plat_touch_tablet(void) { return false; }
 // ---- iOS only (runtime/platform/ios.c, ios_bookmark.m; SDL's dialogs: platform/ios_sdl.h; within the iOS layer:
 // platform/ios_internal.h)
 #if PLAT_IOS
-const char *plat_ios_documents(void);     // the app's Documents folder (Files > On My iPhone > EoW Recomp): the default data root
+const char *plat_ios_documents(void);     // the app's Documents folder (Files > On My iPhone > ReTri): the default data root
 // The signature has / lacks (1 / 0) com.apple.developer.kernel.increased-memory-limit; -1 unreadable. Without it iOS
 // ends the app at a much lower footprint. LARECOMP_TEST_NO_MEMORY_ENTITLEMENT=1 (test): 0.
 int plat_ios_memory_entitled(void);

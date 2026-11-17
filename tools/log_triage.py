@@ -56,9 +56,9 @@ def code(s, n=160):
 FPS_RE = re.compile(r"^\[(vk|metal)\] t=([\d.]+) frame (\d+) ([\d.]+) fps max (\d+)ms level (\S+)")
 BUILD_RE = re.compile(r"LAS[ ._-]?Recomp[ ._-]((?:beta_\d+(?:[._-]\d+)?)|(?:v\d+\.\d+\.\d+)|(?:test-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*?))"
                       r"(?:-(windows|macos|linux|android)\b|[\\/\s]|$)", re.I)
-# runtime/main.c log_startup_info: "[info] EoW Recomp beta_5.4, Windows 11 (10.0.26300, x64), AMD Ryzen 5 7500F
+# runtime/main.c log_startup_info: "[info] ReTri beta_5.4, Windows 11 (10.0.26300, x64), AMD Ryzen 5 7500F
 # 6-Core Processor 6 cores / 12 threads, 31.7 GB RAM, zip" - the build; the OS, CPU and RAM; the package when known
-INFO_RE = re.compile(r"^\[info\] EoW Recomp ([^\s,]+), (.+?(?:GB RAM|RAM unknown))(?:, (.+))?$")
+INFO_RE = re.compile(r"^\[info\] (?:EoW Recomp|ReTri) ([^\s,]+), (.+?(?:GB RAM|RAM unknown))(?:, (.+))?$")
 MS_RE = re.compile(r"([\d.]+)\s*ms")
 # runtime/nvn/shader_seen.c shader_seen_note: "[shader] record G vs=... fs=... f=1 ..." (hashes and pipeline state only)
 RECORD_RE = re.compile(r"^\[shader\] record ([GC] [A-Za-z0-9=,:./+ -]{1,400})$")
@@ -259,10 +259,10 @@ def shader_records(entries):
 def render(entries, total):
     """entries: newest first, (source description, parse result or error string)"""
     out = [MARKER,
-           "This is an automatic summary of the EoW Recomp log files attached to this issue. It only reads the logs, "
+           "This is an automatic summary of the ReTri log files attached to this issue. It only reads the logs, "
            "so a person will still look at the details.",
            "",
-           "For a new report, please attach `eowrecomp.log` from EoW Recomp's data folder (it always holds the latest "
+           "For a new report, please attach `eowrecomp.log` from ReTri's data folder (it always holds the latest "
            "run; `eowrecomp-backup-*.log` there are the earlier runs)."]
     for k, (src, r) in enumerate(entries):
         out += ["", f"#### {'Newest log' if k == 0 else 'Earlier log'}: {src}"]

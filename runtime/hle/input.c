@@ -280,13 +280,13 @@ static bool test_event(const SDL_Event *e) {
 }
 
 // Scripted test runs ignore the user's own input (a key or stick touched while a test drives Link spoils it):
-// LARECOMP_NO_USER_INPUT=1, on by default whenever LARECOMP_INPUT / LARECOMP_DOORJUMP_TEST / LARECOMP_PLACE is set
+// LARECOMP_NO_USER_INPUT=1, on by default whenever LARECOMP_INPUT / LARECOMP_PLACE is set
 // (or LARECOMP_HOST_INPUT / LARECOMP_BIND_TEST; LARECOMP_NO_USER_INPUT=0 lets it through again).
 bool input_user_blocked(const SDL_Event *e) {
     static int on = -1;
     if (on < 0) {
         const char *v = getenv("LARECOMP_NO_USER_INPUT");
-        on = v ? atoi(v) != 0 : (getenv("LARECOMP_INPUT") || getenv("LARECOMP_DOORJUMP_TEST") || getenv("LARECOMP_PLACE") ||
+        on = v ? atoi(v) != 0 : (getenv("LARECOMP_INPUT") || getenv("LARECOMP_PLACE") ||
                                  getenv("LARECOMP_HOST_INPUT") || getenv("LARECOMP_BIND_TEST"));
         if (on) LOG("[input] scripted run: keyboard, mouse and controllers ignored\n");
     }
@@ -810,7 +810,7 @@ static void host_test_frame(uint64_t frame) {
 
 static uint64_t g_pad_obj;
 volatile int32_t g_tour_lx, g_tour_ly;  // (test) the warp tour's walk (warp_other.c LARECOMP_WARP_TOUR_WALK): added to the stick
-volatile int g_inject_plus;  // frames to hold Plus for the game (movie.c: A/B skip the opening on rando seeds)
+volatile int g_inject_plus;  // frames to hold Plus for the game (movie.c: A/B skip the opening)
 RT_ON_RESET(input_reboot_reset) { g_pad_obj = 0; g_inject_plus = 0; }  // (reboot: the controller object was guest memory)
 void input_frame(uint64_t frame) {
     atomic_store(&rumble_frame_ms, SDL_GetTicks());
@@ -857,11 +857,11 @@ void input_frame(uint64_t frame) {
         }
         for (int i = 0; i < 16; i++) if (!strcmp(name, names[i])) b |= 1ull << i;
     }
-    {  // test hooks steering the stick (runtime/hle/doorjump.c LARECOMP_DOORJUMP_TEST)
+    {  // test hooks steering the stick and buttons (runtime/hle/player.c LARECOMP_PLACE)
         extern int32_t g_test_lx, g_test_ly;
         extern uint64_t g_test_stick_until;
         if (frame < g_test_stick_until) { lx = g_test_lx; ly = g_test_ly; }
-        extern uint64_t g_test_buttons, g_test_buttons_until;  // (LARECOMP_PLACE action script)
+        extern uint64_t g_test_buttons, g_test_buttons_until;
         if (frame < g_test_buttons_until) b |= g_test_buttons;
     }
     script_buttons = b;
@@ -896,22 +896,10 @@ static void fill_state(Cpu *c) {
            extern void qol_tick(void); qol_tick(); }  // (another game: only the blur removal and test settings)
     if (!game_other()) { extern void give_item_tick(Cpu *c, uint64_t frame); extern uint64_t renderer_present_count(void);
       give_item_tick(c, renderer_present_count());
-      extern void chamber_game_tick(Cpu *c, uint64_t frame);
-      chamber_game_tick(c, renderer_present_count());
-      extern void digs_game_tick(Cpu *c, uint64_t frame);
-      digs_game_tick(c, renderer_present_count());
-      extern void pot_bush_game_tick(Cpu *c, uint64_t frame);
-      pot_bush_game_tick(c, renderer_present_count());
-      extern void shell_spots_tick(Cpu *c, uint64_t frame);
-      shell_spots_tick(c, renderer_present_count());
-      extern void apple_trees_tick(Cpu *c, uint64_t frame);
-      apple_trees_tick(c, renderer_present_count());
       extern void qol_tick(void);
       qol_tick();
       extern void run_timer_tick(void);
-      run_timer_tick();  // (run timer / LiveSplit: runtime/hle/run_timer.c)
-      extern void pets_game_tick(Cpu *c);
-      pets_game_tick(c); }
+      run_timer_tick(); }  // (run timer / LiveSplit: runtime/hle/run_timer.c)
     extern uint64_t g_watch_lo, g_watch_hi;
     if (id == 0 && !g_pad_obj) g_pad_obj = c->x[1] - 8;
     if (id == 0 && !g_watch_lo && getenv("LARECOMP_WATCH_PAD")) {
@@ -966,16 +954,6 @@ static void fill_state(Cpu *c) {
         int32_t m = dx && dy ? 23170 : 32767;  // diagonals: same speed (32767 / sqrt 2)
         if (dx || dy) lx = dx * m, ly = dy * m;
     }
-    {   // door jumps stop Link for a moment before moving him (runtime/hle/doorjump.c): stick + d-pad released
-        extern int32_t g_stick_lx, g_stick_ly;  // (what the player holds, before that: doorjump.c reads it)
-        g_stick_lx = lx, g_stick_ly = ly;
-        extern uint64_t g_stick_freeze_until;
-        extern uint64_t renderer_present_count(void);
-        if (renderer_present_count() < g_stick_freeze_until) {
-            lx = ly = 0;
-            b &= ~(0xfull << 12);
-        }
-    }
     // stick directions also appear as buttons (bits 16-23)
     if (lx < -16000) b |= 1ull << 16;
     if (ly > 16000) b |= 1ull << 17;
@@ -985,23 +963,12 @@ static void fill_state(Cpu *c) {
     if (ry > 16000) b |= 1ull << 21;
     if (rx > 16000) b |= 1ull << 22;
     if (ry < -16000) b |= 1ull << 23;
-    if (la) {   // the pause menu's companion slot (runtime/hle/pets.c) takes the d-pad / sticks / A while the cursor is on it
-        extern uint64_t pets_menu_input(uint64_t b, int32_t st[4]);
-        int32_t st[4] = {lx, ly, rx, ry};
-        b = pets_menu_input(b, st);
-        // the check tracker drives the Map page in randomizer seeds (runtime/ui/tracker_overlay.mm): its cursor takes
-        // the d-pad / left stick / A / Y (and B while one of its panels is open)
-        extern uint64_t tracker_map_input(uint64_t b, int32_t st[4]);
-        b = tracker_map_input(b, st);
-        lx = st[0], ly = st[1], rx = st[2], ry = st[3];
-    }
     *(uint64_t *)(s + 8) = b;
     static uint64_t last_b;
     if (b != last_b && getenv("LARECOMP_INPUT")) LOG("[input] id %#x buttons %#llx (sampling %lld, lr %llx)\n", id, (unsigned long long)b, (long long)sampling, c->x[30]);
     last_b = b;
     *(int32_t *)(s + 16) = lx;
     *(int32_t *)(s + 20) = ly;
-    { extern void input_note_rstick(int32_t ry); input_note_rstick(ry); }
     *(int32_t *)(s + 24) = rx;
     *(int32_t *)(s + 28) = ry;
     *(uint32_t *)(s + 32) = 1;  // IsConnected

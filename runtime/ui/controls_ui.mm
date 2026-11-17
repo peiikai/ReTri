@@ -367,7 +367,7 @@ extern "C" void controls_tab_draw(float scale) {
         opt_child_end();
     }
     if (la) opt_toggle("Controller light", &g_settings.controller_light, true, "The light bar shows Link's health.");
-    if (la) {
+    {  // (EoW too: runtime/nvn/texpatch.c)
         static const char *const fam[] = {LN("Nintendo"), LN("Xbox"), LN("PlayStation")};
         char autol[64];  // (in the menus' language already: the row leaves it as it is)
         snprintf(autol, sizeof autol, L("Auto (%s)"), L(fam[input_pad_family() % 3]));
@@ -383,7 +383,7 @@ extern "C" void controls_tab_draw(float scale) {
         if (opt_choice("Button layout", &i, names, 2, 0,
                        "Switch keeps the Switch's button positions, so the right button confirms. Xbox / PlayStation "
                        "swaps the bottom and right buttons, so the bottom button confirms, as on those controllers. "
-                       "Applies to the game and EoW Recomp's menus."))
+                       "Applies to the game and ReTri's menus."))
             g_settings.face_by_label = i != 0;
     }
 

@@ -6,16 +6,16 @@
 
 - iOS or iPadOS 16.4 or newer.
 - iPhone 15 Pro or newer, iPad Pro (2021) or newer, iPad Air (2022) or newer, or iPad mini (2024) or newer.
-- A Mac, Windows or Linux computer with EoW Recomp set up and your extracted game files.
+- A Mac, Windows or Linux computer with ReTri set up and your extracted game files.
 
 A device whose graphics chip lacks the game's texture formats stops at start with "This iPhone or iPad can't run
-EoW Recomp: its graphics chip has no support for the game's texture formats (BC)."
+ReTri: its graphics chip has no support for the game's texture formats (BC)."
 
 ### Making the app
 
-1. On your computer, download `EoW Recomp-<version>-iOS.laskit` from the same release as your EoW Recomp.
+1. On your computer, download `ReTri-<version>-iOS.laskit` from the same release as your ReTri.
 2. On the start screen, open Settings > System > Recomp for iOS..., choose the kit, then Export iOS app.
-3. The app is saved to your Downloads folder as `EoW Recomp-<version>-iOS.ipa`.
+3. The app is saved to your Downloads folder as `ReTri-<version>-iOS.ipa`.
 
 The .ipa holds the game code built from your own files. Don't share it.
 
@@ -26,7 +26,7 @@ can't help with the tools themselves, since they're made by others.
 
 #### Increased Memory Limit
 
-EoW Recomp asks iOS for more memory than a normal app gets. iOS only grants it when the tool that signs the app also
+ReTri asks iOS for more memory than a normal app gets. iOS only grants it when the tool that signs the app also
 turns on Increased Memory Limit for the app's App ID. Not every tool does. Without it, iOS may close the game when it
 needs more memory.
 
@@ -43,11 +43,11 @@ in `eowrecomp.log` also shows `increased-memory-limit yes` or `NO`.
 
 **If your sideloader didn't add Increased Memory Limit:** you can add it to the app's App ID once with GetMoreRam.
 SideStore with a free Apple account is one known case ([SideStore#1616](https://github.com/SideStore/SideStore/issues/1616)).
-1. Install EoW Recomp with your sideloader as usual, so its App ID exists.
+1. Install ReTri with your sideloader as usual, so its App ID exists.
 2. Sideload [GetMoreRam](https://github.com/hugeBlack/GetMoreRam) and sign in with the same Apple ID that your
    sideloader uses.
-3. In GetMoreRam, go to App IDs, tap Refresh, tap EoW Recomp's App ID, then Add Increased Memory Limit.
-4. Install EoW Recomp again with your sideloader. It updates in place, so your saves stay.
+3. In GetMoreRam, go to App IDs, tap Refresh, tap ReTri's App ID, then Add Increased Memory Limit.
+4. Install ReTri again with your sideloader. It updates in place, so your saves stay.
 
 The limit stays on the App ID, so it survives the weekly refresh. If the start-screen warning comes back, repeat
 steps 3 and 4. GetMoreRam takes one of a free account's three app slots, so delete it afterwards.
@@ -55,21 +55,21 @@ steps 3 and 4. GetMoreRam takes one of a free account's three app slots, so dele
 ### Your game files
 
 Copy your game files folder (with `exefs` and `romfs` in it) to the device:
-- Mac: connect it with a cable, select it in Finder's sidebar, open the Files tab and drag the folder onto EoW Recomp.
-- Windows: the same in the Apple Devices app (or iTunes), under Files > EoW Recomp.
+- Mac: connect it with a cable, select it in Finder's sidebar, open the Files tab and drag the folder onto ReTri.
+- Windows: the same in the Apple Devices app (or iTunes), under Files > ReTri.
 - USB-C drive: put the folder on the drive and plug it in.
-- iCloud Drive: upload the folder, then in the Files app move it to On My iPhone (or On My iPad). EoW Recomp won't
+- iCloud Drive: upload the folder, then in the Files app move it to On My iPhone (or On My iPad). ReTri won't
   use game files that are still on iCloud Drive.
 
 Open the app and choose that folder when it asks. Use the same game version as on your computer.
 
 ### Where things are
 
-Saves, seeds, settings and `eowrecomp.log` are in the app's folder in Files (On My iPhone / On My iPad > EoW Recomp).
+Saves, seeds, settings and `eowrecomp.log` are in the app's folder in Files (On My iPhone / On My iPad > ReTri).
 You can move them to another folder or a drive in Settings > System > Data folder. For a bug report, attach
 `eowrecomp.log` from that folder.
 
-Long-press the app icon for Play Vanilla, up to two of your seeds, and the Metal HUD.
+Long-press the app icon for Play Vanilla and the Metal HUD.
 
 ### Performance
 
@@ -80,33 +80,6 @@ works on 120 Hz displays.
 ## For developers
 
 What is still open or worth knowing. Fixed items are in git history.
-
-### Embedded Python (the seed generator)
-
-- **A script is a process only as far as [runtime/platform/ios_pyproc.py](../runtime/platform/ios_pyproc.py) makes
-  it one.** The generator's `os.chdir` and its re-run of itself through `subprocess` work unchanged, with these
-  shortcuts:
-  - The working directory is the thread's, through `pthread_chdir_np` / `pthread_fchdir_np` (in libSystem since
-    iOS 10, in no SDK header). A thread already running when another calls `chdir` stays where it was, and a `chdir`
-    from C code still moves the whole app.
-  - A child runs on the calling thread to its end before `Popen` returns: no pipe to a running child, no two at once,
-    and each waiting parent keeps its memory. Only this Python (`sys.executable`) with a script, `-m` or `-c` runs.
-  - The environment is swapped through `os.environ._data`, a private field of CPython's `os` module.
-
-  [tools/test_ios_pyproc.py](../tools/test_ios_pyproc.py) (CI) and the self-test's `process` step (CI's Simulator
-  run) fail when one of these stops holding.
-- **The generator's modules are reset by hand.** `ios_pyproc.py` drops every module under `rando-gen` (by real path)
-  and the PySide6 stubs from `sys.modules` before a run; the C extensions stay loaded. A sub-interpreter per run was
-  tried (b2013266) and taken back: oead and quicktex are pybind11 modules without `multiple_interpreters` support,
-  their types and pybind11's internals are process-wide, and CPython tightens the rules with every version. The reset
-  needs its two cases kept right (`/var` vs `/private/var` paths, the `RandomizerCore.Tools` namespace package); the
-  self-test's kill check covers them. `build_deps_ios.sh` pins pybind11 at what oead vendors and fails when the two
-  modules' `__pybind11_internals_vN` differ.
-- The native packages (keystone, oead, quicktex, PyYAML, Pillow) still have their own recipes in
-  `build_deps_ios.sh` with a hand-moved version.
-- [tools/test_ios_python.sh](../tools/test_ios_python.sh) `<devicectl id> <udid>` runs the self-test on a device and
-  compares a generated seed with the same seed generated on the computer. An incomplete romfs changes the output
-  without an error (`loc_text.Names` falls back to English when a language's `Place.msbt` is missing).
 
 ### Address space
 

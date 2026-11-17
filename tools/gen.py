@@ -383,14 +383,6 @@ class Module:
         all_labels = bool(tables)
         if all_labels:
             labels = set(range(entry, end, 4))
-        rando_here = [a for a in range(entry, end, 4) if a - self.base in RANDO_CODE]
-        if rando_here:
-            labels = set(labels)
-            for a in rando_here:
-                for w in RANDO_CODE[a - self.base]:
-                    v = self.lifter.lift(w, a)
-                    if v.kind in ('b', 'bcond') and isinstance(v.target, int) and entry <= v.target < end:
-                        labels.add(v.target)
         hooks_here = [a for a in range(entry, end, 4) if a in HOOKS]
         if hooks_here:  # (a hook's jump targets need their labels)
             labels = set(labels)
@@ -405,17 +397,6 @@ class Module:
             if a in labels:
                 flush()
                 out.append(f'L_{a:x}:;')
-            if a - self.base in RANDO_CODE:  # randomizer patch site: the active seed picks the instruction
-                flush()
-                out.append(f'    {{ extern uint32_t rando_word(uint64_t); uint32_t rw = rando_word({gaddr(a)});')
-                first = True
-                for w in RANDO_CODE[a - self.base]:
-                    v = self.lifter.lift(w, a)
-                    out.append(f'    {"if" if first else "else if"} (rw == {hx(w)}) {{ ' + ' '.join(self.render_single(v, a, jump, refs)) + ' }')
-                    first = False
-                out.append('    else { ' + ' '.join(self.render_single(ins, a, jump, refs)) + ' } }')
-                last = 'op'
-                continue
             if a in HOOKS:  # hook site (tools/patches.py HOOKS): the runtime decides, the instruction stays as it is
                 flush()
                 word, targets, _ = HOOKS[a]
@@ -512,17 +493,10 @@ def switch_on(expr):
 def rebase_patch(code):
     return PATCH_ADDR.sub(lambda m: gaddr(int(m.group(1), 16)), code) if lifter.DYN_BASE else code
 
-import json as _json
-import os as _os
-_rv = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'rando', 'patch_variants.json')
 # Functions built without optimisation: guest address -> its first instruction word (checked, as patches are).
 # Workaround: LLVM's loop passes (LICM, then loop-load elimination) run for over half an hour and 7 GB on these at
 # -O1, a cost no flag of theirs caps (-disable-licm-promotion below doesn't), and they don't run in normal play.
 OPTNONE = {}
-RANDO_CODE = {}
-if _os.path.exists(_rv):
-    for _a, _ws in _json.load(open(_rv))['code'].items():
-        RANDO_CODE[int(_a, 16)] = [int(_w, 16) for _w in _ws]
 
 
 def write_if_changed(path, text):
@@ -568,7 +542,7 @@ def main():
     ap.add_argument('--simd', choices=('asm', 'c'),
                     default='asm' if platform.machine().lower() in ('arm64', 'aarch64') else 'c')
     ap.add_argument('--game', default='la')  # another game on the same engine (runtime/game_addresses/games.h): no
-    # patches, hooks or randomizer code (all of them are LA addresses)
+    # LA patches or hooks (all of them are LA addresses)
     ap.add_argument('--dyn-base', action='store_true',
                     help='Android: guest addresses relative to the window the runtime picks (lifter.gaddr)')
     args = ap.parse_args()
@@ -579,8 +553,6 @@ def main():
     m = Module(args.name, args.nso, args.base, args.simd)
     import game_addresses
     if args.game != 'la':
-        global RANDO_CODE
-        RANDO_CODE = {}
         if args.game not in game_addresses.GAMES:
             sys.exit(f'{args.name}: unknown game {args.game}')
         if args.name == 'main' and game_addresses.game_for_build_id(m.nso.build_id) != args.game:

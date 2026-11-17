@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <!-- Paths are UTF-8 everywhere in EoW Recomp: this makes the C library's fopen / stat / opendir and the Windows
+  <!-- Paths are UTF-8 everywhere in ReTri: this makes the C library's fopen / stat / opendir and the Windows
        "A" functions take them as UTF-8 too (Windows 10 1903+), so folders named with any characters work -->
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>

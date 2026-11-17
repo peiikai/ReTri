@@ -1,4 +1,4 @@
-# EoW Recomp
+# ReTri
 
 > [!IMPORTANT]
 > **This project was made almost exclusively with AI.** Nearly all of the code, tooling, reverse engineering and
@@ -8,7 +8,7 @@
 > in the controversy in relation to this project. You may simply ignore this project and its code.
 > As with anything on the internet, you run the code at your own discretion.
 
-**EoW Recomp** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch) into a native
+**ReTri** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch) into a native
 macOS application (Apple Silicon, Metal). It is built on the LAS Recomp runtime, which still supports *Link's
 Awakening*; much of the text below is that runtime's and describes Link's Awakening.
 
@@ -67,20 +67,20 @@ These are the minimums during the beta and may change as development continues.
 ![Mabe Village in a 21:9 window: the unlocked aspect ratio shows more of the island](docs/ultrawide.jpg)
 
 > [!NOTE]
-> **No game files are included.** EoW Recomp needs your own legally obtained copy of the extracted game files of
+> **No game files are included.** ReTri needs your own legally obtained copy of the extracted game files of
 > *Link's Awakening* **v1.0.0, v1.0.1 or v1.1.0**. When setting up, choose a folder that contains the `exefs`
 > and `romfs` folders, or their contents. Instructions on how to obtain these files will **NOT** be provided.
 > On first launch the app sets up what it needs, including the actual recompilation locally. No game files, assets or fonts are included.
 > The screenshot shows the start screen after setup; no Nintendo artwork is included until provided by the user.
 
-![The start screen: choose vanilla or a randomizer seed, set up your game files, settings](docs/start_screen.jpg)
+![The start screen: play, set up your game files, settings](docs/start_screen.jpg)
 
 ## Project Discord
 https://discord.gg/DhrgdYqdcY
 
 ## Status
 
-This is a beta release. That means bugs are likely, crashes could occur, randomizer seeds could possibly be unsolvable (dungeon room shuffle modes are especially experimental at this point) and some graphics issues remain (especially in wide and ultrawide aspect ratios). This is a work in progress, hence the beta designation. To report a bug or a possible randomizer logic issue, open a [GitHub issue](https://github.com/peiikai/LASRecomp/issues) - see [CONTRIBUTING.md](CONTRIBUTING.md#reporting-bugs) for what to include.
+This is a beta release. That means bugs are likely, crashes could occur and some graphics issues remain (especially in wide and ultrawide aspect ratios). This is a work in progress, hence the beta designation. To report a bug, open a [GitHub issue](https://github.com/peiikai/LASRecomp/issues) - see [CONTRIBUTING.md](CONTRIBUTING.md#reporting-bugs) for what to include.
 
 ### Known issues
 
@@ -96,27 +96,27 @@ Known issues and their status are on the [GitHub issues page](https://github.com
 
 The iOS app is made on your computer from your own game files, then sideloaded.
 
-1. Set up EoW Recomp on a Mac, Windows or Linux computer as usual.
-2. From the same release, download `EoW Recomp-<version>-iOS.laskit`.
+1. Set up ReTri on a Mac, Windows or Linux computer as usual.
+2. From the same release, download `ReTri-<version>-iOS.laskit`.
 3. On the start screen, open Settings > System > Recomp for iOS..., choose the kit, then Export iOS app.
-   The app is saved to your Downloads folder as `EoW Recomp-<version>-iOS.ipa`.
+   The app is saved to your Downloads folder as `ReTri-<version>-iOS.ipa`.
 4. Install the .ipa with a sideloading tool such as SideStore, AltStore or Sideloadly. A free Apple account works,
-   but the app then has to be refreshed every 7 days. EoW Recomp only makes the .ipa. Installing it is up to you,
+   but the app then has to be refreshed every 7 days. ReTri only makes the .ipa. Installing it is up to you,
    and we can't help with these tools since they're made by others. The extra steps come from Apple's limits on
-   installing apps, not from EoW Recomp.
+   installing apps, not from ReTri.
 5. Copy your game files folder (with `exefs` and `romfs` in it) to the phone or iPad:
    - Mac: connect it with a cable, select it in Finder's sidebar, open the Files tab and drag the folder onto
-     EoW Recomp.
-   - Windows: the same in the Apple Devices app (or iTunes), under Files > EoW Recomp.
+     ReTri.
+   - Windows: the same in the Apple Devices app (or iTunes), under Files > ReTri.
    - USB-C drive: put the folder on the drive and plug it in (iPhone 15 or newer, USB-C iPads).
-   - iCloud Drive: upload the folder, then in the Files app move it to On My iPhone (or On My iPad). EoW Recomp
+   - iCloud Drive: upload the folder, then in the Files app move it to On My iPhone (or On My iPad). ReTri
      won't use game files that are still on iCloud Drive.
 6. Open the app and choose that folder when it asks for your game files. Use the same game version as the files
    on your computer.
 
 ### Increased Memory Limit
 
-EoW Recomp asks iOS for more memory than a normal app gets. iOS only grants it when the tool that signs the app also
+ReTri asks iOS for more memory than a normal app gets. iOS only grants it when the tool that signs the app also
 turns on Increased Memory Limit for the app's App ID. Not every tool does. Without it, iOS may close the game when it
 needs more memory, and the start screen says "Installed without the increased memory limit".
 
@@ -135,9 +135,6 @@ GetMoreRam. More on the iOS app is there too.
 
 - **This is not emulation.** It runs natively on Windows, macOS, Linux, Android, iPhone and iPad.
 - Works with game versions 1.0.0, 1.0.1 and 1.1.0.
-- **Built-in randomizer:** make seeds in the app, with presets, seed IDs to share, separate saves for each seed,
-  a tracker and a spoiler log. Shuffle items, entrances, dungeon rooms, enemies and more, and switch between
-  vanilla and any seed without restarting.
 - Wider screens show more of the island, up to ultrawide. You can switch back to the original 16:9.
 - Higher resolutions, a "match your display" option and dynamic resolution with an FPS target, with MetalFX (Mac)
   or FSR 1 (Windows, Linux and Android) upscaling and SMAA anti-aliasing.
@@ -169,13 +166,10 @@ Requirements: Apple Silicon, Xcode command line tools (clang), [Homebrew](https:
 Python 3.12.
 
 1. Build: `make -j10` -> `build/eowrecomp`. Set up your game files (above), then `make gen` and `make -j10` again.
-2. Randomizer: create the Python environment for LAS-Randomizer, from `third_party/LAS-Randomizer`:
-   `python3.12 -m venv venv && venv/bin/pip install -r requirements.txt`.
-3. Run: `./build/eowrecomp extracted` (start screen) or `./build/eowrecomp extracted --play` (straight into the game).
-4. Package: `make deps` (once: SDL3, FFmpeg, keystone and Python from pinned sources, built for macOS 15),
-   `make rando-helper` (the seed generator as a standalone helper, so players need no Python), `make gen-helper` and
+2. Run: `./build/eowrecomp extracted` (start screen) or `./build/eowrecomp extracted --play` (straight into the game).
+3. Package: `make deps` (once: SDL3, FFmpeg and Python from pinned sources, built for macOS 15), `make gen-helper` and
    `tools/fetch_zig.sh` (what the start screen builds the game code with), then `make app` ->
-   `build/EoW Recomp.app` (macOS 15+, Apple Silicon) and `make dmg` -> `build/dist/EoW Recomp-<version>-macOS.dmg`.
+   `build/ReTri.app` (macOS 15+, Apple Silicon) and `make dmg` -> `build/dist/ReTri-<version>-macOS.dmg`.
 
 ### Windows
 
@@ -184,13 +178,13 @@ Requirements: Windows 10+ x86-64, a CPU with AVX2 and a GPU with Vulkan 1.3. Mor
 that page.
 
 1. One-time setup, in PowerShell from the repo root: `powershell -ExecutionPolicy Bypass -File tools\setup_windows.ps1`.
-   It installs MSYS2 (UCRT64: clang, make, SDL3, FFmpeg, Vulkan, shaderc), Python 3.12 for the tools and the
-   randomizer (`third_party\LAS-Randomizer\venv`) and switches the clone to LF line endings.
+   It installs MSYS2 (UCRT64: clang, make, SDL3, FFmpeg, Vulkan, shaderc), Python 3.12 for the tools and switches
+   the clone to LF line endings.
 2. Build, from an MSYS2 UCRT64 shell (or Git Bash with `export PATH="/c/msys64/ucrt64/bin:/c/msys64/usr/bin:$PATH"`):
    `make -j` -> `build/eowrecomp.exe`. Set up your game files (above), then `make gen` and `make -j` again.
 3. Run: `./build/eowrecomp.exe extracted`, from a shell with `C:\msys64\ucrt64\bin` on PATH (for the DLLs).
-4. Package: `make deps-windows` (once: LGPL FFmpeg), `make rando-helper RANDO_PY="<path to python.org Python 3.12>"`
-   (MSYS2's Python has no oead wheel), then `make dist` -> `build/dist/EoW Recomp-<version>-windows.zip`.
+4. Package: `make deps-windows` (once: LGPL FFmpeg), `make gen-helper GEN_PY="<path to python.org Python 3.12>"`
+   and `tools/fetch_zig.sh`, then `make dist` -> `build/dist/ReTri-<version>-windows.zip`.
 
 ### Linux
 
@@ -201,15 +195,15 @@ Vulkan Memory Allocator from your distribution, Python 3.12. Packages, cross bui
 1. Build: `make -j` -> `build/eowrecomp`. Set up your game files (above), then `make gen` and `make -j` again.
 2. Run: `./build/eowrecomp extracted`.
 3. Package: `make appimage` (this machine's arch; `ARCH=aarch64` cross-compiles) or `make appimages` (both) ->
-   `build/dist/EoW Recomp-<version>-linux-<arch>.AppImage`, built in Ubuntu 22.04 containers (podman). `make smoketest`
+   `build/dist/ReTri-<version>-linux-<arch>.AppImage`, built in Ubuntu 22.04 containers (podman). `make smoketest`
    checks the x86-64 AppImage before a release.
 
-Where files live (game files, saves, seeds, settings and logs):
+Where files live (game files, saves, settings and logs):
 - macOS: `~/Library/Application Support/com.peiikai.eowrecomp/`
-- Windows: next to `eowrecomp.exe`, so keep the `EoW Recomp` folder somewhere writable (not Program Files).
+- Windows: next to `eowrecomp.exe`, so keep the `ReTri` folder somewhere writable (not Program Files).
 - Linux: `~/.local/share/eowrecomp/`
 - Android: `Android/data/com.retri.android/files` in the phone's storage.
-- iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > EoW Recomp).
+- iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > ReTri).
 - You can move it to another folder or drive in Settings > System > Data folder.
 - `LARECOMP_DATA_ROOT=<dir>` overrides all of these.
 - For a bug report, attach `eowrecomp.log` from that folder.
@@ -226,7 +220,7 @@ Python 3. Details in [docs/android.md](docs/android.md).
 ### Resuming game-code builds
 
 If the game-code build is cancelled or interrupted, **Resume game code** continues where it stopped. It also resumes
-by itself the next time EoW Recomp starts. **System > Clear build cache** removes the build's leftover files
+by itself the next time ReTri starts. **System > Clear build cache** removes the build's leftover files
 without touching the installed game, your game files or your saves.
 
 ## Credits
@@ -270,13 +264,6 @@ without touching the installed game, your game files or your saves.
 
 Thanks also to everyone who reports issues and tests builds. Your logs and screenshots find most of the bugs.
 
-**LAS-Randomizer** - the randomizer at the heart of this project's randomizer features, vendored (with local
-changes) in `third_party/LAS-Randomizer` under the MIT license. Huge thanks to its authors and community:
-- **Owen_Splat** - LAS-Randomizer (https://github.com/Owen-Splat/LAS-Randomizer)
-- **Glan** - created the original early builds of the randomizer (https://github.com/la-switch/LAS-Randomizer)
-- **ProfessorLaw** - additional programming
-- and everyone who has reported bugs, given feedback or contributed to LAS-Randomizer
-
 **Community mods** - some options re-implement ideas from these GameBanana mods (re-implemented in the recomp;
 none of their files are used):
 - **360 Controls (And More!)** by Owen_Splat - 360-degree movement, blur removal (blur removal patch by theboy181)
@@ -293,6 +280,7 @@ none of their files are used):
 - [SDL 3](https://libsdl.org) - windowing, input, audio (zlib license)
 - [FFmpeg](https://ffmpeg.org) - movie playback (LGPL)
 - [Dear ImGui](https://github.com/ocornut/imgui) - overlay menu and start screen (MIT)
+- [Hylia Serif](https://artsyomni.com/hyliaserif) by Omni Jacala - the start screen's title (free, not for profit; `third_party/fonts/HyliaSerif/README.md`)
 - [Baloo 2](https://github.com/EkType/Baloo2) by Ek Type - the start screen's font (SIL Open Font License 1.1, `third_party/fonts/Baloo2/OFL.txt`)
 - [BIZ UDPGothic](https://github.com/googlefonts/morisawa-biz-ud-gothic) by Morisawa - the game's text on Linux when you haven't imported the Switch fonts: a free font from the same universal-design gothic family as the Switch's UD Shin Go (SIL Open Font License 1.1, `third_party/fonts/BIZUDPGothic/OFL.txt`)
 - [DejaVu Sans](https://dejavu-fonts.github.io) - the in-game menu and button letters when no system font fits, and the game text's last resort (Bitstream Vera / DejaVu license, `third_party/fonts/DejaVu/LICENSE`)
@@ -301,17 +289,11 @@ none of their files are used):
   Gutierrez - the anti-aliasing option (MIT, `third_party/smaa/LICENSE.txt`)
 - [AMD FidelityFX Super Resolution 1](https://github.com/GPUOpen-Effects/FidelityFX-FSR) - the Windows and Linux upscaler
   option, ported to GLSL (MIT)
-- [oead](https://github.com/zeldamods/oead) and [evfl](https://github.com/zeldamods/evfl) - Nintendo file formats, used by LAS-Randomizer
-- [PyInstaller](https://pyinstaller.org) - packs the seed generator into a standalone helper (GPL 2.0+ with the
-  bootloader exception, which allows distributing the packed program). The helper bundles CPython (PSF License),
-  oead / evfl (GPL 2.0+), [Keystone](https://www.keystone-engine.org) (GPL 2.0; Python bindings BSD), quicktex
-  (LGPL 3), Pillow (MIT-CMU), PyYAML (MIT) and appdirs (MIT)
-- The iOS app has no helper: it embeds [BeeWare's](https://beeware.org) build of CPython 3.13 for iOS (PSF License;
-  with bzip2, libffi, mpdecimal, OpenSSL and XZ for the standard library) and the same generator packages, built for
-  iOS, inside the app, and links SDL 3 and FFmpeg statically. Their licence texts ship in the app (`LICENSES/`).
+- The iOS app links SDL 3 and FFmpeg statically. Their licence texts ship in the app (`LICENSES/`).
 - [Zig](https://ziglang.org) - its C compiler (`zig cc`: Clang and LLD) builds the game code on the player's
   machine during setup (MIT; LLVM, Clang, LLD: Apache 2.0 with LLVM exceptions)
-- The game code generator (`tools/gen.py`) is packed by PyInstaller into a standalone helper too. It bundles CPython,
+- The game code generator (`tools/gen.py`) is packed by [PyInstaller](https://pyinstaller.org) into a standalone
+  helper (GPL 2.0+ with the bootloader exception, which allows distributing the packed program). It bundles CPython,
   [Capstone](https://www.capstone-engine.org) (BSD 3-clause; disassembly), [Unicorn](https://www.unicorn-engine.org)
   (GPL 2.0; Python bindings BSD; runs small pieces of code to resolve jump tables) and
   [python-lz4](https://github.com/python-lz4/python-lz4) (BSD 3-clause, with the LZ4 library: BSD 2-clause)
@@ -338,45 +320,33 @@ none of their files are used):
 
 ## Legal
 
-EoW Recomp is a fan project. It is not affiliated with, endorsed by or sponsored by Nintendo. *The Legend of Zelda*
+ReTri is a fan project. It is not affiliated with, endorsed by or sponsored by Nintendo. *The Legend of Zelda*
 and *Link's Awakening* are trademarks of Nintendo. No game files, game code, assets or fonts are included - not in
 this repository and not in release builds. You must provide your own legally obtained copy of the game files to play.
 
 ## License
 
-EoW Recomp's own code (the recompiler tools, the runtime, the randomizer additions) is open source under the
-[MIT License](LICENSE). Third-party components keep their own licenses: LAS-Randomizer (MIT), ported audio renderer code (MIT, see `third_party/`), Dear ImGui (MIT),
-Vulkan Memory Allocator (MIT), SMAA (MIT), AMD FSR 1 (MIT), the Baloo 2 and BIZ UDPGothic fonts (SIL OFL 1.1), the DejaVu Sans font (Bitstream Vera / DejaVu license), SDL 3 (zlib), FFmpeg (LGPL 2.1+, linked dynamically, and statically in the iOS app), the
+ReTri's own code (the recompiler tools, the runtime) is open source under the
+[MIT License](LICENSE). Third-party components keep their own licenses: ported audio renderer code (MIT, see `third_party/`), Dear ImGui (MIT),
+Vulkan Memory Allocator (MIT), SMAA (MIT), AMD FSR 1 (MIT), the Baloo 2 and BIZ UDPGothic fonts (SIL OFL 1.1), the Hylia Serif font (free, not for profit), the DejaVu Sans font (Bitstream Vera / DejaVu license), SDL 3 (zlib), FFmpeg (LGPL 2.1+, linked dynamically, and statically in the iOS app), the
 Zig compiler (MIT; its LLVM / Clang / LLD: Apache 2.0 with LLVM exceptions; its C library headers keep their own
 licenses), the iOS kit's Mach-O linker (LLD as built by the Rust project: Apache 2.0 with LLVM exceptions), miniz
-(MIT: the iOS kit and the .ipa it makes), and the generator helpers' bundled libraries listed under Credits (oead / evfl / Keystone in the seed
-generator and Unicorn in the game code generator are under the GPL, versions in the table below: each helper is a separate program the game runs, and its
-sources are this repository plus those projects' published sources). The iOS app is the exception: iOS runs no helper
-processes, so it embeds CPython and the seed generator's packages - oead, evfl and Keystone (GPL 2.0+ / GPL 2.0),
-quicktex (LGPL 3), Pillow, PyYAML, appdirs - and links SDL 3 and FFmpeg (LGPL 2.1+) statically; the app's `LICENSES/`
-folder carries each one's licence text, its sources are this repository plus the versions in the table (the LGPL
-libraries can be relinked: `make deps-ios` builds them from source, `make ipa` the app), and the game code library it
-embeds is built from the player's own game files and never shared. The license covers EoW Recomp's code only - it grants
+(MIT: the iOS kit and the .ipa it makes), and the generator helper's bundled libraries listed under Credits (Unicorn
+in the game code generator is under the GPL, version in the table below: the helper is a separate program the game
+runs, and its sources are this repository plus those projects' published sources). The iOS app links SDL 3 and FFmpeg
+(LGPL 2.1+) statically; the app's `LICENSES/` folder carries each one's licence text, its sources are this repository
+plus the versions in the table (the LGPL libraries can be relinked: `make deps-ios` builds them from source, `make ipa`
+the app), and the game code library it embeds is built from the player's own game files and never shared. The license covers ReTri's code only - it grants
 nothing for Nintendo's game, which you must supply yourself.
 
 ### Source code of bundled third-party components
 
-Release builds include these components; their source code for the exact versions shipped is available here. The
-seed generator's packages are in the desktops' helper and inside the iOS app alike:
+Release builds include these components; their source code for the exact versions shipped is available here:
 
 | Component | Version | License | Source |
 |---|---|---|---|
-| Keystone (seed generator; on iOS built with `tools/patches/keystone-0.9.2.patch`) | 0.9.2 | GPL 2.0 (Python bindings: BSD) | https://github.com/keystone-engine/keystone/releases/tag/0.9.2 |
-| oead (seed generator) | 1.3.0 | GPL 2.0+ | https://github.com/zeldamods/oead/releases/tag/v1.3.0 |
-| evfl (seed generator) | 1.2.0 | GPL 2.0+ | https://github.com/zeldamods/evfl/releases/tag/v1.2.0 |
-| quicktex (seed generator) | 0.2.1 | LGPL 3.0 | https://github.com/drewcassidy/quicktex/releases/tag/v0.2.1 |
-| Pillow (seed generator; on iOS BeeWare's wheel) | 10.4.0 | MIT-CMU | https://github.com/python-pillow/Pillow/releases/tag/10.4.0, https://pypi.anaconda.org/beeware/simple/pillow/ |
-| PyYAML (seed generator) | 6.0.2 | MIT | https://pypi.org/project/PyYAML/6.0.2/ |
-| appdirs (seed generator) | 1.4.4 | MIT | https://pypi.org/project/appdirs/1.4.4/ |
-| pybind11 (oead's and quicktex's Python bindings, built into them on iOS) | 3.1.0 | BSD 3-clause | https://github.com/pybind/pybind11/releases/tag/v3.1.0 |
-| PyInstaller (packs the seed and game code generators) | 6.22.3 | GPL 2.0+ with bootloader exception | https://github.com/pyinstaller/pyinstaller/releases/tag/v6.22.3 |
-| CPython (seed and game code generators) | 3.12.14 (macOS), 3.12.10 (Windows), 3.12.15 (Linux), 3.14.8 (Android) | PSF | https://github.com/python/cpython/releases/tag/v3.12.14, https://github.com/python/cpython/releases/tag/v3.12.10, https://github.com/python/cpython/releases/tag/v3.12.15, https://github.com/python/cpython/releases/tag/v3.14.8 |
-| CPython for iOS, BeeWare's Python-Apple-support build (the iOS app's seed generator; with bzip2 1.0.8, libffi 3.4.7, mpdecimal 4.0.0, OpenSSL 3.5.9, XZ 5.6.4) | 3.13.16 (b16) | PSF; bzip2, libffi (MIT), mpdecimal (BSD 2-clause), OpenSSL (Apache 2.0), XZ (0BSD / public domain) | https://github.com/beeware/Python-Apple-support/releases/tag/3.13-b16, https://github.com/python/cpython/releases/tag/v3.13.16 |
+| PyInstaller (packs the game code generator) | 6.22.3 | GPL 2.0+ with bootloader exception | https://github.com/pyinstaller/pyinstaller/releases/tag/v6.22.3 |
+| CPython (game code generator) | 3.12.14 (macOS), 3.12.10 (Windows), 3.12.15 (Linux), 3.14.8 (Android) | PSF | https://github.com/python/cpython/releases/tag/v3.12.14, https://github.com/python/cpython/releases/tag/v3.12.10, https://github.com/python/cpython/releases/tag/v3.12.15, https://github.com/python/cpython/releases/tag/v3.14.8 |
 | Zig (builds the game code during setup; includes LLVM, Clang, LLD) | 0.17.0 | MIT; LLVM: Apache 2.0 with LLVM exceptions | https://ziglang.org/download/0.17.0/zig-0.17.0.tar.xz |
 | LLD, as rust-lld (iOS kit: links the iOS game code on each desktop) | Rust 1.91.0 (LLVM 21.1.2) | Apache 2.0 with LLVM exceptions | https://static.rust-lang.org/dist/rustc-1.91.0-src.tar.xz, https://github.com/rust-lang/llvm-project |
 | miniz (reads the iOS kit, writes the .ipa) | 3.0.2 | MIT | https://github.com/richgel999/miniz/releases/tag/3.0.2 |
@@ -389,11 +359,12 @@ seed generator's packages are in the desktops' helper and inside the iOS app ali
 | libiconv (Windows: used by SDL 3) | 1.19 | LGPL 2.1+ | https://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.19.tar.gz |
 | GCC runtime: libgcc, libstdc++ (Windows) | 16.2.0 | GPL 3.0 with the GCC Runtime Library Exception | https://gcc.gnu.org/ |
 | winpthreads (Windows, mingw-w64) | 14.0.0 | MIT / BSD | https://www.mingw-w64.org/ |
+| Hylia Serif font (Beta) | 0.009 | Free, not for profit (no license file) | https://artsyomni.com/hyliaserif |
 | Baloo 2 font (SemiBold) | 1.640 | SIL OFL 1.1 | https://github.com/EkType/Baloo2 |
 | BIZ UDPGothic font (Regular, Linux) | 1.05 (Google Fonts) | SIL OFL 1.1 | https://github.com/googlefonts/morisawa-biz-ud-gothic, https://github.com/google/fonts/tree/main/ofl/bizudpgothic |
 | DejaVu Sans font (Book, Bold) | 2.37 | Bitstream Vera license (DejaVu changes public domain) | https://github.com/dejavu-fonts/dejavu-fonts/releases/tag/version_2_37 |
 | SMAA (shader and lookup textures, built in) | 2013 (repository master) | MIT | https://github.com/iryoku/smaa |
 
 The exact build scripts that fetch and build these (with checksums) are in this repository: `tools/build_deps_macos.sh`,
-`tools/build_deps_windows.sh`, `tools/linux/build_deps.sh`, `tools/build_deps_ios.sh` and `tools/rando/rando_gen.spec`. The Windows build takes SDL 3, shaderc, libiconv and the
+`tools/build_deps_windows.sh`, `tools/linux/build_deps.sh`, `tools/build_deps_ios.sh` and `tools/lasgen.spec`. The Windows build takes SDL 3, shaderc, libiconv and the
 compiler runtime from MSYS2's UCRT64 packages (https://packages.msys2.org, which links each package's source).
