@@ -26,7 +26,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Vulkan (Windows, Linux, Android): the hearts show as red hearts, not dark hearts in a red box.
 - Vulkan: draws that read what a compute pass just wrote get the GPU's own copy of it (EoW's interiors were darker
   than on Mac), without stopping the CPU to wait.
-- Vulkan: the rifts read the scene's stencil, as on Mac.
+- Vulkan: the rifts read the scene's stencil and line their map up, as on Mac.
 - The start screen accepts EoW's game files (it said "Wrong version of the game").
 - The Shadows setting changes EoW's shadows (it only knew LA's shadow map).
 - The 3D image is sharp at Match display: EoW draws its 3D at 792 lines, not LA's 1080, and the resolution settings now scale by that (Match display: your screen's pixels; 1x to 4x: 1080 to 4320 lines).

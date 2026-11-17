@@ -3848,6 +3848,31 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     // at every draw, as before)
     static int scan_once = -1;
     if (scan_once < 0) scan_once = getenv("LARECOMP_VK_NO_SCAN_ONCE") == NULL;
+    {   // EoW's rift (the dark void over a building), as renderer.m: a top-down map of the rift meshes drawn with the map
+        // view's projection (vertex cb4 rows 0-1), and a mask pass reading the map back with rows 33-34 of the scene
+        // view's constants (the same projection halved into texture space). The game rewrites both, rotated to its final
+        // map view, a few ms after submitting the frame; copied at record time, the two could come from either side of
+        // that. So the mask's rows are made from the projection the map was drawn with: the map and its lookup agree.
+        // LARECOMP_RIFT_ROWS_OFF=1: the game's rows as they are.
+        static float map_rows[8];
+        static uint64_t map_frame = ~0ull;
+        static int off = -1;
+        if (off < 0) off = getenv("LARECOMP_RIFT_ROWS_OFF") ? 1 : 0;
+        extern uint64_t renderer_exec_frame(void);
+        if (!off && game_other() && stage == 0 && k == 4 && g_cur_fs_hash == 0xd6c58a42e55a9f9eull && r.size >= 32) {
+            memcpy(map_rows, (const void *)(uintptr_t)r.addr, 32);
+            map_frame = renderer_exec_frame();
+            return ubo_span(guest_copy(r.addr, size), size);  // (the map with these rows too: not a GPU copy)
+        }
+        if (!off && game_other() && stage == 1 && k == 4 && g_cur_fs_hash == 0x44b584f0d922d49dull && size >= 35 * 16 &&
+            map_frame == renderer_exec_frame()) {
+            static uint8_t buf[0x10000];
+            memcpy(buf, (const void *)(uintptr_t)r.addr, size);
+            float *row = (float *)buf + 33 * 4;
+            for (int i = 0; i < 8; i++) row[i] = map_rows[i] * 0.5f + ((i & 3) == 3 ? 0.5f : 0.0f);
+            return ubo_span(vk_transient_copy(buf, size, 256), size);
+        }
+    }
     if (g_interp_log && stage < 2) {  // (frame interpolation: logged / blended copy; compared over the bytes the shader reads)
         uint64_t used = si->cbuf_used[k] && si->cbuf_used[k] < size ? si->cbuf_used[k] : size;
         const void *src = interp_cbuf(stage, k, idx, (const void *)(uintptr_t)r.addr, size, used);
