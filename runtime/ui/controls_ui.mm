@@ -5,7 +5,8 @@
 // use swaps over); B goes back a step (bindings -> categories -> the tab). Open menu holds the controller's shortcuts for
 // this menu (one button or two together; X / Delete clears one, never the last) and the keyboard's F1 / Esc, which
 // can't be changed. ReTri Menu holds the buttons our menus use (pad_nav.h): the controller conventions until one is changed,
-// every action always on a button of its own (a button in use swaps over); the keyboard's are shown, fixed. Drawn in
+// every action always on a button of its own (a button in use swaps over), never on L / R or the D-pad (the tabs and
+// moving, fixed); the keyboard's are shown, fixed. Drawn in
 // whichever ImGui context is current.
 #include <SDL3/SDL.h>
 #include <math.h>

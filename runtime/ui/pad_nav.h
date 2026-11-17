@@ -1,7 +1,8 @@
 // Controller buttons into our ImGui menus (the in-game overlay runtime/ui/menu.mm, the start screen launcher.mm).
 // The menus read ImGuiKey_GamepadFaceDown as "confirm" and ImGuiKey_GamepadFaceRight as "back" (as ImGui's own
-// navigation does), FaceUp, L1 / R1 (tabs), the D-pad and Start. The player's ReTri Menu buttons (Controls > Configure
-// inputs; runtime/input_bind.h BIND_UI_*) pick the physical button for each when set. Otherwise the Controls tab's
+// navigation does), FaceUp, L1 / R1 (tabs), the D-pad and Start. L / R and the D-pad are always the tabs and moving.
+// The player's ReTri Menu buttons (Controls > Configure inputs; runtime/input_bind.h BIND_UI_*: Confirm, Back, Option,
+// Confirm text) pick the physical button for those when set. Otherwise the Controls tab's
 // "Confirm button" (g_settings.face_by_label), the game's A and B too: Right (default) - the right button confirms and
 // the bottom one goes back, as on a Switch; Bottom - the other way round, as on Xbox / PlayStation. Same on every pad.
 // The Button icons setting only picks the words the hints use (input_menu_family in runtime/hle/input.c). The

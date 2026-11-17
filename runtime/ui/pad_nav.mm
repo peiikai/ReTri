@@ -9,10 +9,8 @@
 static std::atomic<SDL_JoystickID> g_last_pad{0};
 
 // Menu action -> the ImGui key the menus read (BIND_UI_* order)
-static const ImGuiKey k_act_key[BIND_UI_COUNT] = {
-    ImGuiKey_GamepadFaceDown, ImGuiKey_GamepadFaceRight, ImGuiKey_GamepadFaceUp, ImGuiKey_GamepadL1, ImGuiKey_GamepadR1,
-    ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight,
-    ImGuiKey_GamepadStart};
+static const ImGuiKey k_act_key[BIND_UI_COUNT] = {ImGuiKey_GamepadFaceDown, ImGuiKey_GamepadFaceRight,
+                                                   ImGuiKey_GamepadFaceUp, ImGuiKey_GamepadStart};
 
 ImGuiKey ui_pad_key(SDL_JoystickID which, int button, bool down) {
     static ImGuiKey held[PADB_HOST_COUNT];  // (the layout can change while a button is held: its release)
@@ -20,7 +18,17 @@ ImGuiKey ui_pad_key(SDL_JoystickID which, int button, bool down) {
     if (!down) { ImGuiKey k = held[button]; held[button] = ImGuiKey_None; if (k != ImGuiKey_None) return k; }
     if (down) g_last_pad = which;
     ImGuiKey k = ImGuiKey_None;
-    if (g_bind_ui_custom) {  // ReTri Menu: the player's buttons only (Controls > Configure inputs)
+    switch (button) {  // tabs and moving: always L / R and the D-pad (never rebound: bind_ui_fixed)
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: k = ImGuiKey_GamepadL1; break;
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: k = ImGuiKey_GamepadR1; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_UP: k = ImGuiKey_GamepadDpadUp; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN: k = ImGuiKey_GamepadDpadDown; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT: k = ImGuiKey_GamepadDpadLeft; break;
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: k = ImGuiKey_GamepadDpadRight; break;
+    default: break;
+    }
+    if (k != ImGuiKey_None) {  // (fixed)
+    } else if (g_bind_ui_custom) {  // ReTri Menu: the player's buttons only (Controls > Configure inputs)
         int a = bind_ui_action(button, 0);
         if (a >= 0) k = k_act_key[a - BIND_UI_CONFIRM];
     } else {

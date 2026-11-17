@@ -27,8 +27,8 @@ enum {
     BIND_MENU_1 = BIND_KEY_COUNT, BIND_MENU_2,           // controller only: the shortcuts that open the menu
     BIND_SLOT_COUNT,
     // controller only: ReTri Menu, the buttons our menus use (runtime/ui/pad_nav.mm)
-    BIND_UI_CONFIRM = BIND_SLOT_COUNT, BIND_UI_BACK, BIND_UI_OPTION, BIND_UI_TAB_PREV, BIND_UI_TAB_NEXT,
-    BIND_UI_UP, BIND_UI_DOWN, BIND_UI_LEFT, BIND_UI_RIGHT, BIND_UI_OK,
+    // (tabs: L / R, moving: the D-pad - fixed, never on these: bind_ui_fixed)
+    BIND_UI_CONFIRM = BIND_SLOT_COUNT, BIND_UI_BACK, BIND_UI_OPTION, BIND_UI_OK,
     BIND_UI_END
 };
 #define BIND_UI_COUNT (BIND_UI_END - BIND_UI_CONFIRM)
@@ -52,13 +52,15 @@ bool bind_menu_clear(int i);
 // `host` alone opens the menu (the Controls tab marks a game button on it in red)
 bool bind_menu_single(int host);
 
-// ReTri Menu. Off (the default): the controller conventions - Confirm / Back on the right / bottom buttons by Button
-// layout and the pad's family (fam: input_menu_family), the top button Option, L / R tabs, the D-pad, Start OK.
+// ReTri Menu. Off (the default): the controller conventions - Confirm / Back on the right / bottom buttons by Confirm
+// button (fam: unused), the top button Option, Start OK. Tabs (L / R) and moving (the D-pad) are fixed: no action
+// can take them (bind_ui_fixed).
 // The first change copies those into g_bind_ui (custom: the same physical buttons on every controller, Button layout
 // no longer applies to our menus); bind_ui_reset goes back to the conventions.
 extern bool g_bind_ui_custom;
 extern int8_t g_bind_ui[BIND_UI_COUNT];         // PADB value per action (BIND_UI_* - BIND_UI_CONFIRM)
 int bind_ui_convention(int act, int fam);       // act: BIND_UI_*
+bool bind_ui_fixed(int host);                   // L / R or the D-pad: our menus' tabs and moving, never rebound
 int bind_ui_host(int act, int fam);             // the button driving menu action `act` now
 int bind_ui_action(int host, int fam);          // the action on controller button `host` (custom only; -1 none)
 bool bind_ui_uses(int host);                    // custom ReTri Menu has an action on `host`

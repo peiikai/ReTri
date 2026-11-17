@@ -58,10 +58,7 @@ int bind_pad_from_name(const char *name) {
     return -1;
 }
 
-static const char *const k_ui_names[BIND_UI_COUNT] = {
-    LN("Confirm"), LN("Back"), LN("Option"), LN("Previous tab"), LN("Next tab"), LN("Up"), LN("Down"), LN("Left"),
-    LN("Right"), LN("Confirm text"),
-};
+static const char *const k_ui_names[BIND_UI_COUNT] = {LN("Confirm"), LN("Back"), LN("Option"), LN("Confirm text")};
 const char *bind_input_name(int slot) {
     if (slot >= BIND_UI_CONFIRM && slot < BIND_UI_END) return k_ui_names[slot - BIND_UI_CONFIRM];
     return slot >= 0 && slot < BIND_SLOT_COUNT ? k_names[slot] : "?";
@@ -192,8 +189,7 @@ bool bind_menu_clear(int i) {
 // ------------------------------------------------------------------ ReTri Menu (our menus' buttons)
 bool g_bind_ui_custom;
 int8_t g_bind_ui[BIND_UI_COUNT];
-static const char *const k_ui_ini[BIND_UI_COUNT] = {"confirm", "back", "option", "tab_prev", "tab_next", "up", "down",
-                                                    "left", "right", "ok"};
+static const char *const k_ui_ini[BIND_UI_COUNT] = {"confirm", "back", "option", "ok"};
 
 int bind_ui_convention(int act, int fam) {
     bool sc = g_settings.face_by_label;  // (the bottom button confirms, on every pad: as the game's A, label_swap)
@@ -202,15 +198,13 @@ int bind_ui_convention(int act, int fam) {
     case BIND_UI_CONFIRM: return sc ? SDL_GAMEPAD_BUTTON_SOUTH : SDL_GAMEPAD_BUTTON_EAST;
     case BIND_UI_BACK: return sc ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH;
     case BIND_UI_OPTION: return SDL_GAMEPAD_BUTTON_NORTH;
-    case BIND_UI_TAB_PREV: return SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
-    case BIND_UI_TAB_NEXT: return SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
-    case BIND_UI_UP: return SDL_GAMEPAD_BUTTON_DPAD_UP;
-    case BIND_UI_DOWN: return SDL_GAMEPAD_BUTTON_DPAD_DOWN;
-    case BIND_UI_LEFT: return SDL_GAMEPAD_BUTTON_DPAD_LEFT;
-    case BIND_UI_RIGHT: return SDL_GAMEPAD_BUTTON_DPAD_RIGHT;
     case BIND_UI_OK: return SDL_GAMEPAD_BUTTON_START;
     default: return -1;
     }
+}
+bool bind_ui_fixed(int host) {
+    return host == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER || host == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER ||
+           (host >= SDL_GAMEPAD_BUTTON_DPAD_UP && host <= SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
 }
 int bind_ui_host(int act, int fam) {
     if (act < BIND_UI_CONFIRM || act >= BIND_UI_END) return -1;
@@ -330,7 +324,7 @@ bool bind_capture_event(const SDL_Event *e) {
         return true;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         if (dev == BIND_DEV_PAD && cap_slot >= BIND_UI_CONFIRM) {  // ReTri Menu: any button (Home: refused below)
-            if (e->gbutton.button >= SDL_GAMEPAD_BUTTON_COUNT) return true;
+            if (e->gbutton.button >= SDL_GAMEPAD_BUTTON_COUNT || bind_ui_fixed(e->gbutton.button)) return true;  // (keeps waiting)
             int slot = cap_slot;
             cap_dev = -1;
             ui_assign(slot, e->gbutton.button);
@@ -372,7 +366,8 @@ bool bind_capture_event(const SDL_Event *e) {
 
 // ------------------------------------------------------------------ larecomp.ini
 bool bind_settings_load(const char *key, const char *val) {
-    if (!strncmp(key, "bind_ui_", 8)) {  // (all of them or none: a set missing one stays on the conventions)
+    // (all of them or none: a set missing one stays on the conventions; the removed tab / arrow rows' keys are ignored)
+    if (!strncmp(key, "bind_ui_", 8)) {
         static int8_t got[BIND_UI_COUNT];
         static unsigned have;
         for (int i = 0; i < BIND_UI_COUNT; i++) {
@@ -383,8 +378,10 @@ bool bind_settings_load(const char *key, const char *val) {
         }
         if (have == (1u << BIND_UI_COUNT) - 1) {
             bool ok = true;  // (no button twice, none that opens the menu alone: hand-edited)
-            for (int i = 0; i < BIND_UI_COUNT; i++)
+            for (int i = 0; i < BIND_UI_COUNT; i++) {
+                ok &= !bind_ui_fixed(got[i]);  // (an older set could put one on the D-pad / L / R: the conventions)
                 for (int j = 0; j < i; j++) ok &= got[i] != got[j];
+            }
             if (ok) memcpy(g_bind_ui, got, sizeof g_bind_ui), g_bind_ui_custom = true;
             have = 0;
         }
