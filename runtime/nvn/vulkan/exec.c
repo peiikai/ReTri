@@ -7295,6 +7295,8 @@ static void draw_(CmdRec *r, bool indexed) {
             hud_u = pause_fill_ubo((const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size, hud_k, hud_ky);
             extern const void *hud_corners_ubo(const float *u, uint64_t size, float k, float ky);
             if (!hud_u) hud_u = hud_corners_ubo((const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size, hud_k, hud_ky);
+            extern const void *widescreen_spot_ubo(const float *u, uint64_t size, float k, float ky);  // (layouts at a spot on screen)
+            if (!hud_u) hud_u = widescreen_spot_ubo((const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size, hud_k, hud_ky);
         }
     }
     Range hud_ubuf = st.ubuf[0][0];

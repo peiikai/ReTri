@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- With Aspect ratio Unlocked, the lock-on reticle sits on its target in wide windows (it was pulled toward the
+  centre), and so do action prompts and other markers placed over things in the world.
 - Memory no longer grows during play: the extra command memory the game runs out of is reused instead of leaked.
 - The start screen's game folder help names Echoes of Wisdom and ReTri, not Link's Awakening (all languages).
 - The start screen accepts EoW's game files (it said "Wrong version of the game").
