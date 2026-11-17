@@ -30,6 +30,7 @@
 #include "../shader_prep.h"
 #include "../../settings.h"
 #include "../weather.h"
+#include "../../game_addresses.h"
 
 static uint64_t stat_draws, stat_skipped, stat_passes, stat_dispatches, stat_wait_ns, stat_flushes, stat_feedback_copies;
 // (the guest heap for shaders in chunks: with the heap import below)
@@ -647,8 +648,26 @@ static void overlap_clear(void) {  // (a full wait was made: everything queued s
 }
 
 static bool cs_since_flush;  // (exec_list, render thread) a compute dispatch was recorded since the last flush
+// (another game) What the storing compute dispatches recorded since the last flush may have written: their storage
+// slots, at least GWP_MIN bytes each (EoW's shadow-cascade dispatches store up to 0x478 bytes past slots bound with
+// 60-128, as renderer.m's g_gw_min). Uniform buffers are copied at record time (cbuf_info), before the GPU has run
+// those dispatches: EoW's draws that read their results as uniforms (the shadow cascades' matrices) got older values
+// (the likely cause of the darker interiors on Vulkan, a shop's doorway light missing). A draw or dispatch reading one of these
+// ranges as uniforms first waits for the GPU (gwp_wait), so its copy has the results, as renderer.m's in-place reads.
+// Full: every uniform read waits once. LARECOMP_VK_GW_WAIT=0: off (copied as before).
+#define GWP_N 64
+#define GWP_MIN 0x480
+static struct { uint64_t addr, size; } gwp[GWP_N];
+static int ngwp;
+static bool gwp_full;
+static bool gwp_on(void) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("LARECOMP_VK_GW_WAIT"); on = game_other() && (!e || atoi(e) != 0); }
+    return on;
+}
 void renderer_flush(void) {
     cs_since_flush = false;
+    ngwp = 0, gwp_full = false;
     renderer_submit();
     if (!wait_why) wait_why = "flush";
     vk_wait_seq(submit_seq);
@@ -6416,6 +6435,43 @@ static void gpl_probe_note(Pipe *pp) { (void)pp; }
 static void gpl_probe(void) {}
 #endif
 
+// (gwp) A storing dispatch was recorded: its storage slots may hold its results once the GPU has run it
+static void gwp_note_dispatch(void) {
+    if (!gwp_on()) return;
+    for (int i = 0; i < 16; i++) {
+        uint64_t a = st.sbuf[5][i].addr, n = st.sbuf[5][i].size < GWP_MIN ? GWP_MIN : st.sbuf[5][i].size;
+        if (!a) continue;
+        int j = 0;
+        while (j < ngwp && !(gwp[j].addr == a && gwp[j].size >= n)) j++;
+        if (j < ngwp) continue;
+        if (ngwp == GWP_N) { gwp_full = true; return; }
+        gwp[ngwp].addr = a, gwp[ngwp++].size = n;
+    }
+}
+// (gwp) Before a draw or dispatch is recorded: a uniform buffer a stage reads that a pending dispatch may have written
+// waits for the GPU (renderer_flush: the GPU's writes in guest memory), so cbuf_info's copy has the results
+static void gwp_wait(int stage, const ShaderInfo *si) {
+    if ((!ngwp && !gwp_full) || g_interp_replaying) return;  // (a replay: no waits, as the indirect draws)
+    for (int k = 3; k < 18; k++) {
+        if (!(si->cbuf_mask & (1u << k))) continue;
+        Range r = st.ubuf[stage][k - 3];
+        if (!r.addr) continue;
+        uint64_t size = r.size ? r.size : si->cbuf_size[k];
+        bool hit = gwp_full;
+        for (int j = 0; j < ngwp && !hit; j++) hit = r.addr < gwp[j].addr + gwp[j].size && gwp[j].addr < r.addr + size;
+        if (!hit) continue;
+        if (getenv("LARECOMP_LOG_GW")) {
+            static int n;
+            if (n++ < 100) LOG("[gw] stage %d cb%d %llx+%llu: written by a dispatch not run yet - waiting\n", stage, k,
+                               (unsigned long long)r.addr, (unsigned long long)size);
+        }
+        wait_why = "uniforms a dispatch writes";
+        renderer_flush();
+        gw_inval_done(vk_completed_seq());  // (non-coherent heap: the dispatches' writes, seen by the CPU)
+        return;
+    }
+}
+
 static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     snap_reason = "compute"; snapshots_invalidate(NULL);
     if (!st.program || !gx || !gy || !gz) return;
@@ -6439,6 +6495,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
             LOG("\n");
         }
     }
+    gwp_wait(5, cp->si);  // (before anything of this dispatch is recorded: the wait submits)
     st_cs_stores = cp->si->uses_gmem_store;
     snap_apply(5, 0xFFFF);  // (overlap) every bound slot: the probe / copy decision per range, before gfast and the sets read the table
     vk_end_pass();
@@ -6479,7 +6536,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
         if (gmir_on()) gmir_after_dispatch(cb);  // (its slots: readbacks; what follows reads the slots)
         else gfast_finish(cb);
     }
-    if (cp->si->uses_gmem_store) vc_mark_sbufs(5);
+    if (cp->si->uses_gmem_store) vc_mark_sbufs(5), gwp_note_dispatch();
     stat_dispatches++;
 }
 
@@ -6933,6 +6990,7 @@ static void draw_(CmdRec *r, bool indexed) {
     for (int i = 0; i < st.rt.ncolor; i++) if (st.rt.color[i]) fkey.rt_kind[i] = (uint8_t)rt_kind(st.rt.color[i]->format);
     Prog *pr = get_program(st.program, &vkey, &fkey);
     if (!pr || atomic_load(&pr->state) != 1) { SKIP(!pr ? SK_NO_STAGES : atomic_load(&pr->state) == 2 ? SK_PROG_FAILED : SK_PROG_BUILDING); return; }
+    gwp_wait(0, pr->vi), gwp_wait(1, pr->fi);  // (before anything of this draw is recorded: the wait submits)
     g_mirror_w = 0;
     extern float renderer_ao_blur_scale(NvnTexture *t);
     g_ao_taps = pr->fi->uses_ao_taps && st.rt.ncolor ? renderer_ao_blur_scale(st.rt.color[0]) : 0;
