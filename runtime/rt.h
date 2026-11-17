@@ -47,13 +47,13 @@ extern uint64_t g_guest_lo;
 #define GUEST_LO     GUEST_CANON
 #endif
 // (each region's offset from GUEST_LO: constants, so the layout is checked below whether the start is one or not)
-#if PLAT_IOS                                          // (packed: the modules end at +0x5000000, main 29 MB, sdk 13 MB)
-#define GUEST_SIZE       0x0150000000ull                 // 5.25 GB
-#define HLE_OFF          0x0008000000ull
+#if PLAT_IOS                                          // (packed: the modules end at +0x8E04000, EoW's main 64 MB at +0,
+#define GUEST_SIZE       0x0152000000ull                 //  its sdk 14 MB at +0x8000000 (games.h); LA's end lower) 5.28 GB
+#define HLE_OFF          0x000A000000ull
 #define TLS_OFF          (HLE_OFF + 0x0001000000ull)
 #define HLE_HEAP_OFF     (HLE_OFF + 0x0002000000ull)
-#define HEAP_OFF         0x0018000000ull
-#define GUEST_STACK_OFF  0x00E8000000ull
+#define HEAP_OFF         0x001A000000ull
+#define GUEST_STACK_OFF  0x00EA000000ull
 #define ALIAS_SIZE       0x0020000000ull                 // 512 MB
 #define ALIAS_OFF        (GUEST_SIZE - ALIAS_SIZE)        // (at the top, after the stacks)
 #else                                                 // (the Switch's own spacing)
@@ -68,7 +68,8 @@ extern uint64_t g_guest_lo;
 #endif
 #define GUEST_HI         (GUEST_LO + GUEST_SIZE)
 #define MAIN_BASE        (GUEST_LO + 0x0000000000ull)
-#define SDK_BASE         (GUEST_LO + 0x0004000000ull)
+#define SDK_OFF          0x0004000000ull                 // (LA's; another game's sdk can sit elsewhere: game_sdk_base)
+#define SDK_BASE         (GUEST_LO + SDK_OFF)
 #define HLE_BASE         (GUEST_LO + HLE_OFF)            // fake addresses for host-implemented functions
 #define HLE_SIZE         0x0000100000ull
 #define TLS_BASE         (GUEST_LO + TLS_OFF)

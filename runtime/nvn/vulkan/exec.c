@@ -7181,11 +7181,11 @@ static void draw_(CmdRec *r, bool indexed) {
 #define FTEX(i) (hook_pass ? ftex[i] : shader_texture_object(1, &pr->fi->tex[i]))
 #if PLAT_TOUCH
     if (fknown) {  // (the title and the file select, seen from their draws: what a tap does there, touch_controls.mm)
-        extern void texpatch_note_draw(int id);
+        extern void texpatch_note_draw_at(int id, const float *ui, uint64_t size);
         for (int i = 0; i < pr->fi->ntex; i++) {
             NvnTexture *t = FTEX(i);
             const TexBackend *b = t ? (const TexBackend *)t->backend : NULL;
-            if (b && b->tp > 0) texpatch_note_draw(b->tp - 1);
+            if (b && b->tp > 0) texpatch_note_draw_at(b->tp - 1, (const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size);
         }
     }
 #endif

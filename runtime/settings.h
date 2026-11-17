@@ -120,7 +120,7 @@ typedef struct {
     float touch_size;    // 0.6 .. 1.6 (1 = the default layout)
     // the layout editor (touch_controls.mm): per control, moved (its place: share of the screen), size (x), hidden;
     // saved as touch_ctl_<name> = x, y, size, hidden
-#define TOUCH_NCTL 14
+#define TOUCH_NCTL 15
     bool touch_moved[TOUCH_NCTL];
     float touch_pos[TOUCH_NCTL][2];
     float touch_scale[TOUCH_NCTL];
