@@ -18,7 +18,7 @@ endif
 ifeq ($(PLATFORM),windows)
 export TMP := $(or $(TMP),$(shell cygpath -w /tmp))
 export TEMP := $(or $(TEMP),$(TMP))
-export USERPROFILE := $(or $(USERPROFILE),$(shell cygpath -w ~))
+export USERPROFILE := $(or $(USERPROFILE),$(shell cygpath -w -F 40))  # (CSIDL_PROFILE: C:\Users\<name>; ~ is MSYS2's own home)
 endif
 
 # iOS: the same generated code with the moving guest window (DYN_BASE=1 below: an iOS process has 58 GB of address
