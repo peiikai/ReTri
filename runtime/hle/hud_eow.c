@@ -1,6 +1,7 @@
 // Echoes of Wisdom's HUD on phones and tablets (as runtime/hle/hud_corners.c does LA's): the hearts go to the screen's
 // upper left corner, the mini map from the lower right to the upper right, and the HUD's Y / X item buttons to the
-// left of the map, in a row with it. With "Hide X / Y on the HUD" (touch_hide_xy_hud) they're put out of
+// left of the map, in a row with it; the map and the buttons only while the on-screen controls are up (a controller
+// in use: where the game puts them). With "Hide X / Y on the HUD" (touch_hide_xy_hud) they're put out of
 // sight while the on-screen controls (which show the same icons) are up: moved off the screen, not hidden, so the HUD
 // still draws the Y slot's icon and the touch Y follows it (runtime/nvn/texpatch.c texpatch_eow_y_icon).
 //
@@ -164,9 +165,12 @@ void hud_eow_tick(void) {
         if (l < 0) l = 0;
         if (r < 0) r = 0;
     }
-    bool hide = false;
+    // the map and the buttons move only while the on-screen controls are up (they'd sit under them): with a
+    // controller in use they're back where the game puts them; the hearts stay in the corner
+    bool touch = true, hide = false;
 #if PLAT_TOUCH
-    hide = g_settings.touch_hide_xy_hud && touch_visible();
+    touch = touch_visible();
+    hide = g_settings.touch_hide_xy_hud && touch;
 #endif
     if (ENV("LARECOMP_HIDE_XY_HUD")) hide = atoi(ENV("LARECOMP_HIDE_XY_HUD")) != 0;  // (test: 1 hidden, 0 shown)
     // the map: from the lower right to the upper right, its middle level with the buttons' (Y 442, X 458); the buttons
@@ -185,6 +189,7 @@ void hud_eow_tick(void) {
         }
         float x = g_ax[i], y = g_ay[i] + (i == HEARTS ? up : 0);
         if (i == HEARTS) x -= l;
+        else if (!touch) {}  // (the game's own place)
         else if (i == MAP) x += r, y += map_dy;
         else x += r + slot_dx + (hide ? 4000 : 0);  // (hidden: drawn far off the screen, so its icon still shows on Y)
         set_xy(i, p, x, y);
