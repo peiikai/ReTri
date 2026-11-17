@@ -676,6 +676,7 @@ static const char *uv2(Ctx *c, int slot, const char *x, const char *y, char *buf
 // reference or NULL, lod_kind 0 implicit / 1 level / 2 bias (lod), off: ivec2 texel offset or NULL.
 // GLSL offsets must be constants, so register offsets move the coordinates by offset / size of the level
 // (level 0 for implicit-LOD lookups). Non-fragment stages have no implicit LOD: level 0 (+ bias).
+static bool tex_is_stencil(const Ctx *c, int slot);
 static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, const char *layer, const char *dref,
                         int lod_kind, const char *lod, const char *off) {
     if (c->fail) { strcpy(out, "vec4(0.0f)"); return; }  // e.g. a type conflict: tex[slot] is not this lookup's type
@@ -719,6 +720,11 @@ static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, cons
         snprintf(P, sizeof P, "vec%d(%s, float(%s), %s)", n + 2, xs, layer, dref);
     } else {
         snprintf(P, sizeof P, "vec%d(%s, %s)", n + 1, xs, dref);
+    }
+    if (tex_is_stencil(c, slot) && n == 2 && !layer && !dref) {  // (as the MSL in emit_tex: the texel under the coordinate, its integer as is)
+        snprintf(out, 4096, "uintBitsToFloat(texelFetch(t%d, ivec2(clamp(%s, vec2(0.0f), vec2(0.99999f)) * vec2(textureSize(t%d, 0))), 0))",
+                 slot, xs, slot);
+        return;
     }
     char e[2000], ex[300] = "";
     if (extra) snprintf(ex, sizeof ex, ", %s", extra);
@@ -880,7 +886,7 @@ static void emit_texs(Ctx *c, uint64_t w, bool fetch) {
 // A texture the key names as a stencil read (ShaderKey.stencil_slots, by its handle's slot): a plain 2D texture of
 // integers - the depth / stencil buffer's stencil through a view (EoW's rifts read the bits the scene marks there)
 static bool tex_is_stencil(const Ctx *c, int slot) {
-    if (!c->key || c->glsl || !c->key->stencil_slots || slot < 0 || slot >= c->info->ntex) return false;
+    if (!c->key || !c->key->stencil_slots || slot < 0 || slot >= c->info->ntex) return false;
     const ShaderTexture *t = &c->info->tex[slot];
     int h = ((int)t->handle_offset - 0x20) / 8;
     return t->type == TEXTYPE_2D && !t->shadow && h >= 0 && h < 16 && (c->key->stencil_slots >> h & 1);
@@ -2677,7 +2683,7 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     }
     for (int i = 0; i < info->ntex; i++) {
         ShaderTexture *t = &info->tex[i];
-        sp(&s, "layout(set = %d, binding = %d) uniform %s t%d;\n", set, 32 + i, glsl_sampler_type(t), i);
+        sp(&s, "layout(set = %d, binding = %d) uniform %s t%d;\n", set, 32 + i, tex_is_stencil(c, i) ? "usampler2D" : glsl_sampler_type(t), i);
         // size of level l as (width, height, depth or layers)
         switch (t->type) {
         case TEXTYPE_1D: sp(&s, "ivec3 tsize%d(int l) { return ivec3(textureSize(t%d, l), 1, 1); }\n", i, i); break;
