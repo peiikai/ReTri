@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- No more drops to 35-55 fps in busy areas on Mac: the game's own dynamic resolution is off, as in LAS Recomp. It
+  raised the 3D size on a fast GPU (up to 1.9x the window's pixels at Match display) until frames ran late.
 - Memory no longer grows during play: the extra command memory the game runs out of is reused instead of leaked.
 - The start screen's game folder help names Echoes of Wisdom and ReTri, not Link's Awakening (all languages).
 - The start screen accepts EoW's game files (it said "Wrong version of the game").

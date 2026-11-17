@@ -570,6 +570,21 @@ def main():
                 return ('{ extern void rt_tilt_obj(uint64_t); c->x[19] = c->x[23] + 0x600; rt_tilt_obj(c->x[19]); }'
                         f'  /* {a:#x}: add x19, x23, #0x600 (tilt-shift set-up: blur removal) */')
             PATCHES[0x70027802e8] = _eow_tilt
+            # (resolution, runtime/nvn/output_scale.c) the game's own dynamic resolution, off - as LA's
+            # GAME_DYNRES_SITE. Its frame controller (main+0x346530) reads the scaler's enabled byte (+0x480 of its
+            # object); on, it turns the GPU timing counters into a load figure and steps its 3D a level (1080 - 36 x
+            # level lines) after 6 samples over 90% / under 70% (main+0x3468c0). It started at 1408x792 and climbed
+            # to 1920x1080 on a fast GPU: our scale (Match display maps 792 lines to the window) then drew the 3D at
+            # up to 1.9x the window's pixels (6982x1964 for 5120x1440), new targets at each step, and frames over
+            # 16.7 ms once our own window step (SMAA, upscale) came on top. Read as 0: it stays at 1408x792.
+            # LARECOMP_GAME_DYNRES=1 (test): the game's own again.
+            def _eow_dynres(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0x39520348, hex(w)  # ldrb w8, [x26, #0x480]
+                return ('{ extern int rt_game_dynres(void); '
+                        'c->x[8] = rt_game_dynres() ? LD8(c->x[26] + 0x480) : 0; }'
+                        f'  /* {a:#x}: ldrb w8, [x26, #0x480] (the game\'s dynamic resolution: off) */')
+            PATCHES[0x7000346580] = _eow_dynres
             # (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
             # `movz wD, #0x8e39; movk wD, #0x3fe3, lsl #16`: the movk gets the runtime's aspect instead
             eow_aspect = [0x700033d32c, 0x700033e6f8, 0x7000348b70, 0x7000351e20, 0x7000c2bd3c, 0x7000c2c8b4,
