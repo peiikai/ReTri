@@ -3476,19 +3476,39 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
         // The game writes both a second time, rotated to its final map view, a few ms after the frame's list is
         // submitted; the Switch GPU reaches these passes later than that and reads the final rows, but ours runs before
         // it (the mask's rows are still identity then; read in place, the two raced and each frame could miss). So the
-        // map keeps the projection it was drawn with and the mask's rows are made from it: the map and its lookup agree.
+        // map and the mask's rows are made from one projection: the map and its lookup agree.
+        // That projection is the game's final one from the frame before (read back from the last mask draw's rows once
+        // the game has written them), not the first one: the final view fits the rift about 3x tighter, so the map's
+        // texels are 3x finer and the rift's edges are clean lines instead of steps (the first view only until a final
+        // one is known, and when the rift's map is not drawn for a while). LARECOMP_RIFT_FIRST_ROWS=1: the first rows.
         bool rift_rows = false;
-        {   static float map_rows[8]; static uint64_t map_frame = ~0ull;
+        {   static float map_rows[8], final_rows[8]; static uint64_t map_frame = ~0ull, final_frame, mask_addr;
             static int off = -1; if (off < 0) off = ENV("LARECOMP_RIFT_ROWS_OFF") ? 1 : 0;  // (debug: the game's rows as they are)
+            static int first = -1; if (first < 0) first = ENV("LARECOMP_RIFT_FIRST_ROWS") ? 1 : 0;
             if (!off && game_other() && stage == 0 && k == 4 && g_cur_fs_hash == 0xd6c58a42e55a9f9eull && r.size >= 32) {
-                memcpy(map_rows, (const void *)(uintptr_t)r.addr, 32);
-                map_frame = renderer_exec_frame();
-                gpu_written = false;  // (the map is drawn with these rows too, not the later ones in place: the two agree)
+                uint64_t fr = renderer_exec_frame();
+                if (mask_addr && map_frame != fr) {  // (a new frame: the last mask's rows, final if the game has written them)
+                    const float *g = (const float *)(uintptr_t)mask_addr + 33 * 4;
+                    bool identity = g[0] == 1 && g[1] == 0 && g[2] == 0 && g[3] == 0 && g[4] == 0 && g[5] == 1 && g[6] == 0 && g[7] == 0;
+                    if (!identity) {
+                        for (int i = 0; i < 8; i++) final_rows[i] = (g[i] - ((i & 3) == 3 ? 0.5f : 0.0f)) * 2.0f;
+                        final_frame = fr;
+                    }
+                    mask_addr = 0;
+                }
+                bool use_final = !first && final_frame && fr - final_frame <= 4;
+                if (map_frame != fr) memcpy(map_rows, use_final ? final_rows : (const float *)(uintptr_t)r.addr, 32);
+                map_frame = fr;
+                uint64_t o = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);
+                memcpy((uint8_t *)ring.contents + o, map_rows, 32);
+                E_buf(stage, ring, o, k);
+                continue;
             }
             if (!off && game_other() && stage == 1 && k == 4 && g_cur_fs_hash == 0x44b584f0d922d49dull && size >= 35 * 16 &&
                 map_frame == renderer_exec_frame()) {
                 gpu_written = false;
                 rift_rows = true;
+                mask_addr = r.addr;
             }
             if (rift_rows) {
                 uint64_t o = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);
