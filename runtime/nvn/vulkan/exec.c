@@ -672,7 +672,11 @@ static bool gwp_on(void) {
 // offset within 256 bytes, so a bind at a 256-byte boundary stays aligned. Where no copy could be made (the lazy heap
 // chunks) the wait above stays. LARECOMP_VK_GW_COPY=0: always the wait.
 #define GWC_N 256
-static struct { uint64_t addr, size; VkBuffer buf; VkDeviceSize off; } gwc[GWC_N];
+// A copy is good for the submission it was recorded in only: its ring chunk is recycled once that submission is done
+// (vk_transient; a later bind doesn't hold the chunk), and by then the game's CPU may have rewritten the range. Kept
+// across submissions until a flush, they were bound from reused memory on an RTX 3080 Ti: EoW's opening dungeon black
+// or streaked (frames ~1650-1860) where a range a dispatch stored to earlier was read without a dispatch since.
+static struct { uint64_t addr, size, seq; VkBuffer buf; VkDeviceSize off; } gwc[GWC_N];
 static int ngwc;
 static bool gwc_find(uint64_t addr, uint64_t size, VkDescriptorBufferInfo *out);
 static bool gwc_on(void) {
@@ -6523,8 +6527,9 @@ static void gwc_note(VkCommandBuffer cb, uint64_t a, uint64_t n, uint64_t slot_s
     VkBuffer sb;
     VkDeviceSize so;
     uint64_t m = n;  // (the slot as bound, if the 0x480 bytes past it aren't in the source: binds past it still wait)
-    for (int j = 0; j < ngwc; j++)  // (a range stored again: the older copy is no longer what the slot holds)
-        if (gwc[j].addr == a) gwc_drop(j--);
+    uint64_t seq = vk_pending_seq();
+    for (int j = 0; j < ngwc; j++)  // (a range stored again: the older copy is no longer what the slot holds; an earlier
+        if (gwc[j].addr == a || gwc[j].seq != seq) gwc_drop(j--);  // submission's copies are no use any more)
     bool ok = gwc_on() && !g_interp_replaying && ngwc < GWC_N && (gwc_source(a, m, &sb, &so) || (m = slot_size, gwc_source(a, m, &sb, &so)));
     if (!ok) {
         if (getenv("LARECOMP_LOG_GW")) {
@@ -6540,7 +6545,7 @@ static void gwc_note(VkCommandBuffer cb, uint64_t a, uint64_t n, uint64_t slot_s
     VkSpan d = vk_transient(m + 256, 256);
     VkBufferCopy c = {so, d.off + (a & 255), m};
     rec_CmdCopyBuffer(cb, sb, d.buf, 1, &c);
-    gwc[ngwc].addr = a, gwc[ngwc].size = m, gwc[ngwc].buf = d.buf, gwc[ngwc++].off = c.dstOffset;
+    gwc[ngwc].addr = a, gwc[ngwc].size = m, gwc[ngwc].seq = vk_pending_seq(), gwc[ngwc].buf = d.buf, gwc[ngwc++].off = c.dstOffset;
     { static int nl; if (gw_log(&nl)) LOG("[gw] frame %llu: dispatch cs %llx stored to %llx+%llu: GPU copy %d\n", (unsigned long long)renderer_exec_frame(),
                                          (unsigned long long)st.program->stages[5].code_addr, (unsigned long long)a, (unsigned long long)m, ngwc); }
 }
@@ -6557,8 +6562,10 @@ static bool gmir_overlaps(uint64_t addr, uint64_t size) {
 // (gwc) A uniform range inside one of this submission's copies (the newest first): bound there
 static bool gwc_find(uint64_t addr, uint64_t size, VkDescriptorBufferInfo *out) {
     if (g_interp_replaying) return false;
+    uint64_t seq = vk_pending_seq();
     for (int j = ngwc - 1; j >= 0; j--) {
         if (addr < gwc[j].addr || addr + size > gwc[j].addr + gwc[j].size) continue;
+        if (gwc[j].seq != seq) return false;  // (the newest copy holding it is from an earlier submission: wait instead)
         VkDeviceSize off = gwc[j].off + (addr - gwc[j].addr);
         if (off % g_vk.props.limits.minUniformBufferOffsetAlignment) return false;
         *out = ubo_span((VkSpan){gwc[j].buf, off, NULL}, size);
