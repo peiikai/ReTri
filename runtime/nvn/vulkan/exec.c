@@ -30,6 +30,7 @@
 #include "../shader_prep.h"
 #include "../../settings.h"
 #include "../weather.h"
+#include "../../game_addresses.h"
 
 static uint64_t stat_draws, stat_skipped, stat_passes, stat_dispatches, stat_wait_ns, stat_flushes, stat_feedback_copies;
 // (the guest heap for shaders in chunks: with the heap import below)
@@ -646,7 +647,46 @@ static void overlap_clear(void) {  // (a full wait was made: everything queued s
     pthread_mutex_unlock(&seq_lock);
 }
 
+static bool cs_since_flush;  // (exec_list, render thread) a compute dispatch was recorded since the last flush
+// (another game) What the storing compute dispatches recorded since the last flush may have written: their storage
+// slots, at least GWP_MIN bytes each (EoW's shadow-cascade dispatches store up to 0x478 bytes past slots bound with
+// 60-128, as renderer.m's g_gw_min). Uniform buffers are copied at record time (cbuf_info), before the GPU has run
+// those dispatches: EoW's draws that read their results as uniforms (the shadow cascades' matrices) got older values
+// (the likely cause of the darker interiors on Vulkan, a shop's doorway light missing). A draw or dispatch reading one of these
+// ranges as uniforms first waits for the GPU (gwp_wait), so its copy has the results, as renderer.m's in-place reads.
+// Full: every uniform read waits once. LARECOMP_VK_GW_WAIT=0: off (copied as before).
+#define GWP_N 64
+#define GWP_MIN 0x480
+static struct { uint64_t addr, size; } gwp[GWP_N];
+static int ngwp;
+static bool gwp_full;
+static bool gwp_on(void) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("LARECOMP_VK_GW_WAIT"); on = game_other() && (!e || atoi(e) != 0); }
+    return on;
+}
+// (gwp, no wait) Right after a storing dispatch (its pass is already ended) its slots are copied on the GPU, from where
+// the dispatch wrote them (the heap import, or the shader global memory copies), into the transient ring; a uniform
+// buffer inside one of those copies is bound there instead of copied from guest memory, so no CPU wait (the wait cost
+// ~5 ms a frame on a Retroid Pocket 5, Adreno 650, in a shop: 23.6 against 18.8 ms). The copy keeps the address's
+// offset within 256 bytes, so a bind at a 256-byte boundary stays aligned. Where no copy could be made (the lazy heap
+// chunks) the wait above stays. LARECOMP_VK_GW_COPY=0: always the wait.
+#define GWC_N 256
+// A copy is good for the submission it was recorded in only: its ring chunk is recycled once that submission is done
+// (vk_transient; a later bind doesn't hold the chunk), and by then the game's CPU may have rewritten the range. Kept
+// across submissions until a flush, they were bound from reused memory on an RTX 3080 Ti: EoW's opening dungeon black
+// or streaked (frames ~1650-1860) where a range a dispatch stored to earlier was read without a dispatch since.
+static struct { uint64_t addr, size, seq; VkBuffer buf; VkDeviceSize off; } gwc[GWC_N];
+static int ngwc;
+static bool gwc_find(uint64_t addr, uint64_t size, VkDescriptorBufferInfo *out);
+static bool gwc_on(void) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("LARECOMP_VK_GW_COPY"); on = !e || atoi(e) != 0; }
+    return on;
+}
 void renderer_flush(void) {
+    cs_since_flush = false;
+    ngwp = 0, gwp_full = false, ngwc = 0;
     renderer_submit();
     if (!wait_why) wait_why = "flush";
     vk_wait_seq(submit_seq);
@@ -732,6 +772,19 @@ void renderer_wait_seq(uint64_t seq) {
     vk_wait_seq(seq);
     gw_inval_done(vk_completed_seq());  // (non-coherent heap: the GPU's writes the game may read now)
     gmir_writeback();  // (what the GPU stored, in guest memory before the game reads it)
+}
+
+// Wait until submission `seq` has completed, now: renderer_wait_seq without the overlap deferral (objects.c
+// other_lag_cap, EoW: the GPU at most a frame behind the game, as renderer.m's).
+void renderer_wait_seq_now(uint64_t seq) {
+    if (!seq) return;
+    pthread_mutex_lock(&seq_lock);
+    uint64_t s = submit_seq;
+    pthread_mutex_unlock(&seq_lock);
+    if (seq > s) seq = s;  // not queued yet (other thread): everything queued so far
+    vk_wait_seq(seq);
+    gw_inval_done(vk_completed_seq());
+    gmir_writeback();
 }
 
 // A descriptor set for the pending submission (record.c: the slot's pools, allocated in batches per layout). With
@@ -1047,6 +1100,7 @@ static struct {
     bool prim_restart;
     uint32_t restart_index;
     uint64_t copy_row_stride, copy_image_stride;
+    bool depth_clamp;  // nvnCommandBufferSetDepthClamp: depth is clamped, not clipped (EoW; as renderer.m's)
 } st;
 
 uint32_t nvn_window_origin(void);
@@ -1504,6 +1558,18 @@ static inline bool ss_need(uint32_t bit, bool same) {
 static void vk_end_pass_at(int line);
 void vk_end_pass(void) { vk_end_pass_at(0); }
 #define vk_end_pass() vk_end_pass_at(__LINE__)
+
+// (objects.c nvn_texture_destroy, EoW; in queue order on the render thread) a texture the game frees while it is still
+// a render target: the pass ends and the slot empties, as renderer.m's, so the next pass doesn't name a freed texture.
+void renderer_texture_destroying(NvnTexture *t) {
+    bool used = st.rt.depth == t;
+    for (int i = 0; i < st.rt.ncolor && i < 8; i++) used |= st.rt.color[i] == t;
+    if (!used) return;
+    vk_end_pass();
+    for (int i = 0; i < st.rt.ncolor && i < 8; i++) if (st.rt.color[i] == t) st.rt.color[i] = NULL, st.rt.has_cview[i] = 0;
+    if (st.rt.depth == t) st.rt.depth = NULL, st.rt.has_dview = 0;
+    st.rt_dirty = true;
+}
 static void vk_end_pass_at(int line) {
     if (!in_pass) return;
     if (prof && line < 4096) prof_end_line[line]++;
@@ -2163,6 +2229,7 @@ static uint64_t prog_content_key(uint64_t vh, uint64_t fh, const ShaderKey *vkey
     b = (const uint8_t *)vkey;
     for (size_t i = 0; i < sizeof *vkey; i++) { h ^= b[i]; h *= 0x100000001B3ull; }
     for (int i = 0; i < 8; i++) { h ^= fkey->rt_kind[i]; h *= 0x100000001B3ull; }
+    if (fkey->stencil_slots) { h ^= fkey->stencil_slots; h *= 0x100000001B3ull; }  // (only then: other keys as before)
     return h;
 }
 
@@ -2188,10 +2255,10 @@ static bool key_memo_on(void) {
 
 static Prog *get_program_(NvnProgram *np, ShaderKey *vkey, ShaderKey *fkey);
 static Prog *get_program(NvnProgram *np, ShaderKey *vkey, ShaderKey *fkey) {
-    static struct { uint64_t code[2]; ShaderKey vkey; uint8_t rt[8]; uint32_t gen; Prog *prog; } m;
+    static struct { uint64_t code[2]; ShaderKey vkey; uint8_t rt[8]; uint16_t stencil; uint32_t gen; Prog *prog; } m;
     bool on = key_memo_on();
     if (on && m.prog && m.gen == key_gen && (np->stage_mask & 3) == 3 && m.code[0] == np->stages[0].code_addr &&
-        m.code[1] == np->stages[1].code_addr && !memcmp(&m.vkey, vkey, sizeof *vkey) && !memcmp(m.rt, fkey->rt_kind, 8)) {
+        m.code[1] == np->stages[1].code_addr && !memcmp(&m.vkey, vkey, sizeof *vkey) && !memcmp(m.rt, fkey->rt_kind, 8) && m.stencil == fkey->stencil_slots) {
         prof_prog_memo++;
         prog_fp_check(m.prog, np);  // (as a table hit)
         return m.prog;
@@ -2199,7 +2266,7 @@ static Prog *get_program(NvnProgram *np, ShaderKey *vkey, ShaderKey *fkey) {
     Prog *p = get_program_(np, vkey, fkey);
     if (on && p) {
         m.code[0] = np->stages[0].code_addr; m.code[1] = np->stages[1].code_addr;
-        m.vkey = *vkey; memcpy(m.rt, fkey->rt_kind, 8); m.gen = key_gen; m.prog = p;
+        m.vkey = *vkey; memcpy(m.rt, fkey->rt_kind, 8); m.stencil = fkey->stencil_slots; m.gen = key_gen; m.prog = p;
     }
     return p;
 }
@@ -2211,6 +2278,7 @@ static Prog *get_program_(NvnProgram *np, ShaderKey *vkey, ShaderKey *fkey) {
     const uint8_t *vb = (const uint8_t *)vkey;
     for (size_t i = 0; i < sizeof *vkey; i++) { h ^= vb[i]; h *= 0x100000001B3ull; }
     for (int i = 0; i < 8; i++) { h ^= fkey->rt_kind[i]; h *= 0x100000001B3ull; }
+    if (fkey->stencil_slots) { h ^= fkey->stencil_slots; h *= 0x100000001B3ull; }
     if (!h) h = 1;
     uint32_t slot = (uint32_t)(h ^ (h >> 31)) & (PROG_TAB - 1);
     while (prog_tab[slot].key && prog_tab[slot].key != h) slot = (slot + 1) & (PROG_TAB - 1);
@@ -2428,6 +2496,7 @@ typedef struct {
     uint8_t blend[8][8];
     uint8_t blend_on, a2c, topo_class, poly_fill;
     uint8_t recol;  // (maxwell_glsl_tint_branch) built with the HSV recolour (RECOLOUR = true)
+    uint8_t depth_clamp;  // nvnCommandBufferSetDepthClamp (EoW): depth clamped, not clipped
     uint32_t write_mask[8];
 } PipeKey;
 
@@ -2450,7 +2519,7 @@ struct PipeMemo {
     int nattrib, nstream;
     VkFormat color[8], depth, stencil;
     uint32_t attrib[16], stream[16][2], rt_fmt[8];
-    uint8_t blend[8][8], blend_on, a2c, cls, poly_fill;
+    uint8_t blend[8][8], blend_on, a2c, cls, poly_fill, depth_clamp;
     Pipe *pp;
     VtxLayout vl;  // the layout pipe_key_fill made from these inputs (dynamic vertex input leaves it out of pp's key)
 };
@@ -2486,6 +2555,7 @@ typedef struct {
     uint8_t blend_on;               // color state blend enables
     const uint8_t (*blend)[8];
     uint8_t a2c, topo_class, poly_fill;
+    uint8_t depth_clamp;            // (not in variant records: 0 for prepared pipelines)
 } PipeIn;
 
 // vl (optional): the vertex layout, also when the key leaves it out (dynamic vertex input)
@@ -2546,6 +2616,7 @@ static void pipe_key_fill(PipeKey *k, Prog *pr, const PipeIn *in, const VkFormat
     k->a2c = in->a2c;
     k->topo_class = in->topo_class;
     k->poly_fill = in->poly_fill;
+    k->depth_clamp = in->depth_clamp;
 }
 
 // A pipeline's create info from its key (the structures point into each other and into the key: filled in place)
@@ -2602,6 +2673,7 @@ static void pipe_ci_fill(PipeCI *c, const PipeKey *k) {
                                                      .topology = topo_class_base(k->topo_class)};
     c->vs = (VkPipelineViewportStateCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
     c->rs = (VkPipelineRasterizationStateCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+                                                     .depthClampEnable = k->depth_clamp && g_vk.depth_clamp,
                                                      .polygonMode = k->poly_fill ? VK_POLYGON_MODE_FILL : VK_POLYGON_MODE_LINE, .lineWidth = 1};
     c->ms = (VkPipelineMultisampleStateCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
                                                    .rasterizationSamples = (VkSampleCountFlagBits)k->samples, .alphaToCoverageEnable = k->a2c};
@@ -2686,6 +2758,8 @@ static void set_vertex_input(VkCommandBuffer cb, const VtxLayout *l) {
 // ================================================================== feedback snapshots (renderer.m resolve_feedback)
 static NvnTexture *feedback_tex[4];
 static VkImageView feedback_view[4];
+static TexBackend *feedback_snap[4];  // (the copy itself: a stencil read gets its stencil, texture_info)
+static uint16_t g_stencil_slots;      // the current draw's fragment slots read as stencil (draw_, stencil_slots_of)
 static int nfeedback;
 static uint64_t g_cur_fs_hash;
 static NvnTexture *snap_tex[8];
@@ -2700,9 +2774,18 @@ typedef struct { NvnTexture *key; TexBackend copy; } Snap;
 static Snap snaps[16];
 static int nsnaps;
 
+// A shader's texture handle by its slot ((cbuf offset - 0x20) / 8): 0-31 the bound textures; 32-39 (offsets
+// 0x120-0x15f) the bound images - a texture fetch through an image binding (EoW's environment-map dispatch reads one
+// this way, as renderer.m's handle_at); both handles index the texture pool.
+static uint64_t handle_at(int stage, int slot) {
+    if (slot >= 0 && slot < 32) return st.tex[stage][slot];
+    if (slot >= 32 && slot < 40) return st.img[stage][slot - 32];
+    return 0;
+}
+
 static NvnTexture *shader_texture_object(int stage, ShaderTexture *st_) {
     int slot = ((int)st_->handle_offset - 0x20) / 8;
-    uint64_t h = (slot >= 0 && slot < 32) ? st.tex[stage][slot] : 0;
+    uint64_t h = handle_at(stage, slot);
     uint32_t tic = h & 0xFFFFF;
     if (!h || !st.tpool || tic >= (uint32_t)st.tpool->count) return NULL;
     return ((NvnTexEntry *)st.tpool->entries)[tic].tex;
@@ -2976,6 +3059,7 @@ static void resolve_feedback(Prog *pr) {
             static const VkComponentMapping id = {0};
             if (!nosnap && si >= 0 && (snap_ok[si] || self_write) && existing) {
                 feedback_tex[nfeedback] = t;
+                feedback_snap[nfeedback] = &existing->copy;
                 feedback_view[nfeedback++] = vk_image_view(&existing->copy, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, sa);
                 continue;
             }
@@ -2999,6 +3083,7 @@ static void resolve_feedback(Prog *pr) {
                 cb = vk_cmd();
             }
             feedback_tex[nfeedback] = t;
+            feedback_snap[nfeedback] = dst;
             feedback_view[nfeedback++] = vk_image_view(dst, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, sa);
             if (si < 0) { static int rr; si = rr++ & 7; snap_tex[si] = t; }
             snap_ok[si] = true;
@@ -3721,6 +3806,28 @@ static VkSpan drv_dedupe(int stage, uint64_t size) {
 }
 
 // Constant buffer k of a stage (renderer.m bind_cbufs), copied into transient memory.
+// EoW's rift: the map's draw (its vertex cb4 rows 0-1) and the mask's (fragment cb4 rows 33-34): see cbuf_info.
+// LARECOMP_RIFT_ROWS_OFF=1: the game's rows as they are.
+// (debug) LARECOMP_LOG_GW=1: the [gw] lines, 100 each from the start; LARECOMP_LOG_GW_FROM=<frame>: up to 600 from that
+// frame on, each with its frame and fragment shader (the frames that went wrong, not the first second)
+uint64_t renderer_exec_frame(void);
+static bool gw_log(int *n) {
+    static int on = -1;
+    static long from = -1;
+    if (on < 0) { on = getenv("LARECOMP_LOG_GW") != NULL; from = getenv("LARECOMP_LOG_GW_FROM") ? atol(getenv("LARECOMP_LOG_GW_FROM")) : -1; }
+    if (!on) return false;
+    if (from < 0) return (*n)++ < 100;
+    static int total;
+    return (long)renderer_exec_frame() >= from && total++ < 600;
+}
+#define GW_AT() (unsigned long long)renderer_exec_frame(), (unsigned long long)g_cur_fs_hash
+#define RIFT_MAP_FS 0xd6c58a42e55a9f9eull
+#define RIFT_MASK_FS 0x44b584f0d922d49dull
+static bool rift_rows_on(void) {
+    static int on = -1;
+    if (on < 0) on = game_other() && !getenv("LARECOMP_RIFT_ROWS_OFF");
+    return on;
+}
 static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32_t gx, uint32_t gy, uint32_t gz) {
     static const uint8_t zeros[0x10000];
     if (k == 0) {
@@ -3771,10 +3878,61 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     // at every draw, as before)
     static int scan_once = -1;
     if (scan_once < 0) scan_once = getenv("LARECOMP_VK_NO_SCAN_ONCE") == NULL;
+    {   // EoW's rift (the dark void over a building), as renderer.m: a top-down map of the rift meshes drawn with the map
+        // view's projection (vertex cb4 rows 0-1), and a mask pass reading the map back with rows 33-34 of the scene
+        // view's constants (the same projection halved into texture space). The game rewrites both, rotated to its final
+        // map view, a few ms after submitting the frame; copied at record time, the two could come from either side of
+        // that. So the map and the mask's rows are made from one projection: the map and its lookup agree.
+        // That projection is the game's final one from the frame before (read back from the last mask draw's rows once
+        // the game has written them), not the first one: the final view fits the rift about 3x tighter, so the map's
+        // texels are 3x finer and the rift's edges are clean lines instead of steps (the first view only until a final
+        // one is known, and when the rift's map is not drawn for 4 frames). LARECOMP_RIFT_FIRST_ROWS=1: the first rows.
+        // Both read cb4 from a CPU copy, never the GPU's copy of a dispatch's results: draw_ waits for those first.
+        static float map_rows[8], final_rows[8];
+        static uint64_t map_frame = ~0ull, final_frame, mask_addr;
+        static int first = -1;
+        if (first < 0) first = getenv("LARECOMP_RIFT_FIRST_ROWS") != NULL;
+        static uint8_t buf[0x10000];
+        extern uint64_t renderer_exec_frame(void);
+        if (rift_rows_on() && stage == 0 && k == 4 && g_cur_fs_hash == RIFT_MAP_FS && r.size >= 32) {
+            uint64_t fr = renderer_exec_frame();
+            if (mask_addr && map_frame != fr) {  // (a new frame: the last mask's rows, final if the game has written them)
+                const float *g = (const float *)(uintptr_t)mask_addr + 33 * 4;
+                bool identity = g[0] == 1 && g[1] == 0 && g[2] == 0 && g[3] == 0 && g[4] == 0 && g[5] == 1 && g[6] == 0 && g[7] == 0;
+                if (!identity) {
+                    for (int i = 0; i < 8; i++) final_rows[i] = (g[i] - ((i & 3) == 3 ? 0.5f : 0.0f)) * 2.0f;
+                    final_frame = fr;
+                }
+                mask_addr = 0;
+            }
+            bool use_final = !first && final_frame && fr - final_frame <= 4;
+            if (map_frame != fr) memcpy(map_rows, use_final ? final_rows : (const float *)(uintptr_t)r.addr, 32);
+            map_frame = fr;
+            { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: rift map cb4 %llx+%llu (%s rows, pending dispatches %d, copies %d)\n", GW_AT(), (unsigned long long)r.addr, (unsigned long long)size, use_final ? "final" : "first", ngwp, ngwc); }
+            memcpy(buf, (const void *)(uintptr_t)r.addr, size);  // (a CPU copy, not a GPU copy)
+            memcpy(buf, map_rows, 32);
+            return ubo_span(vk_transient_copy(buf, size, 256), size);
+        }
+        if (rift_rows_on() && stage == 1 && k == 4 && g_cur_fs_hash == RIFT_MASK_FS && size >= 35 * 16 &&
+            map_frame == renderer_exec_frame()) {
+            mask_addr = r.addr;
+            memcpy(buf, (const void *)(uintptr_t)r.addr, size);
+            float *row = (float *)buf + 33 * 4;
+            { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: rift mask cb4 %llx+%llu rows 33-34 from the map (pending dispatches %d, copies %d)\n", GW_AT(), (unsigned long long)r.addr, (unsigned long long)size, ngwp, ngwc); }
+            for (int i = 0; i < 8; i++) row[i] = map_rows[i] * 0.5f + ((i & 3) == 3 ? 0.5f : 0.0f);
+            return ubo_span(vk_transient_copy(buf, size, 256), size);
+        }
+    }
     if (g_interp_log && stage < 2) {  // (frame interpolation: logged / blended copy; compared over the bytes the shader reads)
         uint64_t used = si->cbuf_used[k] && si->cbuf_used[k] < size ? si->cbuf_used[k] : size;
         const void *src = interp_cbuf(stage, k, idx, (const void *)(uintptr_t)r.addr, size, used);
         if (src != (const void *)(uintptr_t)r.addr) return ubo_span(vk_transient_copy(src, size, 256), size);
+    }
+    VkDescriptorBufferInfo gb;
+    if (ngwc && gwc_find(r.addr, size, &gb)) {  // (a storing dispatch's results this submission: the GPU's copy)
+        { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: stage %d cb%d %llx+%llu: the GPU's copy of a dispatch's results\n", GW_AT(), stage, k,
+                                             (unsigned long long)r.addr, (unsigned long long)size); }
+        return gb;
     }
     if (gc_lazy && si->uses_gmem && scan_once) return ubo_span(guest_copy_ex(r.addr, size, true), size);
     if (gc_lazy && si->uses_gmem) gc_scan_pointers((const uint32_t *)(uintptr_t)r.addr, size);
@@ -5774,7 +5932,7 @@ static void shadow_slot_check(int stage, const ShaderTexture *st_, int i, uint64
 static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo *out, float sc[2], uint32_t wh[2], float fr[2]) {
     ShaderTexture *st_ = &si->tex[i];
     int slot = ((int)st_->handle_offset - 0x20) / 8;  // 64-bit handles from offset 0x20
-    uint64_t h = (slot >= 0 && slot < 32) ? st.tex[stage][slot] : 0;
+    uint64_t h = handle_at(stage, slot);
     VkImageView view = VK_NULL_HANDLE;
     VkSampler smp = VK_NULL_HANDLE;
     uint32_t tic = h & 0xFFFFF, tsc = (uint32_t)(h >> 20) & 0xFFF;
@@ -5810,6 +5968,15 @@ static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo
             for (int k = 0; k < nfeedback; k++)
                 if (e->tex == feedback_tex[k] && (st_->type == TEXTYPE_2D || st_->type == TEXTYPE_2D_ARRAY)) {
                     view = feedback_view[k];
+                    // A stencil read of the snapshot gets the copy's stencil, as vk_view gives the texture's own: through
+                    // the depth view the shader's integer reads got the depth's bits. EoW's rift mask reads the depth /
+                    // stencil it is drawn against; its whole area was striped in most runs on an RTX 3080 Ti (renderer.m
+                    // binds a stencil view of its copy too).
+                    static const VkComponentMapping idm = {0};
+                    if (stage == 1 && slot >= 0 && slot < 16 && (g_stencil_slots >> slot & 1) && st_->type == TEXTYPE_2D &&
+                        (feedback_snap[k]->aspect & VK_IMAGE_ASPECT_STENCIL_BIT))
+                        view = vk_image_view(feedback_snap[k], VK_IMAGE_VIEW_TYPE_2D, feedback_snap[k]->format, 0, 1, 0, 1, idm,
+                                             VK_IMAGE_ASPECT_STENCIL_BIT);
                     if (st_->type == TEXTYPE_2D_ARRAY) view = vk_dummy_view(TEXTYPE_2D_ARRAY);  // (2D snapshot as array: rare)
                 }
         } else if (e->dead_format) {
@@ -6375,6 +6542,113 @@ static void gpl_probe_note(Pipe *pp) { (void)pp; }
 static void gpl_probe(void) {}
 #endif
 
+// (gwc) Where the GPU has [addr, addr + size) after a dispatch stored to it: the shader global memory copies' slot, or
+// the heap import itself; none with the lazy heap chunks (a range can cross them)
+static bool gwc_source(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSize *off) {
+    if (addr < HEAP_BASE || !size) return false;
+    if (gmir_on()) return gmir_direct(addr, size, buf, off);
+    if (gc_lazy || !gmem_buf || addr + size > HEAP_BASE + gmem_size) return false;
+    *buf = gmem_buf, *off = addr - HEAP_BASE;
+    return true;
+}
+static void gwc_drop(int j) {  // (in order: gwc_find takes the newest copy holding a range)
+    memmove(&gwc[j], &gwc[j + 1], (size_t)(--ngwc - j) * sizeof gwc[0]);
+}
+// (gwc) The dispatch just recorded stored to [a, a + n): copy it on the GPU, or (no source) drop older copies it
+// overlaps, so a bind there waits (gwp_wait) rather than reading a copy from before this dispatch
+static void gwc_note(VkCommandBuffer cb, uint64_t a, uint64_t n, uint64_t slot_size, bool *barrier) {
+    VkBuffer sb;
+    VkDeviceSize so;
+    uint64_t m = n;  // (the slot as bound, if the 0x480 bytes past it aren't in the source: binds past it still wait)
+    uint64_t seq = vk_pending_seq();
+    for (int j = 0; j < ngwc; j++)  // (a range stored again: the older copy is no longer what the slot holds; an earlier
+        if (gwc[j].addr == a || gwc[j].seq != seq) gwc_drop(j--);  // submission's copies are no use any more)
+    bool ok = gwc_on() && !g_interp_replaying && ngwc < GWC_N && (gwc_source(a, m, &sb, &so) || (m = slot_size, gwc_source(a, m, &sb, &so)));
+    if (!ok) {
+        if (getenv("LARECOMP_LOG_GW")) {
+            static int nl;
+            if (nl++ < 40) LOG("[gw] no GPU copy of %llx+%llu (slot %llu bytes, %d copies)\n", (unsigned long long)a,
+                               (unsigned long long)n, (unsigned long long)slot_size, ngwc);
+        }
+        for (int j = 0; j < ngwc; j++)
+            if (a < gwc[j].addr + gwc[j].size && gwc[j].addr < a + n) gwc_drop(j--);
+        return;
+    }
+    if (!*barrier) vk_full_barrier(cb), *barrier = true;  // (the dispatch's writes, before the copy reads them)
+    VkSpan d = vk_transient(m + 256, 256);
+    VkBufferCopy c = {so, d.off + (a & 255), m};
+    rec_CmdCopyBuffer(cb, sb, d.buf, 1, &c);
+    gwc[ngwc].addr = a, gwc[ngwc].size = m, gwc[ngwc].seq = vk_pending_seq(), gwc[ngwc].buf = d.buf, gwc[ngwc++].off = c.dstOffset;
+    { static int nl; if (gw_log(&nl)) LOG("[gw] frame %llu: dispatch cs %llx stored to %llx+%llu: GPU copy %d\n", (unsigned long long)renderer_exec_frame(),
+                                         (unsigned long long)st.program->stages[5].code_addr, (unsigned long long)a, (unsigned long long)m, ngwc); }
+}
+// (gwc, shader global memory copies) Does any slot hold part of [addr, addr + size)? The GPU writes only there: a range
+// outside every slot (past a slot, in GWP_MIN's margin) can't hold a dispatch's results, and needs no wait
+static bool gmir_overlaps(uint64_t addr, uint64_t size) {
+    bool hit = false;
+    pthread_mutex_lock(&gmir_lock);
+    for (int k = 0; k < GMIR_SLOTS && !hit; k++)
+        hit = gmir_slot[k].used && addr < gmir_slot[k].hi && gmir_slot[k].lo < addr + size;
+    pthread_mutex_unlock(&gmir_lock);
+    return hit;
+}
+// (gwc) A uniform range inside one of this submission's copies (the newest first): bound there
+static bool gwc_find(uint64_t addr, uint64_t size, VkDescriptorBufferInfo *out) {
+    if (g_interp_replaying) return false;
+    uint64_t seq = vk_pending_seq();
+    for (int j = ngwc - 1; j >= 0; j--) {
+        if (addr < gwc[j].addr || addr + size > gwc[j].addr + gwc[j].size) continue;
+        if (gwc[j].seq != seq) return false;  // (the newest copy holding it is from an earlier submission: wait instead)
+        VkDeviceSize off = gwc[j].off + (addr - gwc[j].addr);
+        if (off % g_vk.props.limits.minUniformBufferOffsetAlignment) return false;
+        *out = ubo_span((VkSpan){gwc[j].buf, off, NULL}, size);
+        return true;
+    }
+    return false;
+}
+
+// (gwp) A storing dispatch was recorded: its storage slots may hold its results once the GPU has run it
+static void gwp_note_dispatch(VkCommandBuffer cb) {
+    if (!gwp_on()) return;
+    bool barrier = false;
+    for (int i = 0; i < 16; i++) {
+        uint64_t a = st.sbuf[5][i].addr, n = st.sbuf[5][i].size < GWP_MIN ? GWP_MIN : st.sbuf[5][i].size;
+        if (!a) continue;
+        gwc_note(cb, a, n, st.sbuf[5][i].size, &barrier);
+        int j = 0;
+        while (j < ngwp && !(gwp[j].addr == a && gwp[j].size >= n)) j++;
+        if (j < ngwp) continue;
+        if (ngwp == GWP_N) { gwp_full = true; break; }
+        gwp[ngwp].addr = a, gwp[ngwp++].size = n;
+    }
+    if (barrier) vk_full_barrier(cb);  // (the copies, before draws read them as uniforms)
+}
+// (gwp) Before a draw or dispatch is recorded: a uniform buffer a stage reads that a pending dispatch may have written
+// waits for the GPU (renderer_flush: the GPU's writes in guest memory), so cbuf_info's copy has the results
+// kmask: the uniform slots to check; no_copy: slots whose CPU copy is used even when a GPU copy exists (the rift rows)
+static void gwp_wait_k(int stage, const ShaderInfo *si, uint32_t kmask, bool no_copy) {
+    if ((!ngwp && !gwp_full) || g_interp_replaying) return;  // (a replay: no waits, as the indirect draws)
+    for (int k = 3; k < 18; k++) {
+        if (!(si->cbuf_mask & kmask & (1u << k))) continue;
+        Range r = st.ubuf[stage][k - 3];
+        if (!r.addr) continue;
+        uint64_t size = r.size ? r.size : si->cbuf_size[k];
+        VkDescriptorBufferInfo b;
+        if (!no_copy && gwc_find(r.addr, size, &b)) continue;  // (bound to the GPU's copy: cbuf_info)
+        if (gwc_on() && gmir_on() && !gmir_overlaps(r.addr, size)) continue;  // (the GPU can't have written it)
+        bool hit = gwp_full;
+        for (int j = 0; j < ngwp && !hit; j++) hit = r.addr < gwp[j].addr + gwp[j].size && gwp[j].addr < r.addr + size;
+        if (!hit) continue;
+        { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: stage %d cb%d %llx+%llu: written by a dispatch not run yet - waiting\n", GW_AT(), stage, k,
+                                             (unsigned long long)r.addr, (unsigned long long)size); }
+        wait_why = "uniforms a dispatch writes";
+        renderer_flush();
+        gw_inval_done(vk_completed_seq());  // (non-coherent heap: the dispatches' writes, seen by the CPU)
+        return;
+    }
+}
+static void gwp_wait(int stage, const ShaderInfo *si) { gwp_wait_k(stage, si, ~0u, false); }
+
 static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     snap_reason = "compute"; snapshots_invalidate(NULL);
     if (!st.program || !gx || !gy || !gz) return;
@@ -6398,6 +6672,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
             LOG("\n");
         }
     }
+    gwp_wait(5, cp->si);  // (before anything of this dispatch is recorded: the wait submits)
     st_cs_stores = cp->si->uses_gmem_store;
     snap_apply(5, 0xFFFF);  // (overlap) every bound slot: the probe / copy decision per range, before gfast and the sets read the table
     vk_end_pass();
@@ -6438,7 +6713,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
         if (gmir_on()) gmir_after_dispatch(cb);  // (its slots: readbacks; what follows reads the slots)
         else gfast_finish(cb);
     }
-    if (cp->si->uses_gmem_store) vc_mark_sbufs(5);
+    if (cp->si->uses_gmem_store) vc_mark_sbufs(5), gwp_note_dispatch(cb);
     stat_dispatches++;
 }
 
@@ -6549,6 +6824,7 @@ static int pk_diff(const PipeKey *a, const PipeKey *b, char *out, size_t n) {
     PKD(a->a2c != b->a2c, " a2c %u/%u;", a->a2c, b->a2c);
     PKD(a->topo_class != b->topo_class, " topo %u/%u;", a->topo_class, b->topo_class);
     PKD(a->poly_fill != b->poly_fill, " fill %u/%u;", a->poly_fill, b->poly_fill);
+    PKD(a->depth_clamp != b->depth_clamp, " depth clamp %u/%u;", a->depth_clamp, b->depth_clamp);
     if (!d && memcmp(a, b, sizeof *a)) {  // (no field differs: other bytes - padding)
         const uint8_t *x = (const uint8_t *)a, *y = (const uint8_t *)b;
         for (size_t i = 0; i < sizeof *a; i++) PKD(x[i] != y[i], " byte %zu %02x/%02x;", i, x[i], y[i]);
@@ -6879,6 +7155,26 @@ static void draw(CmdRec *r, bool indexed) {
     PROF_ADD(prof_draw);
 }
 static uint64_t prof_tp_;
+// Fragment texture slots (0-15) bound to a depth / stencil texture in stencil mode (the texture's own mode, or its
+// view's): the shader reads the stencil's integers (ShaderKey.stencil_slots) from a stencil view (textures.c vk_view).
+// EoW's rifts test bits the scene marks in the stencil; read as depth, the rift's dark void was missing. As renderer.m.
+static uint16_t stencil_slots_of(const ShaderInfo *fi) {
+    uint16_t m = 0;
+    if (!fi || !game_other()) return 0;
+    for (int i = 0; i < fi->ntex; i++) {
+        const ShaderTexture *t = &fi->tex[i];
+        int slot = ((int)t->handle_offset - 0x20) / 8;
+        if (slot < 0 || slot >= 16 || t->type != TEXTYPE_2D || t->shadow || t->bindless) continue;
+        uint64_t h = st.tex[1][slot];
+        uint32_t tic = h & 0xFFFFF;
+        if (!h || !st.tpool || tic >= (uint32_t)st.tpool->count) continue;
+        const NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
+        if (!e->tex) continue;
+        uint32_t mode = e->has_view && (e->view.setmask & 16) ? e->view.ds_mode : e->tex->ds_mode;
+        if (mode == 1) m |= (uint16_t)(1u << slot);
+    }
+    return m;
+}
 static void draw_(CmdRec *r, bool indexed) {
     if (prof) prof_tp_ = SDL_GetTicksNS();
     if (!st.program) { SKIP(SK_NO_PROGRAM); return; }
@@ -6890,6 +7186,12 @@ static void draw_(CmdRec *r, bool indexed) {
     for (int i = 0; i < st.rt.ncolor; i++) if (st.rt.color[i]) fkey.rt_kind[i] = (uint8_t)rt_kind(st.rt.color[i]->format);
     Prog *pr = get_program(st.program, &vkey, &fkey);
     if (!pr || atomic_load(&pr->state) != 1) { SKIP(!pr ? SK_NO_STAGES : atomic_load(&pr->state) == 2 ? SK_PROG_FAILED : SK_PROG_BUILDING); return; }
+    g_stencil_slots = fkey.stencil_slots = stencil_slots_of(pr->fi);
+    if (fkey.stencil_slots) {  // (a texture read as its stencil: another program)
+        pr = get_program(st.program, &vkey, &fkey);
+        if (!pr || atomic_load(&pr->state) != 1) { SKIP(!pr ? SK_NO_STAGES : atomic_load(&pr->state) == 2 ? SK_PROG_FAILED : SK_PROG_BUILDING); return; }
+    }
+    gwp_wait(0, pr->vi), gwp_wait(1, pr->fi);  // (before anything of this draw is recorded: the wait submits)
     g_mirror_w = 0;
     extern float renderer_ao_blur_scale(NvnTexture *t);
     g_ao_taps = pr->fi->uses_ao_taps && st.rt.ncolor ? renderer_ao_blur_scale(st.rt.color[0]) : 0;
@@ -6967,6 +7269,11 @@ static void draw_(CmdRec *r, bool indexed) {
         for (int i = 0; i < nskip; i++) if (last_hash == skip[i]) { SKIP(SK_DEBUG_SKIP); return; }
         if (g_debug_frame && getenv("LARECOMP_LOG_FSHASH")) LOG("[fshash] fs=%llx hash %016llx\n", (unsigned long long)fs, (unsigned long long)last_hash);
         g_cur_fs_hash = last_hash;
+        // (the rift's map and mask make their cb4 from a CPU copy, cbuf_info: a dispatch's results in it, GPU-copied
+        // for other draws, are waited for here - with the GPU's copy left aside the mask read stale rows and the
+        // opening dungeon went black, frames ~1650-1860 on an RTX 3080 Ti)
+        if (rift_rows_on() && (last_hash == RIFT_MAP_FS || last_hash == RIFT_MASK_FS))
+            gwp_wait_k(last_hash == RIFT_MAP_FS ? 0 : 1, last_hash == RIFT_MAP_FS ? pr->vi : pr->fi, 1u << 4, true);
         extern void widescreen_backdrop_seen(uint64_t hash);
         if (last_hash) widescreen_backdrop_seen(last_hash);
         extern void widescreen_scene_ubo(const float *u, uint64_t size);  // (the camera's view-projection)
@@ -7008,7 +7315,7 @@ static void draw_(CmdRec *r, bool indexed) {
     uint32_t rt_fmt[8] = {0};
     for (int i = 0; i < st.rt.ncolor && i < 8; i++) rt_fmt[i] = st.rt.color[i] ? st.rt.color[i]->format : 0;
     const PipeIn in = {st.attrib, st.nattrib, (const uint32_t (*)[2])st.stream, st.nstream, rt_fmt, st.channel_mask,
-                       st.color_state[0], (const uint8_t (*)[8])st.blend, st.ms[0xC] != 0, cls, st.poly[2] != 1};
+                       st.color_state[0], (const uint8_t (*)[8])st.blend, st.ms[0xC] != 0, cls, st.poly[2] != 1, st.depth_clamp};
     bool memo_on = key_memo_on();
     if (memo_on && !pr->pmemo) pr->pmemo = calloc(1, sizeof *pr->pmemo);
     struct PipeMemo *pm = memo_on ? pr->pmemo : NULL;
@@ -7021,6 +7328,7 @@ static void draw_(CmdRec *r, bool indexed) {
     if (pm && pm->pp && pm->gen == key_gen && pm->ncolor == pass_ncolor && pm->samples == pass_samples && pm->depth == pass_depth &&
         pm->stencil == pass_stencil && pm->nattrib == st.nattrib && pm->nstream == st.nstream && pm->channel_mask == in.channel_mask &&
         pm->blend_on == in.blend_on && pm->a2c == in.a2c && pm->cls == in.topo_class && pm->poly_fill == in.poly_fill &&
+        pm->depth_clamp == in.depth_clamp &&
         !memcmp(pm->color, pass_color, npc * sizeof pass_color[0]) && !memcmp(pm->rt_fmt, rt_fmt, sizeof rt_fmt) &&
         !memcmp(pm->attrib, st.attrib, (size_t)nat * 4) && !memcmp(pm->stream, st.stream, (size_t)nst * 8) &&
         !memcmp(pm->blend, st.blend, sizeof pm->blend)) {
@@ -7060,7 +7368,7 @@ static void draw_(CmdRec *r, bool indexed) {
         if (pm) {
             pm->gen = key_gen; pm->ncolor = pass_ncolor; pm->samples = pass_samples; pm->depth = pass_depth; pm->stencil = pass_stencil;
             pm->nattrib = st.nattrib; pm->nstream = st.nstream; pm->channel_mask = in.channel_mask; pm->blend_on = in.blend_on;
-            pm->a2c = in.a2c; pm->cls = in.topo_class; pm->poly_fill = in.poly_fill;
+            pm->a2c = in.a2c; pm->cls = in.topo_class; pm->poly_fill = in.poly_fill; pm->depth_clamp = in.depth_clamp;
             memcpy(pm->color, pass_color, sizeof pm->color); memcpy(pm->rt_fmt, rt_fmt, sizeof pm->rt_fmt);
             memcpy(pm->attrib, st.attrib, sizeof pm->attrib); memcpy(pm->stream, st.stream, sizeof pm->stream);
             memcpy(pm->blend, st.blend, sizeof pm->blend);
@@ -7181,11 +7489,11 @@ static void draw_(CmdRec *r, bool indexed) {
 #define FTEX(i) (hook_pass ? ftex[i] : shader_texture_object(1, &pr->fi->tex[i]))
 #if PLAT_TOUCH
     if (fknown) {  // (the title and the file select, seen from their draws: what a tap does there, touch_controls.mm)
-        extern void texpatch_note_draw(int id);
+        extern void texpatch_note_draw_at(int id, const float *ui, uint64_t size);
         for (int i = 0; i < pr->fi->ntex; i++) {
             NvnTexture *t = FTEX(i);
             const TexBackend *b = t ? (const TexBackend *)t->backend : NULL;
-            if (b && b->tp > 0) texpatch_note_draw(b->tp - 1);
+            if (b && b->tp > 0) texpatch_note_draw_at(b->tp - 1, (const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size);
         }
     }
 #endif
@@ -8569,6 +8877,7 @@ static void exec_list(uint64_t handle, int depth) {
         }
         case CMD_SET_POLYGON_OFFSET: memcpy(st.poly_offset, r->f, sizeof st.poly_offset); break;
         case CMD_SET_PRIMITIVE_RESTART: st.prim_restart = r->x[0] != 0; st.restart_index = (uint32_t)r->x[1]; break;
+        case CMD_SET_DEPTH_CLAMP: st.depth_clamp = r->x[0] != 0; break;
         case CMD_SET_COPY_STRIDES: st.copy_row_stride = r->x[0]; st.copy_image_stride = r->x[1]; break;
         case CMD_CLEAR_COLOR: {
             snap_reason = "clear-color"; snapshots_invalidate(NULL);
@@ -8640,9 +8949,52 @@ static void exec_list(uint64_t handle, int depth) {
         case CMD_DISPATCH:
             if (g_interp_replaying) break;  // (a replayed frame: the frame's compute results are already there)
             dispatch_compute((uint32_t)r->x[0], (uint32_t)r->x[1], (uint32_t)r->x[2]);
+            cs_since_flush = true;
             break;
         case CMD_DRAW_ARRAYS: draw(r, false); break;
         case CMD_DRAW_ELEMENTS: draw(r, true); break;
+        case CMD_DRAW_ARRAYS_INDIRECT: case CMD_DRAW_ELEMENTS_INDIRECT: case CMD_DISPATCH_INDIRECT: {
+            // (EoW; LA has none) The arguments are in GPU memory, often written by a compute dispatch just before:
+            // ~24 GPU-culled instanced draws a frame, their instance counts added up by its culling dispatches. They
+            // were dropped here, as on Metal before renderer.m's fix (the town's lighting flickered). As renderer.m's
+            // CPU path: once the GPU work before is done (one flush per batch after a dispatch), the arguments are
+            // read and drawn as a plain draw. The flush also gives the plain draws after it the dispatches' results
+            // (their uniforms are copied at record time: cbuf_info). Layouts: elements {count, instances, first
+            // index, base vertex, base instance}, arrays {count, instances, first, base instance}, dispatch {x, y, z}.
+            uint64_t args = r->op == CMD_DRAW_ELEMENTS_INDIRECT ? r->x[3] : r->op == CMD_DRAW_ARRAYS_INDIRECT ? r->x[1] : r->x[0];
+            if (!args) break;
+            if (r->op == CMD_DISPATCH_INDIRECT && g_interp_replaying) break;
+            if (cs_since_flush && !g_interp_replaying) {
+                wait_why = "indirect arguments";
+                renderer_flush();
+                gw_inval_done(vk_completed_seq());  // (non-coherent heap: the dispatches' writes, seen by the CPU)
+            }
+            const uint32_t *a = (const uint32_t *)(uintptr_t)args;
+            if (r->op == CMD_DISPATCH_INDIRECT) {
+                if (a[0] && a[1] && a[2]) dispatch_compute(a[0], a[1], a[2]), cs_since_flush = true;
+                break;
+            }
+            CmdRec d = *r;
+            if (r->op == CMD_DRAW_ELEMENTS_INDIRECT) {
+                uint32_t isz = r->x[1] == 0 ? 1 : r->x[1] == 1 ? 2 : 4;
+                d.op = CMD_DRAW_ELEMENTS;
+                d.x[0] = r->x[0], d.x[1] = r->x[1], d.x[2] = a[0], d.x[3] = r->x[2] + (uint64_t)a[2] * isz;
+                d.x[4] = (uint64_t)(int64_t)(int32_t)a[3], d.x[5] = a[4], d.x[6] = a[1];
+            } else {
+                d.op = CMD_DRAW_ARRAYS;
+                d.x[0] = r->x[0], d.x[1] = a[2], d.x[2] = a[0], d.x[3] = a[3], d.x[4] = a[1];
+            }
+            if (a[0] && a[1]) draw(&d, r->op == CMD_DRAW_ELEMENTS_INDIRECT);
+            break;
+        }
+        case CMD_CLEAR_BUFFER: {  // (address, size, 32-bit value; EoW resets its culling counters with it): in order
+            if (g_interp_replaying || !r->x[0] || r->x[1] > (1ull << 30)) break;  // with the GPU work before, as a copy
+            wait_why = "clear buffer";
+            renderer_flush();
+            uint32_t *d = (uint32_t *)(uintptr_t)r->x[0];
+            for (uint64_t i = 0; i < r->x[1] / 4; i++) d[i] = (uint32_t)r->x[2];
+            break;
+        }
         case CMD_UPDATE_UNIFORM_BUFFER:
             if (g_interp_replaying) break;  // (replay: the draws read their logged uniform copies)
             memcpy((void *)(uintptr_t)(r->x[0] + r->x[2]), x, r->x[3]);

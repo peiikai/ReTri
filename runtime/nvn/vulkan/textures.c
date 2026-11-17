@@ -16,10 +16,12 @@
 #include "../tex_hash.h"
 #include "../renderer.h"
 #include "../texpatch.h"
+#include "../../game_addresses.h"
 #include "../output_scale.h"
+#include "../../game_addresses.h"
 
 // ================================================================== formats
-typedef struct { VkFormat vf; uint8_t expand_rgb, alpha_one; } VkFmt;
+typedef struct { VkFormat vf; uint8_t expand_rgb, alpha_one, swap_rb; } VkFmt;
 
 // DEPTH24_STENCIL8 as itself where the GPU has it for everything the game does with depth (NVIDIA, Intel): half the
 // bytes of D32_SFLOAT_S8_UINT (4 instead of 8 per pixel) for every depth test, clear and copy - the game copies its
@@ -90,7 +92,8 @@ static VkFmt fmt_of(uint32_t f) {
     case 0x39: return (VkFmt){VK_FORMAT_R4G4B4A4_UNORM_PACK16};   // Metal ABGR4Unorm
     case 0x3A: return (VkFmt){VK_FORMAT_R5G6B5_UNORM_PACK16};     // Metal B5G6R5Unorm
     case 0x3B: return (VkFmt){VK_FORMAT_R5G5B5A1_UNORM_PACK16};   // Metal A1BGR5Unorm
-    case 0x3C: return (VkFmt){VK_FORMAT_R5G6B5_UNORM_PACK16};
+    case 0x3C: return (VkFmt){VK_FORMAT_R5G6B5_UNORM_PACK16, .swap_rb = 1};  // (as metal.m: NVN packs R / B the other way
+    // round; an EoW HUD mask, the hearts, has its fill in the channel read as blue. Swapped in the view's swizzle, other games)
     case 0x3D: return (VkFmt){VK_FORMAT_A2B10G10R10_UNORM_PACK32};
     case 0x3E: return (VkFmt){VK_FORMAT_A2B10G10R10_UINT_PACK32};
     case 0x3F: return (VkFmt){VK_FORMAT_B10G11R11_UFLOAT_PACK32};
@@ -221,12 +224,20 @@ static bool tex_scalable(const NvnTexture *t) {
     if (off) return false;
     if (t->target != 1 || t->samples > 1 || !(t->flags & 8) || t->width < 32 || t->height < 16) return false;
     float a = (float)t->width / (float)t->height;
-    return a > 1.74f && a < 1.81f;  // 16:9 (1920x1080 and its fractions, 704x396, 60x33...)
+    if (!(a > 1.74f && a < 1.81f)) return false;  // 16:9 (1920x1080 and its fractions, 704x396, 60x33...)
+    // (another game: not the small ones, as metal.m - EoW rasterises its lights into a 64x36 grid whose cells the
+    // fragment shaders address by pixel; scaled, only some cells got their bits: interiors lit in patches, darker)
+    if (game_other() && t->width < 128) return false;
+    return true;
 }
+// EoW's 2D: the 1920x1080 targets its frame is composed and presented in (output_scale_2d).
+static bool tex_2d(const NvnTexture *t) { return game_other() && t->width == 1920 && t->height == 1080; }
 // The scale a scalable texture is allocated and drawn at: the ambient occlusion's own, else the frame's
-// (the AO: uniform, by the height's)
-static float tex_alloc_x(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : g_al_x; }
-static float tex_alloc_y(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : g_al_y; }
+// (the AO: uniform, by the height's; EoW's 2D: a part of the frame's)
+static float tex_alloc_x(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : b->two_d ? g_al_x * output_scale_2d() : g_al_x; }
+static float tex_alloc_y(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : b->two_d ? g_al_y * output_scale_2d() : g_al_y; }
+static float tex_draw_x(const TexBackend *b) { return b->two_d ? g_rs_x * output_scale_2d() : g_rs_x; }
+static float tex_draw_y(const TexBackend *b) { return b->two_d ? g_rs_y * output_scale_2d() : g_rs_y; }
 
 bool renderer_texture_first_write(NvnTexture *t) {
     TexBackend *b = t ? (TexBackend *)t->backend : NULL;
@@ -381,8 +392,8 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     VkFmt mf = fmt_of(t->format);
     b->ax = b->scalable ? tex_alloc_x(b) : 1;
     b->ay = b->scalable ? tex_alloc_y(b) : 1;
-    b->sx = b->scalable ? (b->ao || b->shadow ? b->ax : g_rs_x) : 1;
-    b->sy = b->scalable ? (b->ao || b->shadow ? b->ay : g_rs_y) : 1;
+    b->sx = b->scalable ? (b->ao || b->shadow ? b->ax : tex_draw_x(b)) : 1;
+    b->sy = b->scalable ? (b->ao || b->shadow ? b->ay : tex_draw_y(b)) : 1;
     uint32_t tw = t->width ? t->width : 1, th = t->height ? t->height : 1;
     if (b->scalable) {
         tw = (uint32_t)lroundf(tw * b->ax); th = (uint32_t)lroundf(th * b->ay);
@@ -582,6 +593,7 @@ static TexBackend *tex_backend(NvnTexture *t) {
     b->scalable = tex_scalable(t);
     b->shadow = tex_shadow(t);
     b->ao = b->scalable && !b->shadow && tex_ao(t);
+    b->two_d = b->scalable && !b->shadow && !b->ao && tex_2d(t);
     create_image(t, b);
     t->backend = b;
     live_add(t, b);
@@ -812,7 +824,7 @@ TexBackend *vk_tex(NvnTexture *t, bool for_render) {
 void renderer_mark_gpu_owned(NvnTexture *t) {
     TexBackend *b = tex_backend(t);
     b->gpu_owned = true;
-    if (b->scalable && !b->ao && !b->shadow) { b->sx = g_rs_x; b->sy = g_rs_y; }
+    if (b->scalable && !b->ao && !b->shadow) { b->sx = tex_draw_x(b); b->sy = tex_draw_y(b); }
 }
 bool renderer_is_gpu_owned(NvnTexture *t) { return tex_backend(t)->gpu_owned; }
 void backend_pool_written(uint64_t addr, uint64_t size) { (void)addr; (void)size; }
@@ -1016,6 +1028,11 @@ VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool 
         return vk_image_view(b, type, fmt, lv0, 1, ly0, 1, IDENTITY, b->aspect);
     }
     VkImageAspectFlags aspect = b->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ? VK_IMAGE_ASPECT_DEPTH_BIT : b->aspect;
+    // (stencil mode, the texture's or its view's, 2D: the stencil, as renderer.m's X32_Stencil8 view - EoW's rifts read
+    // the bits the scene marks there, the shader as integers: exec.c stencil_slots_of, translate.c tex_is_stencil)
+    if (game_other() && (b->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) && want_textype == TEXTYPE_2D && b->samples == 1 &&
+        (v && (v->setmask & 16) ? v->ds_mode : t->ds_mode) == 1)
+        aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
     VkComponentMapping sw = IDENTITY;
     if (!(b->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) && b->samples == 1) {
         const uint8_t *s = v && (v->setmask & 8) ? v->swizzle : t->swizzle;
@@ -1024,6 +1041,8 @@ VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool 
         if (c[0] || c[1] || c[2] || c[3]) {  // never set: identity
             if (fmt_of(t->format).alpha_one)
                 for (int i = 0; i < 4; i++) if (c[i] == 5) c[i] = 1;
+            if (game_other() && fmt_of(t->format).swap_rb)  // (as renderer.m apply_swizzle)
+                for (int i = 0; i < 4; i++) c[i] = c[i] == 2 ? 4 : c[i] == 4 ? 2 : c[i];
             // NVN swizzle 0 zero, 1 one, 2..5 r,g,b,a == VkComponentSwizzle - 1
             sw = (VkComponentMapping){(VkComponentSwizzle)(c[0] + 1), (VkComponentSwizzle)(c[1] + 1), (VkComponentSwizzle)(c[2] + 1),
                                       (VkComponentSwizzle)(c[3] + 1)};

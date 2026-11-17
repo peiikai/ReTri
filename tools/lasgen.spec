@@ -23,7 +23,8 @@ a = Analysis(
     pathex=[TOOLS],
     binaries=collect_dynamic_libs('capstone') + collect_dynamic_libs('unicorn')
              + [(p, 'unicorn/lib') for p in _uc_versioned],
-    datas=[(os.path.join(TOOLS, '..', 'runtime', 'game_addresses', 'versions.h'), 'runtime/game_addresses')]
+    datas=[(os.path.join(TOOLS, '..', 'runtime', 'game_addresses', 'versions.h'), 'runtime/game_addresses'),
+           (os.path.join(TOOLS, '..', 'runtime', 'game_addresses', 'games.h'), 'runtime/game_addresses')]  # (--game eow)
           + [(p, 'runtime/game_addresses')  # (every game version's patch table: gen.py picks one by build ID)
              for p in sorted(glob.glob(os.path.join(TOOLS, '..', 'runtime', 'game_addresses', 'patches_v*.h')))],
     hiddenimports=collect_submodules('unicorn') + ['patches'],  # (unicorn imports its arch modules by name at run time; gen.py imports patches once the version is known)

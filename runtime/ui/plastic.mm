@@ -45,6 +45,7 @@ static const PlasticTheme &theme_eow(void) {
         t.danger = hex(0x7A2E28);
         t.tab = hex(0x2E2826);
         t.tab_sel = hex(0x3C302C);
+        t.tab_hot = hex(0x463A33);  // (a tab under the mouse or the cursor: lighter than the rest; unset it was see-through)
         t.ring = hex(0x4A403A);
         t.ring_sel = hex(0x6A5A50);
         t.bar = hex(0xE8A85A);  // (the title's gold-orange: the selection's grey-brown was lost in the dark track)
@@ -71,8 +72,12 @@ static const PlasticTheme &theme_eow(void) {
     return t;
 }
 
+// EoW's look: its game files, or none chosen yet - the app is ReTri, so its first screens look like it
+// (with no game files it can't tell the game: LA's look and name showed on the first start)
+bool ui_eow_look(void) { return game_other() || !game_version(); }
+
 const PlasticTheme &plastic_theme(void) {
-    if (game_other()) return theme_eow();
+    if (ui_eow_look()) return theme_eow();
     static PlasticTheme t;
     static bool init;
     if (!init) {

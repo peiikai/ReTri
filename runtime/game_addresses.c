@@ -38,7 +38,8 @@ static const struct { GameVersion v; uint64_t sdk_base; } games[] = {
 const GameAddrs *g_ga;
 static const GameVersion *g_version;
 static const char *g_other_game;
-static uint64_t g_sdk_base = SDK_BASE;
+// (the sdk's offset in the guest window: the table's bases are canonical, and the window moves with LARECOMP_DYN_BASE)
+static uint64_t g_sdk_off = SDK_OFF;
 
 static int hexval(char c) { return c <= '9' ? c - '0' : c - 'A' + 10; }
 
@@ -106,6 +107,12 @@ const GameVersion *game_other_of(const char *game_dir) {
     return NULL;
 }
 
+uint64_t game_other_sdk_base_of(const GameVersion *v) {
+    for (size_t i = 0; v && i < sizeof games / sizeof *games; i++)
+        if (&games[i].v == v) return games[i].sdk_base;
+    return SDK_BASE;
+}
+
 bool game_version_select(const char *game_dir, char *why, size_t why_size) {
     uint8_t id[20];
     char exefs[1100], path[1100];
@@ -125,9 +132,9 @@ bool game_version_select(const char *game_dir, char *why, size_t why_size) {
         if (k < 20) continue;
         v = &games[i].v;
         g_other_game = v->key;
-        g_sdk_base = games[i].sdk_base;
+        g_sdk_off = games[i].sdk_base - GUEST_CANON;
         LOG("[game] %s (main build ID %.16s): experimental, LA features off, sdk at %llx\n", v->label, v->build_id,
-            (unsigned long long)g_sdk_base);
+            (unsigned long long)game_sdk_base());
     }
     if (!v) {
         snprintf(why, why_size, "these game files are an unsupported version of the game (main build ID "
@@ -156,7 +163,7 @@ bool game_version_select(const char *game_dir, char *why, size_t why_size) {
 
 const GameVersion *game_version(void) { return g_version; }
 const char *game_other(void) { return g_other_game; }
-uint64_t game_sdk_base(void) { return g_sdk_base; }
+uint64_t game_sdk_base(void) { return GUEST_LO + g_sdk_off; }
 
 uint64_t game_romfs_bytes(const GameVersion *v) {
     if (!v) return 0;

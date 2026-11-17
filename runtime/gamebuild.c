@@ -750,7 +750,11 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
 
     // 1. the generator, both modules at once; their finished files are compiled while it goes on
     Gen gens[2] = {{.name = "main"}, {.name = "sdk"}};
-    static const char *const base[2] = {"0x7000000000", "0x7004000000"};
+    // Another game on the engine (EoW) loads its sdk elsewhere and is generated without LA's patches (gen.py --game)
+    const GameVersion *other = game_other_of(game_dir);
+    char sdk_base[24];
+    snprintf(sdk_base, sizeof sdk_base, "0x%llx", (unsigned long long)game_other_sdk_base_of(other));
+    const char *const base[2] = {"0x7000000000", sdk_base};
     bool ok = true;
     for (int i = 0; i < 2 && ok; i++) {
         Gen *g = &gens[i];
@@ -772,6 +776,7 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
         add(&a, base[i]);
         add(&a, g->out);
         if (i == 1) { add(&a, "--hle"); add(&a, t.hle); }
+        if (other) { add(&a, "--game"); add(&a, other->key); }
 #ifdef LARECOMP_DYN_BASE
         add(&a, "--dyn-base");  // (rt.h: the window moves; the library follows it)
 #endif
