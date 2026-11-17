@@ -23,7 +23,9 @@
 // back, cancels or saves. Each control: settings touch_ctl_<name> = x, y (share of the screen), size, hidden.
 // Echoes of Wisdom (game_other()): the game has no context known here, so play shows the whole Switch pad - the stick,
 // A B X Y, L R ZL ZR, Plus / Minus and a D-pad (the echo list, accessories) - from the moment the game runs, with
-// the Switch letters on them; nothing reads LA's save and no tap on the game's screen turns into presses.
+// the Switch letters on them; nothing reads LA's save. A drag on the game's screen pans the camera (the right stick,
+// C_PAN). They take the look of the inventory screen's background (eow_disc), laid out as LA's; Y and X show the echo
+// or item on the HUD's Y / X buttons (texpatch_eow_slot_icon: the icons the HUD draws).
 // A quick tap still reaches the game (a button is held at least 80 ms). LARECOMP_TOUCH_SHOW_INPUT=1 (videos, tests):
 // scripted input (LARECOMP_INPUT) lights the buttons and moves the stick as a thumb would.
 #include <SDL3/SDL.h>
@@ -31,6 +33,7 @@
 #include <atomic>
 #include <mutex>
 #include <string.h>
+#include <vector>
 
 #include "imgui.h"
 #include "../plastic.h"
@@ -49,9 +52,12 @@ bool map_page_shown(void);           // runtime/ui/pause_pages.mm
 bool dgnmap_shown(void);
 bool pause_menu_shown(void);         // runtime/ui/pause_pages.mm
 int texpatch_title_screen(void);     // runtime/nvn/texpatch.c
+const char *texpatch_eow_slot_icon(int slot);
+int texpatch_ui_rgba_list(const char *const *names, int n, uint8_t **out, int *w, int *h);
 extern int g_start_screen;           // runtime/hle/warp.c
 }
 ImTextureID ui_game_icon(const char *name);  // runtime/ui/game_icons.mm
+ImTextureID ui_rgba_texture(const uint8_t *rgba, int w, int h);
 
 enum { BTN_A = 0, BTN_B, BTN_X, BTN_Y, BTN_L = 6, BTN_R, BTN_ZL, BTN_ZR, BTN_PLUS, BTN_MINUS,
        BTN_LEFT, BTN_UP, BTN_RIGHT, BTN_DOWN };  // (input.c's bits)
@@ -96,6 +102,12 @@ static std::atomic<int> g_ctx{X_PLAY};     // what the game shows, as of the las
 static std::atomic<uint32_t> g_want{0};    // the controls on screen now (context and what Link has)
 static float g_stick_cx, g_stick_cy;       // where the stick's base is now (it follows the thumb's first touch)
 static float g_knob_x, g_knob_y;
+// EoW: a finger on the game's screen (no control under it) pans the camera, as the right stick: the world follows it,
+// as a map dragged by hand (drag left: the view goes right), the push its distance from where it went down (all of
+// it at 1/8 of the screen's height), let go: back. The finger's control is C_PAN.
+enum { C_PAN = C_COUNT };
+static std::atomic<int32_t> g_rx{0}, g_ry{0};
+static float g_pan_x, g_pan_y;
 static bool g_menu_down, g_edit_down;
 static double g_last_touch, g_last_pad;    // (SDL_GetTicks seconds) Auto: shown when a touch came after the pad's last use
 #define MAX_FINGERS 10
@@ -274,7 +286,7 @@ static void dpad_to(float x, float y) {
 
 static void release_all(void) {
     for (int i = 0; i < MAX_FINGERS; i++) g_fingers[i].ctl = -1;
-    g_buttons = 0, g_lx = 0, g_ly = 0;
+    g_buttons = 0, g_lx = 0, g_ly = 0, g_rx = 0, g_ry = 0;
     g_knob_x = g_stick_cx = g_ctl[C_STICK].x, g_knob_y = g_stick_cy = g_ctl[C_STICK].y;
     g_menu_down = false, g_edit_down = false;
 }
@@ -539,6 +551,11 @@ static bool handle(const SDL_Event *e, bool *toggle_menu) {
     if (menu_input_captured() || !touch_visible()) { release_all(); return false; }  // (the menu takes touches)
     if (e->type == SDL_EVENT_FINGER_DOWN) {
         int c = hit(x, y);
+        if (c < 0 && eow() && in_game()) {  // (EoW: the camera)
+            if (slot < 0) for (int i = 0; i < MAX_FINGERS && slot < 0; i++) if (g_fingers[i].ctl < 0) slot = i;
+            if (slot >= 0) g_fingers[slot].id = e->tfinger.fingerID, g_fingers[slot].ctl = C_PAN, g_pan_x = x, g_pan_y = y;
+            return true;
+        }
         if (c < 0) {  // a tap on the game's own screen
             int ctx = g_ctx.load();
             if (ctx == X_TITLE) title_tap(x, y);
@@ -563,6 +580,12 @@ static bool handle(const SDL_Event *e, bool *toggle_menu) {
     if (slot < 0) return true;
     int c = g_fingers[slot].ctl;
     if (e->type == SDL_EVENT_FINGER_MOTION) {
+        if (c == C_PAN) {
+            float full = g_h * 0.125f, dx = (g_pan_x - x) / full, dy = (y - g_pan_y) / full, m = hypotf(dx, dy);
+            if (m > 1) dx /= m, dy /= m;
+            g_rx = (int32_t)(dx * 32767), g_ry = (int32_t)(dy * 32767);  // (y: the stick's up is +)
+            return true;
+        }
         if (c == C_STICK) stick_to(x, y);
         else if (c == C_DPAD) { dpad_to(x, y); g_held_until[C_DPAD] = 0; }  // (a slide: the new arm only)
         else if (c >= C_A && c <= C_Y) {  // sliding across the face buttons presses the one under the thumb
@@ -574,6 +597,7 @@ static bool handle(const SDL_Event *e, bool *toggle_menu) {
     }
     // up / cancelled
     g_fingers[slot].ctl = -1;
+    if (c == C_PAN) { g_rx = 0, g_ry = 0; return true; }
     if (c == C_STICK) stick_up();
     if (c == C_MENU && g_menu_down) {
         g_menu_down = false;
@@ -589,6 +613,7 @@ static bool handle(const SDL_Event *e, bool *toggle_menu) {
 
 extern "C" uint64_t touch_buttons(void) { return g_editing ? 0 : g_buttons | g_nav; }
 extern "C" void touch_stick(int32_t *lx, int32_t *ly) { *lx = g_editing ? 0 : g_lx.load(), *ly = g_editing ? 0 : g_ly.load(); }
+extern "C" void touch_rstick(int32_t *rx, int32_t *ry) { *rx = g_editing ? 0 : g_rx.load(), *ry = g_editing ? 0 : g_ry.load(); }
 
 // ---- what the game shows, what Link has
 static int context(void) {
@@ -658,7 +683,9 @@ static void bubble(ImDrawList *dl, ImVec2 c, float r, bool on, bool teal, float 
 
 // The inventory's own item slot, from the game's UI textures (Game.arc): the cork disc, and pressed, lit as the slot
 // of an equipped item - the green ring round a pale disc. false: the textures aren't there (the bubble instead).
+static bool eow_disc(ImDrawList *dl, ImVec2 c, float r, bool on, float a, float th, bool sel);
 static bool slot_disc(ImDrawList *dl, ImVec2 c, float r, bool on, float a, float th, bool sel) {
+    if (eow()) return eow_disc(dl, c, r, on, a, th, sel);
     ImTextureID dark = ui_game_icon("ItemBG_00^q"), green = ui_game_icon("ItemSetBG_00^q"), pale = ui_game_icon("ItemBG_01^q");
     if (!dark || !green || !pale) return false;
     auto disc = [&](ImTextureID t, float rad, float span, ImU32 tint) {  // (span: the image's half width per disc radius)
@@ -756,7 +783,10 @@ static void dpad(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly, floa
 // The stick and the D-pad to go with the slot discs: the cork disc for a base. The stick: the compass points engraved
 // in brown, the knob a small slot disc, lit while it's held. The D-pad: a cross in the lit slot's tan, edged in brown,
 // the arms held down green. false: the textures aren't there (the blue ones instead).
+static bool eow_compass(ImDrawList *dl, ImVec2 c, float r, ImVec2 knob, float a, float th, bool sel);
+static bool eow_dpad(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly, float a, float th, bool sel);
 static bool compass_disc(ImDrawList *dl, ImVec2 c, float r, ImVec2 knob, float a, float th, bool sel) {
+    if (eow()) return eow_compass(dl, c, r, knob, a, th, sel);
     if (!slot_disc(dl, c, r, false, a, th, sel)) return false;
     float ea = fminf(1, 0.55f + 0.5f * a);
     for (int k = 0; k < 8; k++) {
@@ -772,6 +802,7 @@ static bool compass_disc(ImDrawList *dl, ImVec2 c, float r, ImVec2 knob, float a
 }
 
 static bool dpad_disc(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly, float a, float th, bool sel) {
+    if (eow()) return eow_dpad(dl, c, r, lx, ly, a, th, sel);
     if (!slot_disc(dl, c, r, false, a, th, sel)) return false;
     float ea = fminf(1, 0.55f + 0.5f * a), len = r * 0.84f, w = r * 0.29f, rnd = r * 0.08f;
     ImU32 tan = col(235, 192, 130, ea), lit = col(140, 220, 70, ea), ink = col(74, 52, 26, ea);
@@ -790,6 +821,115 @@ static bool dpad_disc(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly,
     dl->AddTriangleFilled(ImVec2(c.x, c.y + t), ImVec2(c.x - s, c.y + h), ImVec2(c.x + s, c.y + h), ink);
     dl->AddTriangleFilled(ImVec2(c.x - t, c.y), ImVec2(c.x - h, c.y - s), ImVec2(c.x - h, c.y + s), ink);
     dl->AddTriangleFilled(ImVec2(c.x + t, c.y), ImVec2(c.x + h, c.y + s), ImVec2(c.x + h, c.y - s), ink);
+    return true;
+}
+
+// ---- drawing: Echoes of Wisdom's look
+// The inventory screen's background, laid out as LA's slot discs (round buttons, the stick's compass points and knob,
+// the D-pad's cross). The fill: the felt the screen is made of (MatCloth_00^w) with its faint pinwheel facets
+// (MainBGNormal_00+w, a normal map, lit from the top left), both from the player's GameMain.arc, scaled so its average
+// is the background's colour in the running game (45, 35, 30: sampled from a 1280 x 720 screenshot of the Items page,
+// away from the slots). The edge: the item slots' 1-pixel grey line over a darker one. See-through as LA's bubbles
+// (the body at 0.72 of the opacity setting, nearly solid while pressed); pressed, lit: a warm glow and a pale edge.
+// 0: the textures aren't there (LA's look's fallback: the blue bubbles).
+static const int kFill = 512;  // (the fill's size: texels drawn one per 1080p pixel)
+static ImTextureID eow_fill_tex(void) {
+    static int state;
+    static ImTextureID tex;
+    if (state) return tex;
+    state = 1;
+    const char *const names[2] = {"MatCloth_00^w", "MainBGNormal_00+w"};
+    uint8_t *px[2];
+    int w[2], h[2];
+    texpatch_ui_rgba_list(names, 2, px, w, h);
+    if (px[0] && px[1] && w[0] >= kFill && h[0] >= kFill && w[1] > 0 && h[1] > 0) {
+        const float facet = 2.8f;  // (the facets' size on the screen per texel of their map)
+        std::vector<float> f((size_t)kFill * kFill * 3);
+        double sum[3] = {0, 0, 0};
+        for (int y = 0; y < kFill; y++)
+            for (int x = 0; x < kFill; x++) {
+                const uint8_t *c = px[0] + ((size_t)y * w[0] + x) * 4;
+                const uint8_t *n = px[1] + ((size_t)((int)(y / facet) % h[1]) * w[1] + (int)(x / facet) % w[1]) * 4;
+                float nx = n[0] / 127.5f - 1, ny = n[1] / 127.5f - 1;
+                float shade = 1 + 0.10f * (-0.6f * nx + 0.8f * ny);
+                for (int k = 0; k < 3; k++) sum[k] += f[((size_t)y * kFill + x) * 3 + k] = c[k] * shade;
+            }
+        static const float target[3] = {45, 35, 30};
+        std::vector<uint8_t> o((size_t)kFill * kFill * 4);
+        for (size_t i = 0; i < (size_t)kFill * kFill; i++) {
+            for (int k = 0; k < 3; k++)
+                o[i * 4 + k] = (uint8_t)clampf(f[i * 3 + k] * target[k] / (float)(sum[k] / ((double)kFill * kFill)), 0, 255);
+            o[i * 4 + 3] = 255;
+        }
+        tex = ui_rgba_texture(o.data(), kFill, kFill);
+    }
+    free(px[0]);
+    free(px[1]);
+    return tex;
+}
+
+static ImU32 u32(ImVec4 c, float a = 1) { return ImGui::ColorConvertFloat4ToU32(ImVec4(c.x, c.y, c.z, c.w * a)); }
+static const ImU32 kSlotEdge = IM_COL32(65, 62, 61, 255), kSlotShade = IM_COL32(30, 22, 20, 255);  // (sampled as the fill)
+static const ImU32 kSlotIn = IM_COL32(36, 28, 25, 255);  // (inside an item slot: the cross's well)
+static bool eow_disc(ImDrawList *dl, ImVec2 c, float r, bool on, float a, float th, bool sel) {
+    ImTextureID t = eow_fill_tex();
+    if (!t) return false;
+    a = fmaxf(a, 0.55f);  // (as the bubbles: the opacity setting fades them, never to washed out)
+    float fa = (on ? 0.95f : 0.72f) * a;
+    float span = fminf(2 * r / th, (float)kFill) / kFill;  // (one texel per 1080p pixel; each button its own patch)
+    float u = fmodf(fabsf(c.x / th) * 0.61f, (1 - span) * kFill) / kFill, v = fmodf(fabsf(c.y / th) * 0.61f, (1 - span) * kFill) / kFill;
+    dl->AddCircleFilled(ImVec2(c.x, c.y + 3 * th), r + 1.5f * th, col(0, 0, 0, 0.30f * a), 64);  // (a soft drop)
+    dl->AddImageRounded(t, ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r), ImVec2(u, v), ImVec2(u + span, v + span),
+                        col(255, 255, 255, fa), r);
+    if (on) {  // lit: a warm glow from the middle and a pale edge
+        dl->AddCircleFilled(c, r * 0.96f, col(255, 236, 190, 0.16f), 64);
+        dl->AddCircleFilled(c, r * 0.62f, col(255, 236, 190, 0.12f), 48);
+    }
+    dl->AddCircle(c, r - 0.5f * th, col(30, 22, 20, 0.80f * a), 64, 2.0f * th);
+    dl->AddCircle(c, r - 2.0f * th, on ? col(240, 222, 176, 1) : col(65, 62, 61, 0.95f * a), 64, (on ? 2.5f : 1.5f) * th);
+    if (sel) dl->AddCircle(c, r * 1.02f, col(236, 194, 84, 1), 64, 5.0f * th);  // (the layout editor's selection, as LA's)
+    return true;
+}
+
+// As LA's: the stick's eight compass points pressed into its disc and a small disc for the knob, lit while it's held; the D-pad's cross on the disc, here in the slots' darker inside with their grey edge, the arrows in
+// the menu's cream and the arms held down in the cursor's gold.
+static bool eow_compass(ImDrawList *dl, ImVec2 c, float r, ImVec2 knob, float a, float th, bool sel) {
+    if (!eow_disc(dl, c, r, false, a, th, sel)) return false;
+    float ea = fminf(1, 0.55f + 0.5f * a);
+    for (int k = 0; k < 8; k++) {
+        float ang = k * 3.14159265f / 4, len = k % 2 ? 0.62f : 0.92f, wd = k % 2 ? 0.10f : 0.14f;
+        ImVec2 tip(c.x + cosf(ang) * r * len, c.y + sinf(ang) * r * len);
+        ImVec2 s1(c.x + cosf(ang + 1.5708f) * r * wd, c.y + sinf(ang + 1.5708f) * r * wd);
+        ImVec2 s2(c.x - cosf(ang + 1.5708f) * r * wd, c.y - sinf(ang + 1.5708f) * r * wd);
+        dl->AddTriangleFilled(tip, s1, s2, col(20, 14, 12, (k % 2 ? 0.45f : 0.70f) * ea));
+        dl->AddTriangle(tip, s1, s2, col(65, 62, 61, (k % 2 ? 0.45f : 0.70f) * ea), 1.0f * th);
+    }
+    bool held = hypotf(knob.x - c.x, knob.y - c.y) > r * 0.04f;
+    eow_disc(dl, knob, r * 0.42f, held, 1.0f, th, false);
+    return true;
+}
+
+static bool eow_dpad(ImDrawList *dl, ImVec2 c, float r, int32_t lx, int32_t ly, float a, float th, bool sel) {
+    if (!eow_disc(dl, c, r, false, a, th, sel)) return false;
+    const PlasticTheme &t = plastic_theme();
+    float ea = fminf(1, 0.55f + 0.5f * a), len = r * 0.80f, w = r * 0.27f, rnd = r * 0.08f;
+    ImU32 well = (kSlotIn & 0x00FFFFFF) | ((ImU32)(230 * ea) << 24), lit = col(0xE8, 0xD0, 0x60, ea), edge = (kSlotEdge & 0x00FFFFFF) | ((ImU32)(255 * ea) << 24);
+    dl->AddRectFilled(ImVec2(c.x - w, c.y - len), ImVec2(c.x + w, c.y + len), well, rnd);
+    dl->AddRectFilled(ImVec2(c.x - len, c.y - w), ImVec2(c.x + len, c.y + w), well, rnd);
+    float in = 2.5f * th;  // (the held arm inside the edge)
+    if (ly > 8000) dl->AddRectFilled(ImVec2(c.x - w + in, c.y - len + in), ImVec2(c.x + w - in, c.y - w), lit, rnd);
+    if (ly < -8000) dl->AddRectFilled(ImVec2(c.x - w + in, c.y + w), ImVec2(c.x + w - in, c.y + len - in), lit, rnd);
+    if (lx < -8000) dl->AddRectFilled(ImVec2(c.x - len + in, c.y - w + in), ImVec2(c.x - w, c.y + w - in), lit, rnd);
+    if (lx > 8000) dl->AddRectFilled(ImVec2(c.x + w, c.y - w + in), ImVec2(c.x + len - in, c.y + w - in), lit, rnd);
+    ImVec2 o[12] = {{c.x - w, c.y - len}, {c.x + w, c.y - len}, {c.x + w, c.y - w}, {c.x + len, c.y - w}, {c.x + len, c.y + w}, {c.x + w, c.y + w},
+                    {c.x + w, c.y + len}, {c.x - w, c.y + len}, {c.x - w, c.y + w}, {c.x - len, c.y + w}, {c.x - len, c.y - w}, {c.x - w, c.y - w}};
+    dl->AddPolyline(o, 12, edge, ImDrawFlags_Closed, 1.5f * th);
+    float tp = len * 0.86f, hh = len * 0.58f, s = r * 0.13f;
+    ImU32 ar = u32(plastic_col(t.text), fmaxf(ea, 0.9f)), dark = col(40, 30, 20, 1);
+    dl->AddTriangleFilled(ImVec2(c.x, c.y - tp), ImVec2(c.x + s, c.y - hh), ImVec2(c.x - s, c.y - hh), ly > 8000 ? dark : ar);
+    dl->AddTriangleFilled(ImVec2(c.x, c.y + tp), ImVec2(c.x - s, c.y + hh), ImVec2(c.x + s, c.y + hh), ly < -8000 ? dark : ar);
+    dl->AddTriangleFilled(ImVec2(c.x - tp, c.y), ImVec2(c.x - hh, c.y - s), ImVec2(c.x - hh, c.y + s), lx < -8000 ? dark : ar);
+    dl->AddTriangleFilled(ImVec2(c.x + tp, c.y), ImVec2(c.x + hh, c.y + s), ImVec2(c.x + hh, c.y - s), lx > 8000 ? dark : ar);
     return true;
 }
 
@@ -864,8 +1004,10 @@ extern "C" void touch_draw(ImDrawList *dl, float w, float h, ImFont *font, ImFon
         bool disc = slot_disc(dl, p, r, on, fa, th, sel);
         if (!disc) bubble(dl, p, r, on, i == C_A, fa, th, sel);
         ImU32 ink = disc ? col(74, 52, 26, fmaxf(fa, 0.9f)) : col(255, 255, 255, fmaxf(fa, 0.85f));  // (on a disc: the game's brown)
+        if (eow()) ink = plastic_theme().text;  // (the menu's cream, set in the cell)
+        float ir = r;  // (the size the letter or symbol is drawn for)
         if (i == C_EDIT) {  // a pencil, tip down to the left
-            float u = r * 0.55f, d = 0.7071f, wd = u * 0.24f;
+            float u = ir * 0.55f, d = 0.7071f, wd = u * 0.24f;
             ImVec2 a(c.x - u * 0.55f, c.y + u * 0.55f), z(c.x + u * 0.62f, c.y - u * 0.62f);  // (the tip's base, the top)
             ImVec2 n(d * wd, d * wd);  // (across the body)
             dl->AddQuadFilled(ImVec2(a.x - n.x, a.y - n.y), ImVec2(z.x - n.x, z.y - n.y), ImVec2(z.x + n.x, z.y + n.y), ImVec2(a.x + n.x, a.y + n.y), ink);
@@ -873,19 +1015,23 @@ extern "C" void touch_draw(ImDrawList *dl, float w, float h, ImFont *font, ImFon
             continue;
         }
         if (i == C_MENU) {  // three bars
-            float u = r * 0.42f;
+            float u = ir * 0.42f;
             for (int k = -1; k <= 1; k++)
                 dl->AddLine(ImVec2(c.x - u, c.y + k * u * 0.6f), ImVec2(c.x + u, c.y + k * u * 0.6f), ink, 3 * th);
             continue;
         }
-        const char *in = eow() ? NULL : g_editing && i != C_X && i != C_Y ? icon_of(X_PLAY, i) : icon_of(ctx, i);
+        // (EoW: Y and X show the echo or item the HUD's Y / X buttons show)
+        const char *in = eow() ? (i == C_Y ? texpatch_eow_slot_icon(0) : i == C_X ? texpatch_eow_slot_icon(1) : NULL) : g_editing && i != C_X && i != C_Y ? icon_of(X_PLAY, i) : icon_of(ctx, i);
         ImTextureID tex = in ? ui_game_icon(in) : (ImTextureID)0;
         if (tex) {
             icon(dl, tex, p, r, fa);
-            badge(dl, font, p, r, c.label, fa);
+            if (eow())  // (the letter small in the cell's lower left, as the HUD's)
+                label_text(dl, font, r * 0.48f, ImVec2(p.x - r * 0.56f, p.y + r * 0.52f), c.label, ink, true, true);
+            else badge(dl, font, p, r, c.label, fa);
         } else {  // no icon: the letter in the middle
             bool pm = c.label[0] == '+' || c.label[0] == '-';
-            label_text(dl, font, r * (pm ? 1.4f : i == C_A ? 1.15f : 0.95f), p, c.label, ink, !disc, true);
+            float fs = r * (pm ? 1.4f : eow() && strlen(c.label) > 1 ? 0.80f : i == C_A ? 1.15f : 0.95f);
+            label_text(dl, font, fs, p, c.label, ink, !disc || eow(), true);
         }
         const char *hn = g_editing ? NULL : hint(ctx, i);
         if (hn && *hn) {  // what it does here: a small brown tab on the button's bottom rim (the top one when there's

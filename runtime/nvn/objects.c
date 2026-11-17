@@ -875,7 +875,12 @@ static void other_lag_cap(void) {
 }
 NVN(nvnWindowAcquireTexture) {
     NvnWindow *w = WIN;
-    if (game_other()) { extern void pace_other_cadence(void); pace_other_cadence(); }  // (pace.c)
+    if (game_other()) {
+        extern void pace_other_cadence(void);
+        extern void hud_eow_tick(void);
+        pace_other_cadence();  // (pace.c)
+        hud_eow_tick();        // (EoW's HUD on phones and tablets: runtime/hle/hud_eow.c)
+    }
     if (A(1)) sync_of(A(1))->signaled = 1;
     *(int32_t *)AP(2) = w->next;
     w->next = (w->next + 1) % (w->active ? w->active : 1);
