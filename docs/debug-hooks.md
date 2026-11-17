@@ -31,7 +31,7 @@ window at that frame to `build/window.png` and exits.
 | `LARECOMP_FORCE_LAUNCHER` | 1 | Show the start screen even when `LARECOMP_INPUT` is set (which normally skips it). |
 | `LARECOMP_LAUNCHER_AUTOPLAY` | 1, `once` | Press PLAY on the start screen at once. `once`: only the first time, so a "Title screen" reboot stays on the start screen. |
 | `LARECOMP_LAUNCHER_PLAY_AT` | seconds | Press PLAY on the start screen that many seconds in. |
-| `LARECOMP_LAUNCHER_KEYS` | `frame:key,...` | Press keys on the start screen at those frames (`left right up down enter esc`, controller `pl pr pu pd pa pb`). The log names the RANDOMIZER row's choice when it changes. |
+| `LARECOMP_LAUNCHER_KEYS` | `frame:key,...` | Press keys on the start screen at those frames (`left right up down enter esc`, controller `pl pr pu pd pa pb`, or `b.<button>` with a larecomp.ini button name such as `b.north` or `b.rtrigger`: a real controller event that goes through ReTri Menu). The log names the RANDOMIZER row's choice when it changes. |
 | `LARECOMP_NO_UPDATE_CHECK` | 1 | Skip the update check on the start screen. |
 | `LARECOMP_INPUT` | script (see below) | Scripted controller input for player 1. Also skips the start screen and blocks your own input. |
 | `LARECOMP_NO_USER_INPUT` | 0 / 1 | Ignore keyboard, mouse and controllers. On by default when a scripted input hook is set; `0` lets your input through during a scripted run. |
@@ -215,6 +215,7 @@ These work on both Metal and Vulkan unless noted.
 | `LARECOMP_NO_SCALE` | 1 | Keep all render targets at the game's own size (no resolution scaling). |
 | `LARECOMP_AO_SCALE` | 1 to 4 | Draw the game's ambient occlusion at this many times the Switch's size, whatever the setting and render scale. |
 | `LARECOMP_AO_SCALED` | 1 | Scale the ambient occlusion with the frame, as before issue #356 (shows the old haze and dither). |
+| `LARECOMP_2D_SCALED` | 1 | EoW: scale its 1080-line 2D targets (the composed frame, the HUD) like its 792-line 3D, as before (larger than the window). |
 | `LARECOMP_SHADOW_SCALE` | 0.5 to 4 | Draw the game's shadow map at this many times the Switch's size, whatever the setting. |
 | `LARECOMP_SHADOW_BIAS_RAW` | 1 | Keep the game's polygon offset slope in the shadow map as it is, instead of scaling it with the map's size (A/B tests). |
 | `LARECOMP_AO_NO_GRID` | 1 | Leave the ambient occlusion shaders on the game's own pixel grid when the AO is larger than the Switch's. |
@@ -285,6 +286,9 @@ The per-GPU default switches are explained, with the GPUs they were tested on, i
 | Variable | Values | What it does |
 |---|---|---|
 | `LARECOMP_PACE` | 0 | Turn the frame pacer off (it holds the game's 30 fps mode when frames don't fit 60). |
+| `LARECOMP_OTHER_TRY` | 0 / 1 | EoW: at 30 fps, try its 60 fps mode again (1 s after a dip, 10 s when frames already missed 60, doubling after a failed try). Default on for iOS and Android. |
+| `LARECOMP_KEEP_60` | 1 | Pace frames at 60 whatever the game asks (test: its 30 fps mode then runs fast). Shows whether a scene fits 60. |
+| `LARECOMP_SLOW_COUNTER` | `from,to` | The game's GPU timing counters read 25 ms from `from` to `to` seconds (test: a heavy moment). |
 | `LARECOMP_SIM_SLOW_FRAME_MS` | ms | Sleep this long every frame after frame 2600, to simulate a slow machine. |
 | `LARECOMP_SLOW_FRAME_UNTIL` | frame | With `LARECOMP_SIM_SLOW_FRAME_MS`: stop at that frame (recovery tests). |
 | `LARECOMP_SPIKE_MS` | ms | Stall the presenting thread this long every N frames. |

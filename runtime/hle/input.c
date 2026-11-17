@@ -388,11 +388,10 @@ int input_pad_family(void) {
     return env >= 0 ? env : pad_family;
 }
 
-// Our menus' face buttons: the family whose button names they show, and (Button layout = Xbox / PlayStation, #172)
-// whose layout they use - Nintendo (0): the right button confirms, the bottom one goes back; Xbox / PlayStation
-// (1 / 2): the bottom one confirms, the right one goes back (runtime/ui/pad_nav.mm). "Button icons"
-// forced to a style wins (icons and menus agree); Auto: the controller `which` that pressed (0, or not a connected
-// gamepad - a test's pushed press: the game's controller / the first connected one, else Nintendo).
+// Our menus' button names: the family whose words the hints use (which button confirms is the Confirm button
+// setting's alone, runtime/ui/pad_nav.mm). "Button icons" forced to a style wins (hints and the game's icons agree);
+// Auto: the controller `which` that pressed (0, or not a connected gamepad - a test's pushed press: the game's
+// controller / the first connected one, else Nintendo).
 int input_menu_family(SDL_JoystickID which) {
     switch (g_settings.prompts) {
     case PROMPTS_NINTENDO: return 0;
@@ -459,11 +458,13 @@ bool input_gamepad_connected(void) { return pad != NULL; }
 bool touch_handle_event(const SDL_Event *e);
 uint64_t touch_buttons(void);
 void touch_stick(int32_t *lx, int32_t *ly);
+void touch_rstick(int32_t *rx, int32_t *ry);  // (EoW: a drag on the screen pans the camera)
 void touch_pad_used(void);
 #else
 static bool touch_handle_event(const SDL_Event *e) { (void)e; return false; }
 static uint64_t touch_buttons(void) { return 0; }
 static void touch_stick(int32_t *lx, int32_t *ly) { *lx = *ly = 0; }
+static void touch_rstick(int32_t *rx, int32_t *ry) { *rx = *ry = 0; }
 static void touch_pad_used(void) {}
 #endif
 
@@ -901,7 +902,9 @@ static void fill_state(Cpu *c) {
     int32_t tlx, tly;
     touch_stick(&tlx, &tly);
     int32_t lx = clamp_axis((menu ? 0 : key_lx + pad_lx + tlx) + script_lx + g_tour_lx), ly = clamp_axis((menu ? 0 : key_ly + pad_ly + tly) + script_ly + g_tour_ly);
-    int32_t rx = clamp_axis((menu ? 0 : key_rx + pad_rx) + script_rx), ry = clamp_axis((menu ? 0 : key_ry + pad_ry) + script_ry);
+    int32_t trx, try_;
+    touch_rstick(&trx, &try_);
+    int32_t rx = clamp_axis((menu ? 0 : key_rx + pad_rx + trx) + script_rx), ry = clamp_axis((menu ? 0 : key_ry + pad_ry + try_) + script_ry);
     bool la = !game_other();  // (another game on the engine: none of LA's input features, they read LA's state)
     if (!menu && la) {  // d-pad items (setting): the Items page assigns, play uses (runtime/hle/dpad_items.c; before mirroring:
         extern uint64_t dpad_items_input(uint64_t b);  // the d-pad as held)

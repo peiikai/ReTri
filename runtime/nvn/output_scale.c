@@ -1099,6 +1099,16 @@ double output_scale_dynamic_hold_fps(void) { return g_hold_dt > 0 ? 1000 / g_hol
 // up, at four times the AO's cost (a sixteenth of a 4K frame's pixels) - and never below the Switch's size. The
 // shaders are told the real pixel grid (maxwell/translate.c ao_grid_fix). By the allocation scale `al`, which Dynamic
 // resolution keeps (no reallocation at its steps). LARECOMP_AO_SCALE=<n> (test): n times the Switch's size.
+// EoW composes its frame at 1080 lines: one draw puts the 3D (1408x792) into a 1920x1080 target, the HUD goes on top and
+// that is presented. Scaled as the 3D, that target came out larger than the window (3300x2275 on an 11" iPad's
+// 2420x1668, 1.9x its pixels) and was scaled down to it, every frame. At 792/1080 of the frame's scale it is the
+// window's size; the 3D keeps the frame's. LARECOMP_2D_SCALED=1 (A/B): as the 3D, as before.
+float output_scale_2d(void) {
+    static int same = -1;
+    if (same < 0) same = getenv("LARECOMP_2D_SCALED") != NULL;
+    return game_other() && !same ? (float)(792.0 / 1080.0) : 1.0f;
+}
+
 float output_scale_ao(float al) {
     static int mode = -1;  // (-1: unread, 0: the setting, 1: scaled with the frame, 2: LARECOMP_AO_SCALE)
     static float test;
