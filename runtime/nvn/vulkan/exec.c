@@ -7255,6 +7255,30 @@ static void draw_(CmdRec *r, bool indexed) {
         for (int i = 0; i < nskip; i++) if (last_hash == skip[i]) { SKIP(SK_DEBUG_SKIP); return; }
         if (g_debug_frame && getenv("LARECOMP_LOG_FSHASH")) LOG("[fshash] fs=%llx hash %016llx\n", (unsigned long long)fs, (unsigned long long)last_hash);
         g_cur_fs_hash = last_hash;
+        // (test) LARECOMP_LOG_RIFT=1: what the rift's map and mask draw into and read, their first 8 draws each
+        if (rift_rows_on() && (last_hash == RIFT_MAP_FS || last_hash == RIFT_MASK_FS) && getenv("LARECOMP_LOG_RIFT")) {
+            static int n[2];
+            int w = last_hash == RIFT_MASK_FS;
+            if (n[w]++ < 8) {
+                extern uint64_t renderer_exec_frame(void);
+                LOG("[rift] frame %llu %s: viewport %.0f,%.0f %.0fx%.0f, colour %d", (unsigned long long)renderer_exec_frame(),
+                    w ? "mask" : "map", st.viewport[0][0], st.viewport[0][1], st.viewport[0][2], st.viewport[0][3], st.rt.ncolor);
+                for (int i = 0; i < st.rt.ncolor; i++) {
+                    NvnTexture *t = st.rt.color[i];
+                    float sx = 1, sy = 1;
+                    if (t) renderer_texture_scale(t, &sx, &sy);
+                    if (t) LOG(" [%llx %ux%u fmt %#x scale %.2f]", (unsigned long long)t->addr, t->width, t->height, t->format, sx);
+                }
+                if (st.rt.depth) LOG(", depth %llx %ux%u fmt %#x", (unsigned long long)st.rt.depth->addr, st.rt.depth->width, st.rt.depth->height, st.rt.depth->format);
+                for (int i = 0; i < pr->fi->ntex && i < 6; i++) {
+                    NvnTexture *t = shader_texture_object(1, &pr->fi->tex[i]);
+                    float sx = 1, sy = 1;
+                    if (t) renderer_texture_scale(t, &sx, &sy);
+                    if (t) LOG(", tex%d %llx %ux%u fmt %#x scale %.2f", i, (unsigned long long)t->addr, t->width, t->height, t->format, sx);
+                }
+                LOG("\n");
+            }
+        }
         // (the rift's map and mask make their cb4 from a CPU copy, cbuf_info: a dispatch's results in it, GPU-copied
         // for other draws, are waited for here - with the GPU's copy left aside the mask read stale rows and the
         // opening dungeon went black, frames ~1650-1860 on an RTX 3080 Ti)
