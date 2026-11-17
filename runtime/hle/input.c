@@ -457,7 +457,8 @@ static void retroid_fix(SDL_JoystickID id) {
     char out[1024];
     size_t n = 0;
     out[0] = 0;
-    for (char *tok = strtok(m, ","); tok && n < sizeof out - 64; tok = strtok(NULL, ",")) {
+    char *save = NULL;
+    for (char *tok = strtok_r(m, ",", &save); tok && n < sizeof out - 64; tok = strtok_r(NULL, ",", &save)) {
         char k[16] = "";
         const char *v = strchr(tok, ':');
         if (v && v - tok < (long)sizeof k) memcpy(k, tok, (size_t)(v - tok)), k[v - tok] = 0;
