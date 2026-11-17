@@ -1,4 +1,4 @@
-# How EoW Recomp works
+# How ReTri works
 
 A one-page map of the code. CONTRIBUTING.md lists the files and how to build and test; this explains how the parts
 fit together. File names are on the current development branch.

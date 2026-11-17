@@ -1,4 +1,4 @@
-// EoW Recomp entry: load modules, set up the kernel, run nn::init::Start on the main thread.
+// ReTri entry: load modules, set up the kernel, run nn::init::Start on the main thread.
 #include <SDL3/SDL.h>
 #include "platform.h"
 #if defined(__ANDROID__) || PLAT_IOS
@@ -267,7 +267,7 @@ static void log_startup_info(void) {
     char ram[32] = "RAM unknown";
     if (si.ram && tenths % 10) snprintf(ram, sizeof ram, "%llu.%llu GB RAM", tenths / 10, tenths % 10);
     else if (si.ram) snprintf(ram, sizeof ram, "%llu GB RAM", tenths / 10);
-    fprintf(stderr, "[info] EoW Recomp %s, %s, %s%s, %s%s%s\n", larecomp_version(), si.os[0] ? si.os : "unknown OS",
+    fprintf(stderr, "[info] ReTri %s, %s, %s%s, %s%s%s\n", larecomp_version(), si.os[0] ? si.os : "unknown OS",
             si.cpu[0] ? si.cpu : "unknown CPU", cores, ram, si.package ? ", " : "", si.package ? si.package : "");
 }
 
@@ -360,7 +360,7 @@ int main(int argc, char **argv) {
         return iosexport_run_cli(arg_kit, root) ? 0 : 1;
     }
 #else
-    if (build_ios) { fprintf(stderr, "the iOS export isn't in this build of EoW Recomp\n"); return 1; }
+    if (build_ios) { fprintf(stderr, "the iOS export isn't in this build of ReTri\n"); return 1; }
 #endif
     for (bool title = !skip_launcher;;) {
         if (title && no_launcher) {

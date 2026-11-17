@@ -1,6 +1,6 @@
-# Contributing to EoW Recomp
+# Contributing to ReTri
 
-EoW Recomp is a private project for now. This file sets out how work is organised, so that every change follows the
+ReTri is a private project for now. This file sets out how work is organised, so that every change follows the
 same path from the start.
 
 ## The one hard rule: no Nintendo files
@@ -15,7 +15,7 @@ Screenshots and short clips in bug reports are fine.
 
 ## Versions
 
-EoW Recomp uses [Semantic Versioning](https://semver.org): `MAJOR.MINOR.PATCH`.
+ReTri uses [Semantic Versioning](https://semver.org): `MAJOR.MINOR.PATCH`.
 
 - The version lives in `VERSION`. On `develop` it is the next version being worked on.
 - Before 1.0, a MINOR release (0.2.0) carries new features and may change behaviour or settings. A PATCH release

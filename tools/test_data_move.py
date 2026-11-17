@@ -124,14 +124,14 @@ with tempfile.TemporaryDirectory() as directory:
     assert Path(t['PATH']) == S / 'misc' / 'EoW Recomp' and not t['REFUSE'] and t['HAS_DATA'] == '0', t
     t = run('target', S / 'empty')
     assert Path(t['PATH']) == S / 'empty' and not t['REFUSE'] and int(t['BYTES']) > 10_000_000, t
-    (S / 'logs').mkdir()  # (only EoW Recomp's own logs - a start there before: counts as empty)
+    (S / 'logs').mkdir()  # (only ReTri's own logs - a start there before: counts as empty)
     (S / 'logs/eowrecomp.log').write_text('log')
     (S / 'logs/eowrecomp-backup-20261110-120000-1.log').write_text('log')
     t = run('target', S / 'logs')
     assert Path(t['PATH']) == S / 'logs' and not t['REFUSE'], t
     print('target: the folder itself when empty (or holding only our logs), a "EoW Recomp" folder in a full one; the '
           'data folder and folders in it refused')
-    # #736: a folder holding another program's file or folder that has one of our names is not EoW Recomp data
+    # #736: a folder holding another program's file or folder that has one of our names is not ReTri data
     for name in ('cache', 'fonts', 'save', 'rando', 'extracted', 'gamecontrollerdb.txt'):
         for alone in (False, True):
             pick = S / f'other_{name}{"_alone" if alone else ""}'
@@ -150,7 +150,7 @@ with tempfile.TemporaryDirectory() as directory:
     (pick / 'my_document.txt').write_text('mine')
     t = run('target', pick)
     assert t['REFUSE'] == 'Choose an empty folder.', t
-    # EoW Recomp's own data, from any version: used as it is (the folder itself, Use it)
+    # ReTri's own data, from any version: used as it is (the folder itself, Use it)
     def data(name, entries):
         d = S / name
         d.mkdir()

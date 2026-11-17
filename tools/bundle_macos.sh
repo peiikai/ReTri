@@ -1,5 +1,5 @@
 #!/bin/bash
-# make app: build/EoW Recomp.app from <exe> (default build/mac15/eowrecomp). Contents/MacOS: the executable;
+# make app: build/ReTri.app from <exe> (default build/mac15/eowrecomp). Contents/MacOS: the executable;
 # Contents/Frameworks: every non-system dylib it loads (SDL3, FFmpeg; from build/deps, else Homebrew), load
 # paths rewritten to @rpath; Contents/Resources: the icon and what the start screen builds the game code with on the
 # player's machine (runtime/gamebuild.c): the generator helper (build/helper/lasgen), the compiler (build/zig, tools/fetch_zig.sh)
@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 EXE=${1:-build/mac15/eowrecomp}
-APP="build/EoW Recomp.app"
+APP="build/ReTri.app"
 DEPS=$PWD/build/deps
 BUNDLE_ID=$(sed -n 's/^#define RT_BUNDLE_ID "\(.*\)"/\1/p' runtime/paths.h)
 TAG=$(sed -n 's/^#define LARECOMP_VERSION "\(.*\)"/\1/p' runtime/ui/launcher.mm)
@@ -115,8 +115,8 @@ cat > "$C/Info.plist" <<EOF
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleExecutable</key><string>eowrecomp</string>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-    <key>CFBundleName</key><string>EoW Recomp</string>
-    <key>CFBundleDisplayName</key><string>EoW Recomp</string>
+    <key>CFBundleName</key><string>ReTri</string>
+    <key>CFBundleDisplayName</key><string>ReTri</string>
     <key>CFBundleIconFile</key><string>icon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>

@@ -2649,7 +2649,7 @@ void ui_window_init(void) {
     // failing at the first texture. Not on macOS: every Mac it runs on has them. Not in the Simulator
     // either: its GPU has no BC on any Mac, and only the start screen runs there.
     if (TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR && !dev.supportsBCTextureCompression && !getenv("LARECOMP_NO_BC_CHECK")) {
-        static const char msg[] = "This iPhone or iPad can't run EoW Recomp: its graphics chip has no support for the "
+        static const char msg[] = "This iPhone or iPad can't run ReTri: its graphics chip has no support for the "
                                   "game's texture formats (BC).";
         fprintf(stderr, "FATAL: %s (the GPU has no BC texture formats)\n", msg);
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ReTri", msg, window);

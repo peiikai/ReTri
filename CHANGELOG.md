@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to EoW Recomp are listed here.
+All notable changes to ReTri are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org). See `CONTRIBUTING.md` for the release steps.
 
@@ -16,6 +16,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 - The start screen title is in Hylia Serif, a free fan font by Omni Jacala (credited in the README).
 - The window and error dialogs are titled "ReTri", the project's new name (a play on recomp and Tri).
+- All app text says ReTri: menus, the start screen, error and crash messages, in every language. The app,
+  disk image, Windows zip, AppImage and iOS files are named ReTri too (`ReTri.app`, `ReTri-<version>-...`).
+  Binaries, the data folder and `LARECOMP_*` env vars keep their names, so saves and settings stay where they are.
 - The app is named EoW Recomp: binaries `eowrecomp` and `eowgame.dylib`, logs `eowrecomp.log`, and the name in
   menus, window titles and docs. Env vars stay `LARECOMP_*`.
 - A new app icon of EoW Recomp's own: a staff with a glowing orb on a hill at dusk, a small rift on a far hill,

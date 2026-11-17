@@ -107,7 +107,7 @@ adb shell am start -S -n com.lasrecomp.android/com.lasrecomp.LASRecompActivity \
 ```
 
 `adb shell input keyevent` doesn't reach the game. `eowrecomp.log` is in the data folder (on an SD card:
-`/storage/<card>/Android/data/com.lasrecomp.android/files/EoW Recomp`); its `[dynres]` and `[pace]` lines say what
+`/storage/<card>/Android/data/com.lasrecomp.android/files/ReTri`); its `[dynres]` and `[pace]` lines say what
 Dynamic and the frame pacer did and why.
 
 ## Tested devices

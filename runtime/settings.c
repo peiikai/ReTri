@@ -389,7 +389,7 @@ void settings_save(void) {
     FILE *f = fopen(SETTINGS_FILE, "w");
     if (!f) { LOG("[settings] cannot write %s\n", SETTINGS_FILE); return; }
 #endif
-    fprintf(f, "# EoW Recomp settings (edited from the in-game menu: F1, Esc, or Minus+Plus on a controller)\n");
+    fprintf(f, "# ReTri settings (edited from the in-game menu: F1, Esc, or Minus+Plus on a controller)\n");
     fprintf(f, "aspect = %s\n", g_settings.aspect == ASPECT_ORIGINAL ? "original" : "unlocked");
     fprintf(f, "fullscreen = %d\n", g_settings.fullscreen);
     fprintf(f, "volume = %.2f\n", g_settings.volume);
