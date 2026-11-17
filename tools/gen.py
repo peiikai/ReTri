@@ -356,7 +356,7 @@ class Module:
         raise Unsupported(k)
 
     def emit_function(self, entry, end, labels, tables, hle):
-        out = [f'void {fname(entry)}(Cpu *c) {{']
+        out = [f'{"__attribute__((optnone)) " if entry in OPTNONE else ""}void {fname(entry)}(Cpu *c) {{']
         if entry in hle:
             out.append(f'    {sanitize(hle[entry])}(c);')
             out.append('}')
@@ -493,6 +493,12 @@ def switch_on(expr):
 def rebase_patch(code):
     return PATCH_ADDR.sub(lambda m: gaddr(int(m.group(1), 16)), code) if lifter.DYN_BASE else code
 
+# Functions built without optimisation: guest address -> its first instruction word (checked, as patches are).
+# Workaround: LLVM's loop passes (LICM, then loop-load elimination) run for over half an hour and 7 GB on these at
+# -O1, a cost no flag of theirs caps (-disable-licm-promotion below doesn't), and they don't run in normal play.
+OPTNONE = {}
+
+
 def write_if_changed(path, text):
     """Leaves unchanged chunks untouched so make only recompiles what a patch affected."""
     try:
@@ -553,6 +559,12 @@ def main():
             sys.exit(f'{args.name}: main build ID {m.nso.build_id[:16].upper()} is not {args.game}')
         print(f'{args.name}: game {game_addresses.GAMES[args.game][0]} (no LA patches)', file=sys.stderr)
         if args.name == 'main' and args.game == 'eow':
+            # (OPTNONE) a 25 500-line function behind a data table at main+0x3d85e90, never entered in 4 200 frames of
+            # start, file load and play (LARECOMP_FNPROF); at -O1 it took 30+ minutes to compile
+            OPTNONE[0x7001390b70] = 0xa9ba7bfd  # stp x29, x30, [sp, #-0x60]!
+            for _a, _w in OPTNONE.items():
+                _got = struct.unpack_from('<I', m.nso.image, _a - m.base)[0]
+                assert _got == _w, f'OPTNONE {_a:#x}: {_got:#x}, not {_w:#x}'
             # (warp, runtime/hle/warp_other.c) the level-jump request processor (main+0x160f7e0, x0 = its object,
             # the request at +0x10): its `mov x20, x0` tells us where the request is
             def _eow_request(gen, a):
@@ -570,6 +582,36 @@ def main():
                 return ('{ extern void rt_tilt_obj(uint64_t); c->x[19] = c->x[23] + 0x600; rt_tilt_obj(c->x[19]); }'
                         f'  /* {a:#x}: add x19, x23, #0x600 (tilt-shift set-up: blur removal) */')
             PATCHES[0x70027802e8] = _eow_tilt
+            # (frame pacing, runtime/nvn/pace.c rt_other_fps_window) the frame controller at 30 fps, at the end of a
+            # 12-frame window, reads how many of its frames took over 1/60 s; 0 takes it back to 60. On phone and tablet
+            # GPUs its frames read slow at 30 by the lowered clock alone: the runtime may answer 0 to try 60
+            def _eow_fps_window(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0xb944ff49, hex(w)  # ldr w9, [x26, #0x4fc]
+                return ('{ extern uint32_t rt_other_fps_window(uint32_t); '
+                        'c->x[9] = rt_other_fps_window(LD32(c->x[26] + 0x4fc)); }'
+                        f'  /* {a:#x}: ldr w9, [x26, #0x4fc] (30 fps window: its slow frames) */')
+            PATCHES[0x7000347370] = _eow_fps_window
+            # ... and at 60, its count of frames in a row over 1/60 s (at 1 or 2 it goes to 30): 0 for a moment
+            # after a try, while the clock comes up
+            def _eow_slow60(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0xb945034a, hex(w)  # ldr w10, [x26, #0x500]
+                return ('{ extern uint32_t rt_other_slow60(uint32_t); '
+                        'c->x[10] = rt_other_slow60(LD32(c->x[26] + 0x500)); }'
+                        f'  /* {a:#x}: ldr w10, [x26, #0x500] (60 fps: frames over 1/60 s in a row) */')
+            PATCHES[0x7000347668] = _eow_slow60
+            # ... and the frame time it calls slow, 1/60 s (`movk w9, #0x3c88, lsl #16` after `mov w9, #0x8889`), in its 30
+            # and its 60 fps branch: with Dynamic resolution the FPS target decides instead (rt_other_fps_limit)
+            def _eow_fps_limit(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0x72a79109, hex(w)  # movk w9, #0x3c88, lsl #16
+                at30 = 1 if a == 0x7000347340 else 0
+                return ('{ extern uint32_t rt_other_fps_limit(int); '
+                        f'c->x[9] = rt_other_fps_limit({at30}); }}'
+                        f'  /* {a:#x}: movk w9, #0x3c88, lsl #16 (1/60 s: a slow frame, {"30" if at30 else "60"} fps branch) */')
+            for a in (0x7000347340, 0x700034756c):
+                PATCHES[a] = _eow_fps_limit
             # (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
             # `movz wD, #0x8e39; movk wD, #0x3fe3, lsl #16`: the movk gets the runtime's aspect instead
             eow_aspect = [0x700033d32c, 0x700033e6f8, 0x7000348b70, 0x7000351e20, 0x7000c2bd3c, 0x7000c2c8b4,

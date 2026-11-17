@@ -1413,7 +1413,7 @@ static void draw_folder_example(float w) {
 
 // Another game on the engine (game_other) gets its own look on the start screen: the settings menu's palette
 // (runtime/ui/plastic.mm theme_eow) - plum-brown shade, cream text, gold to orange highlights
-static ImU32 eow_or(ImU32 la, ImU32 other) { return game_other() ? other : la; }
+static ImU32 eow_or(ImU32 la, ImU32 other) { return ui_eow_look() ? other : la; }
 
 // Start-screen text: a soft drop shadow, then the text with a top-to-bottom colour gradient (top == bottom: flat)
 static void text_fx(ImDrawList *dl, ImFont *font, float size, ImVec2 p, ImU32 top, ImU32 bottom, const char *t,
@@ -2720,7 +2720,7 @@ extern "C" void launcher_run(const char *root) {
                 bg->AddImage(BG_TEXID, ImVec2(0, 0), ds, uv0, uv1);
             } else if (update_only) {
                 bg->AddRectFilled(ImVec2(0, 0), ds, IM_COL32(40, 40, 40, 255));
-            } else if (game_other()) {  // plum-brown, a bronze glow at the upper right with slow echoes rippling out
+            } else if (ui_eow_look()) {  // plum-brown, a bronze glow at the upper right with slow echoes rippling out
                 bg->AddRectFilledMultiColor(ImVec2(0, 0), ds, IM_COL32(58, 42, 48, 255), IM_COL32(90, 66, 50, 255),
                                             IM_COL32(31, 24, 26, 255), IM_COL32(36, 26, 30, 255));
                 ImVec2 c(ds.x * 0.78f, ds.y * 0.3f);
@@ -2766,7 +2766,7 @@ extern "C" void launcher_run(const char *root) {
             ImGui::SetCursorPos(ImVec2(x0, 120 * s));
             ImGui::PushFont(g_font_title);
             if (page == MAIN) {  // gold to orange, shadowed (not behind the Settings / System windows)
-                const char *t = game_other() ? "ReTri" : "EoW Recompiled";
+                const char *t = ui_eow_look() ? "ReTri" : "EoW Recompiled";
                 ImVec2 p = ImGui::GetCursorScreenPos();
                 text_fx(ImGui::GetWindowDrawList(), ImGui::GetFont(), ImGui::GetFontSize(), p,
                         eow_or(IM_COL32(255, 232, 120, 255), IM_COL32(240, 216, 144, 255)),
@@ -3254,7 +3254,7 @@ extern "C" void launcher_run(const char *root) {
                     const char *v = game_release_label((g_root + "/exefs").c_str(), label, sizeof label);
                     version_label = v ? v : "?";
                 }
-                ImGui::TextColored(game_other() ? ImVec4(0.85f, 0.70f, 0.49f, 1) : ImVec4(0.66f, 0.76f, 0.98f, 1), L("Nintendo Switch  \xc2\xb7  v%s"), version_label.c_str());
+                ImGui::TextColored(ui_eow_look() ? ImVec4(0.85f, 0.70f, 0.49f, 1) : ImVec4(0.66f, 0.76f, 0.98f, 1), L("Nintendo Switch  \xc2\xb7  v%s"), version_label.c_str());
             } else {
                 ImGui::TextColored(ImVec4(1, 0.72f, 0.4f, 1), "!  %s", busy ? L("Setting up the game files...") : shown(status).c_str());
                 ImGui::SetCursorPosX(x0);

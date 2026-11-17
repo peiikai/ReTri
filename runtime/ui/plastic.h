@@ -22,6 +22,7 @@ struct PlasticTheme {
 };
 // LA's; another game on the engine (game_other) gets its own pause menu's colours
 const PlasticTheme &plastic_theme(void);
+bool ui_eow_look(void);  // EoW's look: its game files, or none chosen yet
 static inline ImVec4 plastic_col(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
 
 enum PlasticKind { PK_SLAB = 0, PK_INSET = 1, PK_PILL = 2, PK_RING = 3 };

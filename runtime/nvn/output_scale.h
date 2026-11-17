@@ -28,6 +28,9 @@ void output_scale_thermal(int state);
 // The scale of the game's ambient occlusion targets (metal.m / vulkan/textures.c tex_ao) at allocation scale `al`: 1 =
 // the Switch's size, up to 2 (Video tab "Ambient occlusion"). 0: LARECOMP_AO_SCALED=1, they follow the render scale.
 float output_scale_ao(float al);
+// Another game's 1080-line 2D targets (metal.m / vulkan/textures.c tex_2d): their scale over the frame's. EoW draws
+// its 3D at 792 lines and the frame's scale is set by that; its 2D at 1080 lines takes 792/1080 of it. LA: 1.
+float output_scale_2d(void);
 // The game's shadow map: is this texture it, and its scale (the Switch's size or twice it, at any render scale).
 bool output_scale_is_shadow_map(uint32_t target, uint32_t samples, uint32_t w, uint32_t h, uint32_t format, bool render_target);
 float output_scale_shadow(void);
