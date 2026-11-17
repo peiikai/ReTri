@@ -665,9 +665,24 @@ static bool gwp_on(void) {
     if (on < 0) { const char *e = getenv("LARECOMP_VK_GW_WAIT"); on = game_other() && (!e || atoi(e) != 0); }
     return on;
 }
+// (gwp, no wait) Right after a storing dispatch (its pass is already ended) its slots are copied on the GPU, from where
+// the dispatch wrote them (the heap import, or the shader global memory copies), into the transient ring; a uniform
+// buffer inside one of those copies is bound there instead of copied from guest memory, so no CPU wait (the wait cost
+// ~5 ms a frame on a Retroid Pocket 5, Adreno 650, in a shop: 23.6 against 18.8 ms). The copy keeps the address's
+// offset within 256 bytes, so a bind at a 256-byte boundary stays aligned. Where no copy could be made (the lazy heap
+// chunks) the wait above stays. LARECOMP_VK_GW_COPY=0: always the wait.
+#define GWC_N 256
+static struct { uint64_t addr, size; VkBuffer buf; VkDeviceSize off; } gwc[GWC_N];
+static int ngwc;
+static bool gwc_find(uint64_t addr, uint64_t size, VkDescriptorBufferInfo *out);
+static bool gwc_on(void) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("LARECOMP_VK_GW_COPY"); on = !e || atoi(e) != 0; }
+    return on;
+}
 void renderer_flush(void) {
     cs_since_flush = false;
-    ngwp = 0, gwp_full = false;
+    ngwp = 0, gwp_full = false, ngwc = 0;
     renderer_submit();
     if (!wait_why) wait_why = "flush";
     vk_wait_seq(submit_seq);
@@ -3838,6 +3853,15 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
         const void *src = interp_cbuf(stage, k, idx, (const void *)(uintptr_t)r.addr, size, used);
         if (src != (const void *)(uintptr_t)r.addr) return ubo_span(vk_transient_copy(src, size, 256), size);
     }
+    VkDescriptorBufferInfo gb;
+    if (ngwc && gwc_find(r.addr, size, &gb)) {  // (a storing dispatch's results this submission: the GPU's copy)
+        if (getenv("LARECOMP_LOG_GW")) {
+            static int n;
+            if (n++ < 100) LOG("[gw] stage %d cb%d %llx+%llu: the GPU's copy of a dispatch's results\n", stage, k,
+                               (unsigned long long)r.addr, (unsigned long long)size);
+        }
+        return gb;
+    }
     if (gc_lazy && si->uses_gmem && scan_once) return ubo_span(guest_copy_ex(r.addr, size, true), size);
     if (gc_lazy && si->uses_gmem) gc_scan_pointers((const uint32_t *)(uintptr_t)r.addr, size);
     return ubo_span(guest_copy(r.addr, size), size);
@@ -6437,18 +6461,81 @@ static void gpl_probe_note(Pipe *pp) { (void)pp; }
 static void gpl_probe(void) {}
 #endif
 
+// (gwc) Where the GPU has [addr, addr + size) after a dispatch stored to it: the shader global memory copies' slot, or
+// the heap import itself; none with the lazy heap chunks (a range can cross them)
+static bool gwc_source(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSize *off) {
+    if (addr < HEAP_BASE || !size) return false;
+    if (gmir_on()) return gmir_direct(addr, size, buf, off);
+    if (gc_lazy || !gmem_buf || addr + size > HEAP_BASE + gmem_size) return false;
+    *buf = gmem_buf, *off = addr - HEAP_BASE;
+    return true;
+}
+static void gwc_drop(int j) {  // (in order: gwc_find takes the newest copy holding a range)
+    memmove(&gwc[j], &gwc[j + 1], (size_t)(--ngwc - j) * sizeof gwc[0]);
+}
+// (gwc) The dispatch just recorded stored to [a, a + n): copy it on the GPU, or (no source) drop older copies it
+// overlaps, so a bind there waits (gwp_wait) rather than reading a copy from before this dispatch
+static void gwc_note(VkCommandBuffer cb, uint64_t a, uint64_t n, uint64_t slot_size, bool *barrier) {
+    VkBuffer sb;
+    VkDeviceSize so;
+    uint64_t m = n;  // (the slot as bound, if the 0x480 bytes past it aren't in the source: binds past it still wait)
+    for (int j = 0; j < ngwc; j++)  // (a range stored again: the older copy is no longer what the slot holds)
+        if (gwc[j].addr == a) gwc_drop(j--);
+    bool ok = gwc_on() && !g_interp_replaying && ngwc < GWC_N && (gwc_source(a, m, &sb, &so) || (m = slot_size, gwc_source(a, m, &sb, &so)));
+    if (!ok) {
+        if (getenv("LARECOMP_LOG_GW")) {
+            static int nl;
+            if (nl++ < 40) LOG("[gw] no GPU copy of %llx+%llu (slot %llu bytes, %d copies)\n", (unsigned long long)a,
+                               (unsigned long long)n, (unsigned long long)slot_size, ngwc);
+        }
+        for (int j = 0; j < ngwc; j++)
+            if (a < gwc[j].addr + gwc[j].size && gwc[j].addr < a + n) gwc_drop(j--);
+        return;
+    }
+    if (!*barrier) vk_full_barrier(cb), *barrier = true;  // (the dispatch's writes, before the copy reads them)
+    VkSpan d = vk_transient(m + 256, 256);
+    VkBufferCopy c = {so, d.off + (a & 255), m};
+    rec_CmdCopyBuffer(cb, sb, d.buf, 1, &c);
+    gwc[ngwc].addr = a, gwc[ngwc].size = m, gwc[ngwc].buf = d.buf, gwc[ngwc++].off = c.dstOffset;
+}
+// (gwc, shader global memory copies) Does any slot hold part of [addr, addr + size)? The GPU writes only there: a range
+// outside every slot (past a slot, in GWP_MIN's margin) can't hold a dispatch's results, and needs no wait
+static bool gmir_overlaps(uint64_t addr, uint64_t size) {
+    bool hit = false;
+    pthread_mutex_lock(&gmir_lock);
+    for (int k = 0; k < GMIR_SLOTS && !hit; k++)
+        hit = gmir_slot[k].used && addr < gmir_slot[k].hi && gmir_slot[k].lo < addr + size;
+    pthread_mutex_unlock(&gmir_lock);
+    return hit;
+}
+// (gwc) A uniform range inside one of this submission's copies (the newest first): bound there
+static bool gwc_find(uint64_t addr, uint64_t size, VkDescriptorBufferInfo *out) {
+    if (g_interp_replaying) return false;
+    for (int j = ngwc - 1; j >= 0; j--) {
+        if (addr < gwc[j].addr || addr + size > gwc[j].addr + gwc[j].size) continue;
+        VkDeviceSize off = gwc[j].off + (addr - gwc[j].addr);
+        if (off % g_vk.props.limits.minUniformBufferOffsetAlignment) return false;
+        *out = ubo_span((VkSpan){gwc[j].buf, off, NULL}, size);
+        return true;
+    }
+    return false;
+}
+
 // (gwp) A storing dispatch was recorded: its storage slots may hold its results once the GPU has run it
-static void gwp_note_dispatch(void) {
+static void gwp_note_dispatch(VkCommandBuffer cb) {
     if (!gwp_on()) return;
+    bool barrier = false;
     for (int i = 0; i < 16; i++) {
         uint64_t a = st.sbuf[5][i].addr, n = st.sbuf[5][i].size < GWP_MIN ? GWP_MIN : st.sbuf[5][i].size;
         if (!a) continue;
+        gwc_note(cb, a, n, st.sbuf[5][i].size, &barrier);
         int j = 0;
         while (j < ngwp && !(gwp[j].addr == a && gwp[j].size >= n)) j++;
         if (j < ngwp) continue;
-        if (ngwp == GWP_N) { gwp_full = true; return; }
+        if (ngwp == GWP_N) { gwp_full = true; break; }
         gwp[ngwp].addr = a, gwp[ngwp++].size = n;
     }
+    if (barrier) vk_full_barrier(cb);  // (the copies, before draws read them as uniforms)
 }
 // (gwp) Before a draw or dispatch is recorded: a uniform buffer a stage reads that a pending dispatch may have written
 // waits for the GPU (renderer_flush: the GPU's writes in guest memory), so cbuf_info's copy has the results
@@ -6459,6 +6546,9 @@ static void gwp_wait(int stage, const ShaderInfo *si) {
         Range r = st.ubuf[stage][k - 3];
         if (!r.addr) continue;
         uint64_t size = r.size ? r.size : si->cbuf_size[k];
+        VkDescriptorBufferInfo b;
+        if (gwc_find(r.addr, size, &b)) continue;  // (bound to the GPU's copy: cbuf_info)
+        if (gwc_on() && gmir_on() && !gmir_overlaps(r.addr, size)) continue;  // (the GPU can't have written it)
         bool hit = gwp_full;
         for (int j = 0; j < ngwp && !hit; j++) hit = r.addr < gwp[j].addr + gwp[j].size && gwp[j].addr < r.addr + size;
         if (!hit) continue;
@@ -6538,7 +6628,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
         if (gmir_on()) gmir_after_dispatch(cb);  // (its slots: readbacks; what follows reads the slots)
         else gfast_finish(cb);
     }
-    if (cp->si->uses_gmem_store) vc_mark_sbufs(5), gwp_note_dispatch();
+    if (cp->si->uses_gmem_store) vc_mark_sbufs(5), gwp_note_dispatch(cb);
     stat_dispatches++;
 }
 

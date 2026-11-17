@@ -24,7 +24,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 - Vulkan (Windows, Linux, Android): the hearts show as red hearts, not dark hearts in a red box.
-- Vulkan: draws that read what a compute pass just wrote wait for it (EoW's interiors were darker than on Mac).
+- Vulkan: draws that read what a compute pass just wrote get the GPU's own copy of it (EoW's interiors were darker
+  than on Mac), without stopping the CPU to wait.
 - Vulkan: the rifts read the scene's stencil, as on Mac.
 - The start screen accepts EoW's game files (it said "Wrong version of the game").
 - The Shadows setting changes EoW's shadows (it only knew LA's shadow map).
