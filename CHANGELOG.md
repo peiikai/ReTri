@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
 - Button icons follow the controller, as in LAS Recomp: PlayStation pads show Cross, Circle, Square and Triangle,
   Xbox pads their own letters, in the HUD, menu prompts and text. "Button icons" setting (Controls tab).
+- Windows (x86-64, Vulkan): plays Echoes of Wisdom at 60 fps, with the same picture as on Mac. The zip sets the game
+  up from your own extracted files and builds the game code on your PC (about an hour the first time).
 
 ### Changed
 - The start screen title is in Hylia Serif, a free fan font by Omni Jacala (credited in the README).
