@@ -79,11 +79,39 @@ works on 120 Hz displays.
 
 ## For developers
 
+### Building for your own device (Mac)
+
+```bash
+make deps-ios
+```
+
+Then generate the game code for the moving guest window (`generated-dyn/`, from your own extracted files; gen.py needs
+the `unicorn` module) and build:
+
+```bash
+cd tools && X="<extracted>/exefs" && \
+python gen.py sdk "$X/sdk" 0x7008000000 ../generated-dyn/sdk --hle ../runtime/hle/hle_symbols.txt --simd asm --dyn-base --game eow && \
+python gen.py main "$X/main" 0x7000000000 ../generated-dyn/main --simd asm --dyn-base --game eow
+```
+
+```bash
+make PLATFORM=ios -j8 && PROFILE=<.mobileprovision> IOS_MIN=16.4 tools/bundle_ios.sh build/ios/eowrecomp build/ios/eowgame.dylib
+```
+
+The profile is an Xcode team profile for the app's bundle ID (`com.peiikai.retri.ios`) with Increased Memory
+Limit. `xcrun devicectl device install app` installs it and keeps the app's Documents. Copy `exefs` and `romfs` to
+`Documents/extracted` with `devicectl device copy to` (never with `--remove-existing-content`: it empties the whole
+Documents folder).
+
+Measured (iPad Pro 11" M4, 8 GB, iOS 27.0.1, Increased Memory Limit): an 8192 MB limit, shader preparation 83 s on the
+first start, the overworld at 60 fps with a 2.3-3.0 GB footprint.
+
 What is still open or worth knowing. Fixed items are in git history.
 
 ### Address space
 
-- **The window is one 5.25 GB piece, placed where the process has room.** Free address space differs by device and
+- **The window is one 5.28 GB piece, placed where the process has room.** EoW's main is 64 MB, so its sdk loads at
+  +0x8000000 and the HLE region follows it at +0xA000000 ([runtime/rt.h](../runtime/rt.h)). Free address space differs by device and
   iOS version. On iOS 26 there is a gap above `0x3_0000_0000`. On iOS 27.0.1 (iPhone 15 Pro) the dyld shared cache
   spans `0x2_EA00_0000..0xF_C000_0000`, the gaps under it are under 4 GB, and the only room is above it. So the iOS
   build is a `DYN_BASE=1` build (`generated-dyn/`, the window laid out from `GUEST_LO`), and `plat_place_guest`
