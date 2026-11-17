@@ -49,6 +49,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 - On iPhone, iPad and Android the game no longer stays at 30 fps after a brief dip: it tries 60 again after a
   second (the GPU slows its clock at 30, and the game read that as too slow for 60).
+- Memory no longer grows during play: the extra command memory the game runs out of is reused instead of leaked.
 - The start screen's game folder help names Echoes of Wisdom and ReTri, not Link's Awakening (all languages).
 - The start screen accepts EoW's game files (it said "Wrong version of the game").
 - Before any game files are chosen, the start screen has EoW's look and names Echoes of Wisdom (it showed LA's).
