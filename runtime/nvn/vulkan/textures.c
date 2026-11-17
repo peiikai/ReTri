@@ -514,11 +514,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     // right edge, issue #205; every window resize reallocates these images). Copies into them write only the contents'
     // part, and with LARECOMP_NO_FRAME_CLEAR the per-frame clear is skipped. LARECOMP_NEW_TARGET_FILL=<r>,<g>,<b>,<a>
     // (test): that colour instead of zeros.
-    // (test) LARECOMP_VK_CLEAR_NEW_TARGETS=1: every new colour target, not only the scalable ones (EoW's rift map:
-    // striped in some runs on an RTX 3080 Ti, as if read before it was all written)
-    static int clear_all = -1;
-    if (clear_all < 0) clear_all = getenv("LARECOMP_VK_CLEAR_NEW_TARGETS") != NULL;
-    bool clear_color = !depthfmt && (b->scalable || clear_all) && (ci.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+    bool clear_color = !depthfmt && b->scalable && (ci.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
     if (depthfmt || clear_color) {
         VkCommandBuffer cb = vk_upload_cmd();
         VkImageSubresourceRange rg = {b->aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
