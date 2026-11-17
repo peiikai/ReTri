@@ -365,7 +365,7 @@ deps-ios:
 	IOS_MIN=$(IOS_MIN) PYV=$(PYV) tools/build_deps_ios.sh
 deps-ios-sim:
 	SIM=1 IOS_MIN=$(IOS_MIN) PYV=$(PYV) tools/build_deps_ios.sh
-# iOS: build/ios/TriCompiled.app and build/dist/TriCompiled-<version>-iOS.ipa, signed with TEAM_ID / PROFILE
+# iOS: build/ios/ReTri.app and build/dist/ReTri-<version>-iOS.ipa, signed with TEAM_ID / PROFILE
 # (tools/bundle_ios.sh); DEVICE=<devicectl id> installs and launches it. Holds the game code: for your own devices only.
 ipa:
 	$(MAKE) PLATFORM=ios
@@ -374,22 +374,22 @@ app:
 	@[ -f build/deps/lib/libSDL3.0.dylib ] || { echo "make deps first"; exit 1; }
 	$(MAKE) B=$(APP_B) MACOS_MIN=$(APP_MIN) DEPS=$(CURDIR)/build/deps $(APP_B)/eowrecomp
 	MACOS_MIN=$(APP_MIN) tools/bundle_macos.sh $(APP_B)/eowrecomp
-# The iOS app without game code (build/ios-skeleton/TriCompiled.app), and the release's iOS kit around it
-# (build/dist/TriCompiled-<version>-iOS.laskit: a zip with the app as Payload/, a linker for each desktop, the Darwin
+# The iOS app without game code (build/ios-skeleton/ReTri.app), and the release's iOS kit around it
+# (build/dist/ReTri-<version>-iOS.laskit: a zip with the app as Payload/, a linker for each desktop, the Darwin
 # headers), which the start screen on any desktop completes with the library it builds there (runtime/iosexport.c).
 # Needs `make deps-ios`; the kit needs the five linkers (tools/fetch_lld.sh for each LLD_TARGET).
 ios-skeleton:
 	$(MAKE) PLATFORM=ios build/ios/eowrecomp
-	SKELETON=1 APP="build/ios-skeleton/TriCompiled.app" IOS_MIN=$(IOS_MIN) PYV=$(PYV) tools/bundle_ios.sh build/ios/eowrecomp
+	SKELETON=1 APP="build/ios-skeleton/ReTri.app" IOS_MIN=$(IOS_MIN) PYV=$(PYV) tools/bundle_ios.sh build/ios/eowrecomp
 ios-kit: ios-skeleton $(MINIZ)/.fetched  # (the kit carries miniz's licence: the desktops' export reads it with miniz)
 	tools/ios_kit.sh
-# The simulator app (build/ios-sim/TriCompiled.app, no game code, ad-hoc signed) and its run of the embedded
+# The simulator app (build/ios-sim/ReTri.app, no game code, ad-hoc signed) and its run of the embedded
 # Python's self-test (tools/test_ios_sim.sh): what CI does on a Mac runner. Needs `make deps-ios-sim`.
 ios-sim:
 	$(MAKE) PLATFORM=ios IOS_SIM=1 build/ios-sim/eowrecomp
-	SKELETON=1 IOS_SIM=1 APP="build/ios-sim/TriCompiled.app" IOS_MIN=$(IOS_MIN) PYV=$(PYV) DEPS=build/deps-ios-sim tools/bundle_ios.sh build/ios-sim/eowrecomp
+	SKELETON=1 IOS_SIM=1 APP="build/ios-sim/ReTri.app" IOS_MIN=$(IOS_MIN) PYV=$(PYV) DEPS=build/deps-ios-sim tools/bundle_ios.sh build/ios-sim/eowrecomp
 ios-sim-test: ios-sim
-	tools/test_ios_sim.sh "build/ios-sim/TriCompiled.app"
+	tools/test_ios_sim.sh "build/ios-sim/ReTri.app"
 
 # macOS release disk image (the .app + an Applications shortcut to drag it onto): build/dist/EoW Recomp-<v>-macOS.dmg
 dmg: app

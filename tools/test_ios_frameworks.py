@@ -15,7 +15,7 @@ EXT = '.cpython-313-iphoneos.so'
 
 
 def fixture(root):
-    app = os.path.join(root, 'TriCompiled.app')
+    app = os.path.join(root, 'ReTri.app')
     files = [
         f'python/lib/python3.13/lib-dynload/_bz2{EXT}',
         f'python/lib/python3.13/lib-dynload/_decimal{EXT}',

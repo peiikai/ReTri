@@ -3040,7 +3040,7 @@ extern "C" void launcher_run(const char *root) {
                 };
                 // (the descriptions put together here in the menus' language: the row finds no English for them)
                 std::string src_d = L("Pick the folder with your extracted exefs and romfs from The Legend of Zelda: Echoes of "
-                                      "Wisdom for Switch. TriCompiled doesn't include the game.");
+                                      "Wisdom for Switch. ReTri doesn't include the game.");
                 if (!src.empty()) src_d += std::string("\n\n") + L("Chosen:") + " " + folder_shown(src.c_str());
                 // the step that's running / its result, under the rows and in the Set up row's explanation
                 const std::string &job_line = job;

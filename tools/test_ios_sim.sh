@@ -1,6 +1,6 @@
 #!/bin/bash
 # The embedded Python's self-test in the iOS Simulator: tools/test_ios_sim.sh <app> [simulator name]
-# (make ios-sim-test). Boots a simulator (SIM_DEVICE, default "TriCompiled test": created from the newest iPhone type
+# (make ios-sim-test). Boots a simulator (SIM_DEVICE, default "ReTri test": created from the newest iPhone type
 # and iOS runtime when missing), installs the app, launches it with LARECOMP_IOS_PYTEST=1 and reads
 # Documents/eowrecomp.log from the app's data container: `[py] selftest ok` must be there (every native package
 # imported and exercised) and, with no game files in the simulator, `[py] generator skipped`. SIM_ROMFS=<romfs dir>
@@ -9,8 +9,8 @@
 # covers the game code).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-APP=${1:-build/ios-sim/TriCompiled.app}
-NAME=${2:-${SIM_DEVICE:-TriCompiled test}}
+APP=${1:-build/ios-sim/ReTri.app}
+NAME=${2:-${SIM_DEVICE:-ReTri test}}
 BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "$APP/Info.plist")
 
 UDID=$(xcrun simctl list devices available -j | python3 -c '

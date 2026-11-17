@@ -10,7 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Unlocked aspect ratio: the camera fills wide windows.
 - Logging of shader records the shipped list lacks, once per run.
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
-- iPhone and iPad (TriCompiled for iOS): the app holds the game code built on a Mac from your own game files.
+- iPhone and iPad (ReTri for iOS): the app holds the game code built on a Mac from your own game files.
 - Touch controls for EoW: the whole Switch pad on screen (stick, D-pad, A B X Y, L R ZL ZR, + and -), each
   control movable and resizable in the layout editor. A controller hides them, a touch brings them back.
 

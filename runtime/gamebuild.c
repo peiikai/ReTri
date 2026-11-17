@@ -352,7 +352,7 @@ bool gamebuild_available(void) {
 #define LLD_HOST LLD_ARCH "-linux"
 #endif
 
-#define KIT_APP "Payload/TriCompiled.app"
+#define KIT_APP "Payload/ReTri.app"
 #define KIT_LLD "lld/" LLD_HOST
 #define KIT_LD KIT_LLD "/bin/lld" PLAT_EXE_SUFFIX
 
