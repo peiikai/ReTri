@@ -34,6 +34,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- Memory no longer grows during play: the extra command memory the game runs out of is reused instead of leaked.
 - The start screen's game folder help names Echoes of Wisdom and ReTri, not Link's Awakening (all languages).
 - The start screen accepts EoW's game files (it said "Wrong version of the game").
 - The Shadows setting changes EoW's shadows (it only knew LA's shadow map).

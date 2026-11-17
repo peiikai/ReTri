@@ -3,6 +3,10 @@
 // records, so the game's own memory management and out-of-memory callbacks work as designed.
 // A command handle is the guest address of a list's first record.
 #include "../game_addresses.h"
+#include <pthread.h>
+#ifndef _WIN32
+#include <sys/mman.h>  // (check mode)
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -12,13 +16,113 @@
 
 static NvnCmdBuf *cb_of(uint64_t guest) { return HOST(NvnCmdBuf, guest); }
 
+// ---- host chunks (another game)
+// Our records are bigger than NVN's own commands (a CmdRec is 80 bytes; NVN's state commands are a few words), so
+// another game's command memory runs out where the hardware's wouldn't. EoW sizes its chunks for NVN (some are only
+// 2 KB) and its out-of-memory callback has no handler behind it (it would jump to 0), so the records carry on in
+// host memory: a CMD_JUMP at the end of the guest chunk leads into a host chunk.
+//
+// Lifetime: a host chunk is part of the guest chunk it extends (its origin): every list that reaches it does so
+// through that guest chunk, or was recorded while the game thought it was writing there. The game hands a chunk's
+// memory out again (nvnCommandBufferAddCommandMemory with an overlapping range) only once the GPU is done with what it
+// held, so at that point the host chunks of the old origin are done too and go back to a free list for reuse. A
+// host chunk that is still a command buffer's current memory waits for that buffer to move on, and then takes the
+// buffer's next guest chunk as its origin (lists may have started in it after the old origin was handed out).
+typedef struct HostChunk {
+    struct HostChunk *next;    // live list / free list
+    NvnCmdBuf *owner;          // the command buffer that made it (NULL once it moved on to new guest memory or finalized)
+    uint64_t lo, hi;           // origin: the guest chunk it extends
+    bool dead;                 // origin handed out again while it was still `owner`'s current memory
+    uint8_t data[];
+} HostChunk;
+#define HOST_CHUNK (256 * 1024)
+static pthread_mutex_t hc_lock = PTHREAD_MUTEX_INITIALIZER;
+static HostChunk *hc_live, *hc_free;
+static uint64_t hc_count, hc_live_n, hc_overflows;
+static int hc_log = -1;  // LARECOMP_LOG_CMDMEM: overflows and reuse
+// (test) LARECOMP_CMDMEM_CHECK=1: released chunks are made unreadable instead of reused, so anything still reading one
+// (the render thread replaying a list) crashes on it. Leaks by design. Not on Windows.
+static int hc_check = -1;
+#define HC_BYTES (sizeof(HostChunk) + HOST_CHUNK)
+
+static HostChunk *hc_get(NvnCmdBuf *cb) {
+#ifdef _WIN32
+    hc_check = 0;  // (no check mode on Windows)
+#else
+    if (hc_check < 0) hc_check = getenv("LARECOMP_CMDMEM_CHECK") != NULL;
+#endif
+    pthread_mutex_lock(&hc_lock);
+    HostChunk *h = hc_free;
+    if (h) hc_free = h->next;
+#ifndef _WIN32
+    else if (hc_check) {
+        h = mmap(NULL, HC_BYTES, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        if (h == MAP_FAILED) h = NULL; else hc_count++;
+    }
+#endif
+    else if ((h = malloc(HC_BYTES))) hc_count++;
+    if (h) {
+        h->owner = cb, h->lo = cb->origin_lo, h->hi = cb->origin_hi;
+        h->dead = cb->host && cb->host->dead;  // (chained from a chunk that waits for the buffer to move on)
+        h->next = hc_live, hc_live = h, hc_live_n++;
+        cb->host = h;  // (under the lock: other buffers' adds look at it)
+    }
+    uint64_t n = ++hc_overflows;
+    pthread_mutex_unlock(&hc_lock);
+    if (hc_log < 0) hc_log = getenv("LARECOMP_LOG_CMDMEM") != NULL;
+    if (hc_log || n % 1000 == 1)
+        LOG("[nvn] command memory overflow %llu (host chunks: %llu live, %llu made)\n", (unsigned long long)n,
+            (unsigned long long)hc_live_n, (unsigned long long)hc_count);
+    return h;
+}
+static void hc_release_locked(HostChunk **pp) {
+    HostChunk *h = *pp;
+    *pp = h->next;
+    hc_live_n--;
+#ifndef _WIN32
+    if (hc_check == 1) { mprotect(h, HC_BYTES, PROT_NONE); return; }
+#endif
+    h->next = hc_free, hc_free = h;
+}
+// The game gives [lo, hi) to `cb`: host chunks extending memory in that range are done.
+static void hc_added(NvnCmdBuf *cb, uint64_t lo, uint64_t hi) {
+    if (!cb->host && !__atomic_load_n(&hc_live, __ATOMIC_RELAXED)) return;  // (nothing made yet)
+    pthread_mutex_lock(&hc_lock);
+    for (HostChunk **pp = &hc_live; *pp;) {
+        HostChunk *h = *pp;
+        if (h->dead) {  // waits for its buffer to move on: from now on it lives as long as the buffer's new chunk
+            if (h->owner == cb) h->lo = lo, h->hi = hi, h->dead = false, h->owner = NULL;
+        } else if (h->lo < hi && lo < h->hi) {
+            if (h->owner && h->owner != cb && h->owner->host == h) h->dead = true;  // still another buffer's memory
+            else { hc_release_locked(pp); continue; }
+        } else if (h == cb->host) {
+            h->owner = NULL;
+        }
+        pp = &h->next;
+    }
+    cb->host = NULL;
+    pthread_mutex_unlock(&hc_lock);
+}
+static void hc_finalized(NvnCmdBuf *cb) {  // (any chunk of its chain may name it, not only its current one)
+    if (!__atomic_load_n(&hc_live, __ATOMIC_RELAXED)) return;
+    pthread_mutex_lock(&hc_lock);
+    for (HostChunk *h = hc_live; h; h = h->next)
+        if (h->owner == cb) h->owner = NULL, h->dead = false;  // (dead ones: released when their old range is next added)
+    pthread_mutex_unlock(&hc_lock);
+}
+
 NVN(nvnCommandBufferInitialize) {
     NvnCmdBuf *cb = calloc(1, sizeof *cb);
     cb->guest = A(0);
     SET_HOST(A(0), cb);
     RET(1);
 }
-NVN(nvnCommandBufferFinalize) { free(cb_of(A(0))); SET_HOST(A(0), 0); }
+NVN(nvnCommandBufferFinalize) {
+    NvnCmdBuf *cb = cb_of(A(0));
+    if (cb && game_other()) hc_finalized(cb);
+    free(cb);
+    SET_HOST(A(0), 0);
+}
 NVN(nvnCommandBufferSetDebugLabel) { (void)c; }
 
 static CmdRec *raw_rec(uint64_t at, uint32_t op, uint32_t size) {
@@ -36,6 +140,10 @@ NVN(nvnCommandBufferAddCommandMemory) {
         // chain the list being recorded into the new chunk
         CmdRec *j = raw_rec(cb->mem + cb->used, CMD_JUMP, sizeof(CmdRec));
         j->x[0] = mem;
+    }
+    if (game_other()) {
+        hc_added(cb, mem, mem + size);
+        cb->origin_lo = mem, cb->origin_hi = mem + size;
     }
     cb->mem = mem;
     cb->size = size;
@@ -62,17 +170,13 @@ NVN(nvnCommandBufferSetCommandMemoryCallbackEnabled) { (void)c; }
 static CmdRec *rec(Cpu *c, NvnCmdBuf *cb, uint32_t op, uint32_t extra) {
     uint32_t size = (uint32_t)((sizeof(CmdRec) + extra + 7) & ~7u);
     for (int tries = 0; !cb->mem || cb->used + size + JUMP_RESERVE > cb->size; tries++) {
-        if (game_other() && cb->mem) {  // (another game: our records are bigger than NVN's commands, so its command
-            // memory runs out where the hardware's wouldn't, and it may have no handler for it. Chain into host memory:
-            // experimental, never freed.)
-            static uint64_t overflows;
-            uint64_t n = 256 * 1024 > size + JUMP_RESERVE ? 256 * 1024 : size + JUMP_RESERVE;
-            uint8_t *more = malloc(n);
-            if (!more) FATAL("nvn: out of command memory (need %u)\n", size);
+        if (game_other() && cb->mem) {  // (no handler behind the game's callback: see "host chunks")
+            if (size + JUMP_RESERVE > HOST_CHUNK) FATAL("nvn: command record too big (%u)\n", size);
+            HostChunk *h = hc_get(cb);
+            if (!h) FATAL("nvn: out of command memory (need %u)\n", size);
             CmdRec *j = raw_rec(cb->mem + cb->used, CMD_JUMP, sizeof(CmdRec));
-            j->x[0] = (uint64_t)(uintptr_t)more;
-            cb->mem = (uint64_t)(uintptr_t)more, cb->size = n, cb->used = 0;
-            if (++overflows % 100 == 1) LOG("[nvn] command memory overflow %llu (host chunk)\n", (unsigned long long)overflows);
+            j->x[0] = (uint64_t)(uintptr_t)h->data;
+            cb->mem = (uint64_t)(uintptr_t)h->data, cb->size = HOST_CHUNK, cb->used = 0;
             continue;
         }
         if (!cb->callback || tries == 2) FATAL("nvn: out of command memory (need %u)\n", size);

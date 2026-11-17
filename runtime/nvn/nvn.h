@@ -108,6 +108,8 @@ typedef struct {
     uint64_t callback, callback_data;
     bool recording;
     uint64_t guest;  // the guest NVNcommandBuffer*
+    struct HostChunk *host;           // (game_other) the host chunk `mem` is in, NULL: guest memory
+    uint64_t origin_lo, origin_hi;    // (game_other) the guest chunk the records go into, as the game sees it
 } NvnCmdBuf;
 
 // One recorded command: header, the call's integer and float arguments, then copied data.
