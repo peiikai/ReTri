@@ -306,11 +306,13 @@ $(EXE): $(RT_OBJ) $(BACKEND_OBJ) $(UI_OBJ) $(IMGUI_OBJ) $(MINIZ_OBJ)
 
 # its id file (<library>.id) says what it was built from without loading it (runtime/gamelib.c)
 # (Windows: EoW's ~1430 objects go past the 32 KB command line - "Argument list too long" - so they go in a response
-# file. $(file) needs make 4; macOS's is 3.81, where the command line is long enough.)
+# file. $(file) needs make 4; macOS's is 3.81, where the command line is long enough. MSYS2's make runs recipes with
+# TMP and TEMP empty, and clang then can't write the response file it passes to lld - "unable to make temporary file":
+# the link gets MSYS2's own temp folder.)
 $(GAMELIB): $(GEN_OBJ) | $(EXE)
 ifeq ($(PLATFORM),windows)
 	$(file >$@.rsp,$^)
-	$(CC) $(GAMELIB_LDFLAGS) -o $@.tmp @$@.rsp
+	env TMP="$$(cygpath -w /tmp)" TEMP="$$(cygpath -w /tmp)" $(CC) $(GAMELIB_LDFLAGS) -o $@.tmp @$@.rsp
 else
 	$(CC) $(GAMELIB_LDFLAGS) -o $@.tmp $^
 endif
