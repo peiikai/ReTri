@@ -1135,6 +1135,7 @@ extern int g_tab_request_ext;
 extern "C" void menu_apply_window_requests(void *sdl_window);
 extern "C" void input_cursor_event(const SDL_Event *e);  // runtime/hle/input.c
 extern "C" bool input_cursor_hidden(void);
+extern "C" void input_pad_prepare(SDL_JoystickID id);  // runtime/hle/input.c: controller mapping fixes
 extern "C" int g_start_screen;  // runtime/hle/warp.c: the start screen is up (no game loaded: don't read its memory)
 // The Randomizer panel's Play / Play Now on the start screen (rando_tab.mm): start the game with that seed
 static std::string g_play_seed;
@@ -1614,7 +1615,7 @@ static bool phone_pick_row(const char *title, const char *pick, int choice, int 
 static void launcher_pad_open_all(void) {
     int n = 0;
     SDL_JoystickID *ids = SDL_GetGamepads(&n);
-    for (int i = 0; ids && i < n; i++) SDL_OpenGamepad(ids[i]);
+    for (int i = 0; ids && i < n; i++) input_pad_prepare(ids[i]), SDL_OpenGamepad(ids[i]);
     SDL_free(ids);
 }
 
@@ -1623,6 +1624,7 @@ static bool launcher_pad_event(const SDL_Event &e) {
     ImGuiIO &io = ImGui::GetIO();
     switch (e.type) {
     case SDL_EVENT_GAMEPAD_ADDED:
+        input_pad_prepare(e.gdevice.which);  // (a Retroid Pocket's buttons by their labels, as in game)
         SDL_OpenGamepad(e.gdevice.which);
         io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
         return true;

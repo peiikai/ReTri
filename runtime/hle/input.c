@@ -448,7 +448,7 @@ static int pad_rank(SDL_JoystickID id) {
 // X and Y swapped (getevent on a Retroid Pocket 5: A, B, X, Y -> BTN_SOUTH, BTN_EAST, BTN_NORTH, BTN_WEST). Its
 // mapping gets a and b, x and y exchanged, and the Switch Pro type, so SDL's positions, its labels, our button
 // layout setting and the button icons all match the buttons as printed. LARECOMP_PAD_NO_RETROID_FIX=1 turns it off.
-static void retroid_fix(SDL_JoystickID id) {
+static void retroid_fix(SDL_JoystickID id) {  // (also the start screen's, before it opens a pad: input_pad_prepare)
     if (SDL_GetGamepadVendorForID(id) != 0x2022 || SDL_GetGamepadProductForID(id) != 0x3001) return;
     if (getenv("LARECOMP_PAD_NO_RETROID_FIX")) return;
     char *m = SDL_GetGamepadMappingForID(id);
@@ -472,6 +472,14 @@ static void retroid_fix(SDL_JoystickID id) {
     else LOG("[input] Retroid Pocket controller mapping: %s\n", SDL_GetError());
 }
 #endif
+// Before any code opens a controller (the start screen opens its own, runtime/ui/launcher.mm): its mapping fixes
+void input_pad_prepare(SDL_JoystickID id) {
+#ifdef __ANDROID__
+    retroid_fix(id);
+#else
+    (void)id;
+#endif
+}
 static void open_pad(SDL_JoystickID id) {
 #ifdef __ANDROID__
     retroid_fix(id);
