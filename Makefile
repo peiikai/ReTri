@@ -12,6 +12,14 @@ PLATFORM := linux
 else
 PLATFORM ?= macos
 endif
+# (Windows) Started from a shell that doesn't pass them on, MSYS2's make runs recipes with TMP, TEMP and USERPROFILE
+# empty: clang couldn't write the response file it gives lld ("unable to make temporary file"), dlltool fell back to
+# C:\WINDOWS (FFmpeg's import libraries came out empty) and make dist's home-path check was skipped. Set when empty.
+ifeq ($(PLATFORM),windows)
+export TMP := $(or $(TMP),$(shell cygpath -w /tmp))
+export TEMP := $(or $(TEMP),$(TMP))
+export USERPROFILE := $(or $(USERPROFILE),$(shell cygpath -w ~))
+endif
 
 # iOS: the same generated code with the moving guest window (DYN_BASE=1 below: an iOS process has 58 GB of address
 # space, but the kernel's reserves cut it into a few free gaps that move with every launch - runtime/rt.h packs the
@@ -299,13 +307,11 @@ $(EXE): $(RT_OBJ) $(BACKEND_OBJ) $(UI_OBJ) $(IMGUI_OBJ) $(MINIZ_OBJ)
 
 # its id file (<library>.id) says what it was built from without loading it (runtime/gamelib.c)
 # (Windows: EoW's ~1430 objects go past the 32 KB command line - "Argument list too long" - so they go in a response
-# file. $(file) needs make 4; macOS's is 3.81, where the command line is long enough. MSYS2's make runs recipes with
-# TMP and TEMP empty, and clang then can't write the response file it passes to lld - "unable to make temporary file":
-# the link gets MSYS2's own temp folder.)
+# file. $(file) needs make 4; macOS's is 3.81, where the command line is long enough.)
 $(GAMELIB): $(GEN_OBJ) | $(EXE)
 ifeq ($(PLATFORM),windows)
 	$(file >$@.rsp,$^)
-	env TMP="$$(cygpath -w /tmp)" TEMP="$$(cygpath -w /tmp)" $(CC) $(GAMELIB_LDFLAGS) -o $@.tmp @$@.rsp
+	$(CC) $(GAMELIB_LDFLAGS) -o $@.tmp @$@.rsp
 else
 	$(CC) $(GAMELIB_LDFLAGS) -o $@.tmp $^
 endif
