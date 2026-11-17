@@ -539,7 +539,7 @@
 {"Settings", "Настройки"},
 {"Recomp for iOS", "Recomp для iOS"},
 {"System", "Система"},
-{"Pick the folder with your extracted exefs and romfs from The Legend of Zelda: Link's Awakening for Switch. EoW Recomp doesn't include the game.", "Выберите папку с распакованными exefs и romfs игры The Legend of Zelda: Link's Awakening для Switch. Сама игра в EoW Recomp не входит."},
+{"Pick the folder with your extracted exefs and romfs from The Legend of Zelda: Echoes of Wisdom for Switch. ReTri doesn't include the game.", "Выберите папку с распакованными exefs и romfs игры The Legend of Zelda: Echoes of Wisdom для Switch. Сама игра в ReTri не входит."},
 {"Copies the files ReTri needs and recompiles the game from them. You only do this once, and it takes a while.", "Копирует нужные ReTri файлы и перекомпилирует из них игру. Это делается один раз и занимает время."},
 {"Your copy of the game", "Ваша копия игры"},
 {"Set up", "Установить"},

@@ -34,6 +34,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- The start screen's game folder help names Echoes of Wisdom and ReTri, not Link's Awakening (all languages).
 - The start screen accepts EoW's game files (it said "Wrong version of the game").
 - The Shadows setting changes EoW's shadows (it only knew LA's shadow map).
 - The 3D image is sharp at Match display: EoW draws its 3D at 792 lines, not LA's 1080, and the resolution settings now scale by that (Match display: your screen's pixels; 1x to 4x: 1080 to 4320 lines).

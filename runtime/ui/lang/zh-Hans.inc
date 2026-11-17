@@ -539,7 +539,7 @@
 {"Settings", "设置"},
 {"Recomp for iOS", "为iOS重编译"},
 {"System", "系统"},
-{"Pick the folder with your extracted exefs and romfs from The Legend of Zelda: Link's Awakening for Switch. EoW Recomp doesn't include the game.", "请选择包含Switch版《塞尔达传说 织梦岛》解包后的exefs和romfs的文件夹。EoW Recomp不包含游戏本体。"},
+{"Pick the folder with your extracted exefs and romfs from The Legend of Zelda: Echoes of Wisdom for Switch. ReTri doesn't include the game.", "请选择包含Switch版《塞尔达传说 智慧的再现》解包后的exefs和romfs的文件夹。ReTri不包含游戏本体。"},
 {"Copies the files ReTri needs and recompiles the game from them. You only do this once, and it takes a while.", "复制ReTri所需的文件，并用它们重新编译游戏。只需做一次，需要一些时间。"},
 {"Your copy of the game", "你的游戏"},
 {"Set up", "设置"},
