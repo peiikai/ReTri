@@ -73,10 +73,10 @@ typedef struct {
     bool mirror_mode;    // the world mirrored left to right (Gameplay tab): renderers + runtime/hle/input.c
     int language;        // LANG_AUTO or an index into g_language_codes: the game's text language
     int prompts;         // PROMPTS_*: button glyphs (auto = follow the controller SDL reports): runtime/nvn/texpatch.c
-    // Button layout "Xbox / PlayStation": on Xbox / PlayStation pads the game's A and B swap (A on the bottom button; X / Y
-    // keep the Switch's positions), and our menus confirm with the bottom button (runtime/ui/pad_nav.mm)
+    // Confirm button "Bottom": on every pad the game's A and B swap (A on the bottom button, B on the right; X / Y keep
+    // the Switch's positions), and our menus confirm with the bottom button too (runtime/hle/bindings.c bind_pad_host,
+    // runtime/ui/pad_nav.mm). Never depends on the pad's type or the Button icons setting. (ini: face_buttons_by_label)
     bool face_by_label;
-                         // positions (bottom = A, right = B, left = X, top = Y): runtime/hle/bindings.c bind_pad_host
     bool aspect_asked;   // the start screen's one-time "authentic 16:9 or unlocked?" question was answered
     bool menu_tip_seen;  // the start screen's one-time "how to open the menu" note was shown (first PLAY ever)
     bool onedrive_kept;  // the start screen's OneDrive warning (Windows) was answered with Keep here

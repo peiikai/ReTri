@@ -14,6 +14,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   Xbox pads their own letters, in the HUD, menu prompts and text. "Button icons" setting (Controls tab).
 
 ### Changed
+- "Button layout" is now "Confirm button" (Right or Bottom). It applies the same way to every controller, in the
+  game and in ReTri's menus. Before, ReTri's menus could confirm with the other button when "Button icons" was set
+  to a different controller style than the one plugged in.
 - The start screen title is in Hylia Serif, a free fan font by Omni Jacala (credited in the README).
 - The window and error dialogs are titled "ReTri", the project's new name (a play on recomp and Tri).
 - All app text says ReTri: menus, the start screen, error and crash messages, in every language. The app,
