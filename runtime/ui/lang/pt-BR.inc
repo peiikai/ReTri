@@ -539,7 +539,7 @@
 {"Settings", "Configurações"},
 {"Recomp for iOS", "Recomp para iOS"},
 {"System", "Sistema"},
-{"Pick the folder with your extracted exefs and romfs from The Legend of Zelda: Link's Awakening for Switch. EoW Recomp doesn't include the game.", "Escolha a pasta com os exefs e romfs extraídos de The Legend of Zelda: Link's Awakening para Switch. O EoW Recomp não inclui o jogo."},
+{"Pick the folder with your extracted exefs and romfs from The Legend of Zelda: Echoes of Wisdom for Switch. ReTri doesn't include the game.", "Escolha a pasta com os exefs e romfs extraídos de The Legend of Zelda: Echoes of Wisdom para Switch. O ReTri não inclui o jogo."},
 {"Copies the files EoW Recomp needs and recompiles the game from them. You only do this once, and it takes a while.", "Copia os arquivos de que o EoW Recomp precisa e recompila o jogo a partir deles. Você só faz isso uma vez, e demora um pouco."},
 {"Your copy of the game", "Sua cópia do jogo"},
 {"Set up", "Preparar"},
