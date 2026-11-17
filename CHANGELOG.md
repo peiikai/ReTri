@@ -53,6 +53,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- Rift edges are clean lines instead of steps: the rift map now uses the game's final, closer view, as on the Switch.
 - On iPhone, iPad and Android the game no longer stays at 30 fps after a brief dip: it tries 60 again after a
   second (the GPU slows its clock at 30, and the game read that as too slow for 60).
 - Settings tabs keep their box under the mouse or the controller cursor (it was see-through).
