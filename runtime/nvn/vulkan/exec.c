@@ -2758,6 +2758,8 @@ static void set_vertex_input(VkCommandBuffer cb, const VtxLayout *l) {
 // ================================================================== feedback snapshots (renderer.m resolve_feedback)
 static NvnTexture *feedback_tex[4];
 static VkImageView feedback_view[4];
+static TexBackend *feedback_snap[4];  // (the copy itself: a stencil read gets its stencil, texture_info)
+static uint16_t g_stencil_slots;      // the current draw's fragment slots read as stencil (draw_, stencil_slots_of)
 static int nfeedback;
 static uint64_t g_cur_fs_hash;
 static NvnTexture *snap_tex[8];
@@ -3057,6 +3059,7 @@ static void resolve_feedback(Prog *pr) {
             static const VkComponentMapping id = {0};
             if (!nosnap && si >= 0 && (snap_ok[si] || self_write) && existing) {
                 feedback_tex[nfeedback] = t;
+                feedback_snap[nfeedback] = &existing->copy;
                 feedback_view[nfeedback++] = vk_image_view(&existing->copy, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, sa);
                 continue;
             }
@@ -3080,6 +3083,7 @@ static void resolve_feedback(Prog *pr) {
                 cb = vk_cmd();
             }
             feedback_tex[nfeedback] = t;
+            feedback_snap[nfeedback] = dst;
             feedback_view[nfeedback++] = vk_image_view(dst, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, sa);
             if (si < 0) { static int rr; si = rr++ & 7; snap_tex[si] = t; }
             snap_ok[si] = true;
@@ -5964,6 +5968,15 @@ static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo
             for (int k = 0; k < nfeedback; k++)
                 if (e->tex == feedback_tex[k] && (st_->type == TEXTYPE_2D || st_->type == TEXTYPE_2D_ARRAY)) {
                     view = feedback_view[k];
+                    // A stencil read of the snapshot gets the copy's stencil, as vk_view gives the texture's own: through
+                    // the depth view the shader's integer reads got the depth's bits. EoW's rift mask reads the depth /
+                    // stencil it is drawn against; its whole area was striped in most runs on an RTX 3080 Ti (renderer.m
+                    // binds a stencil view of its copy too).
+                    static const VkComponentMapping idm = {0};
+                    if (stage == 1 && slot >= 0 && slot < 16 && (g_stencil_slots >> slot & 1) && st_->type == TEXTYPE_2D &&
+                        (feedback_snap[k]->aspect & VK_IMAGE_ASPECT_STENCIL_BIT))
+                        view = vk_image_view(feedback_snap[k], VK_IMAGE_VIEW_TYPE_2D, feedback_snap[k]->format, 0, 1, 0, 1, idm,
+                                             VK_IMAGE_ASPECT_STENCIL_BIT);
                     if (st_->type == TEXTYPE_2D_ARRAY) view = vk_dummy_view(TEXTYPE_2D_ARRAY);  // (2D snapshot as array: rare)
                 }
         } else if (e->dead_format) {
@@ -7173,7 +7186,8 @@ static void draw_(CmdRec *r, bool indexed) {
     for (int i = 0; i < st.rt.ncolor; i++) if (st.rt.color[i]) fkey.rt_kind[i] = (uint8_t)rt_kind(st.rt.color[i]->format);
     Prog *pr = get_program(st.program, &vkey, &fkey);
     if (!pr || atomic_load(&pr->state) != 1) { SKIP(!pr ? SK_NO_STAGES : atomic_load(&pr->state) == 2 ? SK_PROG_FAILED : SK_PROG_BUILDING); return; }
-    if ((fkey.stencil_slots = stencil_slots_of(pr->fi))) {  // (a texture read as its stencil: another program)
+    g_stencil_slots = fkey.stencil_slots = stencil_slots_of(pr->fi);
+    if (fkey.stencil_slots) {  // (a texture read as its stencil: another program)
         pr = get_program(st.program, &vkey, &fkey);
         if (!pr || atomic_load(&pr->state) != 1) { SKIP(!pr ? SK_NO_STAGES : atomic_load(&pr->state) == 2 ? SK_PROG_FAILED : SK_PROG_BUILDING); return; }
     }
