@@ -112,9 +112,6 @@ void plat_init(void) {
             ent > 0 ? "yes" : ent == 0 ? "NO" : "unknown");
     // (arguments and environment as on the desktop: `xcrun devicectl device process launch --environment-variables
     // '{"LARECOMP_...":"1"}' <bundle id> --play`; from the home screen there are none)
-    if (getenv("LARECOMP_IOS_PYTEST")) {  // the embedded Python's self-test (ios_python.m): its log lines, then on
-        plat_ios_python_selftest();
-    }
 }
 
 // The process's address space: the free gaps of 256 MB or more and the large regions, to the log (what the window
@@ -218,7 +215,7 @@ void plat_exec(char *const argv[]) { (void)argv; }  // (no exec on iOS: the call
 static atomic_int g_fatal_box;  // 1: on screen, 2: closed
 static void SDLCALL fatal_box(void *text) {
     atomic_store(&g_fatal_box, 1);
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "TriCompiled", text, NULL);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ReTri", text, NULL);
     atomic_store(&g_fatal_box, 2);
 }
 void plat_fatal_notice(void) {
@@ -233,4 +230,10 @@ void plat_fatal_notice(void) {
     }
 }
 
-// (child processes: runtime/platform/ios_python.m - Python scripts as threads of the embedded interpreter)
+// Child processes: an iOS app can't start any. The update check (runtime/ui/launcher.mm) gets none and finds nothing.
+PlatProc plat_spawn(const char *const argv[], const char *log_path, bool append_log) {
+    (void)argv, (void)log_path, (void)append_log;
+    return 0;
+}
+int plat_proc_wait(PlatProc p, bool block) { (void)p, (void)block; return 255; }
+void plat_proc_kill(PlatProc p) { (void)p; }

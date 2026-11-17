@@ -378,9 +378,24 @@ static float vp_sx = 1, vp_sy = 1, vp_ox = 0, vp_oy = 0;
 static float tex_sc[2][64][2];          // per bound texture slot: the contents' scale (for shaders' texel math)
 static float tex_fr[2][64][2];          // per bound texture slot: the part of the texture the contents occupy (Dynamic)
 static uint32_t tex_wh[2][64][2];       // per bound texture slot: guest size
-static int draw_bottle;                 // a fragment texture is the bottle's item icon (1) / model map (2): Escape Bottle
-static int draw_heart;                  // ... a HUD / file select heart's: heart colour (Cosmetics tab)
-static bool draw_item_cursor;           // a fragment texture is the Items page's cursor brackets
+// Screen captures of the boxed frame (capture_from_box): their coordinate mapping
+#define NCAP 8
+static NvnTexture *g_cap[NCAP];  // the latest screen captures (and whole copies of them)
+static bool tex_cap[64];         // per fragment texture slot of the draw: a capture
+static void capture_note(NvnTexture *t, bool on) {
+    int at = -1;
+    for (int i = 0; i < NCAP; i++) if (g_cap[i] == t) at = i;
+    if (at >= 0 && !on) g_cap[at] = NULL;
+    if (at >= 0 || !on) return;
+    for (int i = 0; i < NCAP; i++) if (!g_cap[i]) at = i;
+    if (at < 0) memmove(g_cap, g_cap + 1, sizeof g_cap[0] * (NCAP - 1)), at = NCAP - 1;
+    g_cap[at] = t;
+}
+static bool capture_of(NvnTexture *t) {
+    for (int i = 0; t && i < NCAP; i++) if (g_cap[i] == t) return true;
+    return false;
+}
+static int draw_heart;                  // a fragment texture is a HUD / file select heart's: heart colour (Cosmetics tab)
 static int draw_recolour[2];            // ... Cosmetics recolour textures: their classes (runtime/nvn/recolour.c)
 static char draw_recolour_names[512];   // ... their names (LARECOMP_LOG_RECOLOUR_AT, test)
 #define RSCALE_BUFFER_INDEX 18
@@ -2638,7 +2653,7 @@ static int sampler_slots(int n, __strong id<MTLSamplerState> *smp, NvnSamplerDes
 
 static void bind_textures(int stage, ShaderInfo *si) {
     if (stage == 1) {
-        draw_bottle = draw_heart = draw_recolour[0] = draw_recolour[1] = 0, draw_item_cursor = false;
+        draw_heart = draw_recolour[0] = draw_recolour[1] = 0;
         draw_recolour_names[0] = 0;
     }
     bool mapped = si->ntex > MSL_MAX_SAMPLERS;  // (fragment only: the translator refuses such vertex shaders)
@@ -2653,6 +2668,7 @@ static void bind_textures(int stage, ShaderInfo *si) {
         uint32_t tic = h & 0xFFFFF, tsc = (uint32_t)(h >> 20) & 0xFFF;
         tex_sc[stage][i][0] = tex_sc[stage][i][1] = 1;
         if (i < 64) { tex_wh[stage][i][0] = tex_wh[stage][i][1] = 0; tex_fr[stage][i][0] = tex_fr[stage][i][1] = 1; }
+        if (stage == 1 && i < 64) tex_cap[i] = false;
         if (h && st.tpool && tic < (uint32_t)st.tpool->count) {
             NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
             if (g_interp_log) e = (NvnTexEntry *)interp_texentry(stage, i, e, sizeof *e);  // (frame interpolation: the frame's entry)
@@ -2667,23 +2683,10 @@ static void bind_textures(int stage, ShaderInfo *si) {
             else if (e->dead_format) nvn_dead_slot_sampled(e, tic);
             if (e->tex && stage == 1) {
                 extern int renderer_texpatch_of(NvnTexture *t);
-                extern int texpatch_bottle_kind(int id);
                 extern int texpatch_heart_kind(int id);
-                extern bool texpatch_is_item_cursor(int id);
                 int id = renderer_texpatch_of(e->tex);
                 extern void texpatch_note_draw_at(int id, const float *ui, uint64_t size);
                 texpatch_note_draw_at(id, (const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size);
-                if (!draw_bottle) draw_bottle = texpatch_bottle_kind(id);
-                if (texpatch_bottle_kind(id) == 1) {  // the Hint Sheet: the dungeon map's icon in place (hint_sheet.c)
-                    extern bool hint_sheet_icon_draw(const float *ui, uint32_t ui_size);
-                    extern NvnTexture *texpatch_hint_icon(void);
-                    NvnTexture *ht;
-                    if (hint_sheet_icon_draw((const float *)(uintptr_t)st.ubuf[0][0].addr, (uint32_t)st.ubuf[0][0].size) &&
-                        (ht = texpatch_hint_icon())) {
-                        static NvnTextureView none;
-                        tex = sampled_texture(ht, &none, false, st_->type);
-                    }
-                }
                 if (!draw_heart) draw_heart = texpatch_heart_kind(id);
                 recolour_add(draw_recolour, recolour_class_of(id));
                 if (recolour_name(id)) {
@@ -2691,7 +2694,6 @@ static void bind_textures(int stage, ShaderInfo *si) {
                     snprintf(draw_recolour_names + n, sizeof draw_recolour_names - n, " t%d=%s(%d)", i, recolour_name(id),
                              recolour_class_of(id));
                 }
-                draw_item_cursor |= texpatch_is_item_cursor(id);
             }
             if (e->tex && i < 64) {
                 renderer_texture_scale(alias ? alias : e->tex, &tex_sc[stage][i][0], &tex_sc[stage][i][1]);
@@ -2701,6 +2703,7 @@ static void bind_textures(int stage, ShaderInfo *si) {
                     tex_fr[stage][i][1] *= (float)e->tex->height / (float)alias->height;
                 }
                 tex_wh[stage][i][0] = e->tex->width; tex_wh[stage][i][1] = e->tex->height;
+                if (stage == 1) tex_cap[i] = capture_of(e->tex);
             }
             for (int k = 0; k < nfeedback; k++)
                 if (e->tex == feedback_tex[k]) {
@@ -5389,8 +5392,6 @@ static void draw_one(CmdRec *r, bool indexed) {
                 (stat_skipped++, skip_why(4097));
                 return;
             }
-            extern bool pot_level_active(void);
-            if (last_hash == 0xa2177dbb72197bd9ull && pot_level_active()) { (stat_skipped++, skip_why(4101)); return; }  // item twinkle
         }
         g_cur_fs_hash = last_hash;
         extern void widescreen_backdrop_seen(uint64_t hash);
@@ -5783,8 +5784,6 @@ static void draw_one(CmdRec *r, bool indexed) {
     if (pr->fi->uses_gmem) E_buf(1, g_guest_buffer, 0, GMEM_BUFFER_INDEX);
     bind_textures(0, pr->vi);
     bind_textures(1, pr->fi);
-    extern bool pets_hide_item_cursor(void);  // (the cursor is on the companion card: runtime/hle/pets.c)
-    if (draw_item_cursor && pets_hide_item_cursor()) { (stat_skipped++, skip_why(4373)); return; }
     vp_sx = pass_sx; vp_sy = pass_sy; vp_ox = 0; vp_oy = 0;
     const void *hud_u = NULL;  // (runtime/hle/hud_corners.c: the window-wide uniforms of a UI draw)
     float hud_k = 1, hud_ky = 1;
@@ -5845,8 +5844,9 @@ static void draw_one(CmdRec *r, bool indexed) {
             }
         }
         if (g_debug_frame && getenv("LARECOMP_LOG_UI")) {
-            LOG("[ui2] fs=%llx count %llu ntex %d reads_scene %d fill %d quad %d -> %d |", st.program->stages[1].code_addr, r->x[2],
-                pr->fi->ntex, reads_scene, fullscreen_fill, fullscreen_quad, composite);
+            LOG("[ui2] fs=%llx hash %016llx ubo0 %llu count %llu ntex %d reads_scene %d fill %d quad %d -> %d |", st.program->stages[1].code_addr,
+                (unsigned long long)g_cur_fs_hash, (unsigned long long)st.ubuf[0][0].size, r->x[2], pr->fi->ntex, reads_scene, fullscreen_fill,
+                fullscreen_quad, composite);
             for (int i = 0; i < pr->fi->ntex && i < 4; i++)
                 LOG(" t%d %dx%d sc %.2f,%.2f", i, tex_wh[1][i][0], tex_wh[1][i][1], tex_sc[1][i][0], tex_sc[1][i][1]);
             LOG(" | rt %ux%u vp %.0f,%.0f %.0fx%.0f\n", st.rt.color[0]->width, st.rt.color[0]->height, st.viewport[0][0],
@@ -5870,7 +5870,9 @@ static void draw_one(CmdRec *r, bool indexed) {
             // (the pause screen's backdrop first: the HUD's stretch stays on for the pause screen's first frames, while
             // the world still counts as on screen, and would keep the backdrop boxed until it went off)
             extern const void *pause_fill_ubo(const float *u, uint64_t size, float k, float ky);
-            hud_u = pause_fill_ubo((const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size, hud_k, hud_ky);
+            bool cap = false;  // (a pane showing a screen capture of the box stays in it: capture_from_box)
+            for (int i = 0; i < pr->fi->ntex && i < 64; i++) cap |= tex_cap[i];
+            if (!cap) hud_u = pause_fill_ubo((const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size, hud_k, hud_ky);
             extern const void *hud_corners_ubo(const float *u, uint64_t size, float k, float ky);
             if (!hud_u) hud_u = hud_corners_ubo((const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size, hud_k, hud_ky);
         }
@@ -5910,43 +5912,6 @@ static void draw_one(CmdRec *r, bool indexed) {
         }
         E_bytes(1, rs, (NSUInteger)(fkey.flip_x || pr->fi->uses_ao_taps ? 66 : 1 + pr->fi->ntex) * 16, RSCALE_BUFFER_INDEX);
     }
-    // (uniform buffer 2 = the model matrix - only when the vertex shader reads it: a binding left from an earlier draw
-    // is another object's matrix)
-    bool model_ubo = (pr->vi->cbuf_mask >> (cbuf_base + 2)) & 1;
-    if (model_ubo && st.ubuf[0][2].addr && st.ubuf[0][2].size >= 48 && !(st.ubuf[0][2].addr & 3)) {  // cut bushes' items
-        extern void pot_item_draw(float *m);                                                 // (runtime/hle/pot_glow.c)
-        pot_item_draw((float *)(uintptr_t)st.ubuf[0][2].addr);
-    }
-    if (ENV("LARECOMP_POT_PROBE") && st.ubuf[0][2].addr && st.ubuf[0][2].size >= 48) {  // (debug: bush / pot draws)
-        extern void pot_probe(const float *m, bool tintable, uint64_t mesh, uint32_t inst);
-        uint32_t ninst = indexed ? (uint32_t)r->x[6] : (uint32_t)r->x[4];
-        pot_probe((const float *)(uintptr_t)st.ubuf[0][2].addr, pr->fi->uses_tint, st.vbuf[0].addr, ninst);
-        extern uint64_t renderer_present_count(void);
-        static uint64_t pf; static int pn;
-        if (renderer_present_count() != pf) { pf = renderer_present_count(); pn = 0; }
-        if (ninst > 1 && pf % 300 == 0 && pn++ < 40) {
-            const float *m = (const float *)(uintptr_t)st.ubuf[0][2].addr;
-            LOG("[potprobe] instanced x%u count %u tint %d ubuf sizes %u %u %u %u %u %u  m2 t (%.2f %.2f %.2f)\n", ninst,
-                (uint32_t)r->x[2], pr->fi->uses_tint, (unsigned)st.ubuf[0][0].size, (unsigned)st.ubuf[0][1].size,
-                (unsigned)st.ubuf[0][2].size, (unsigned)st.ubuf[0][3].size, (unsigned)st.ubuf[0][4].size,
-                (unsigned)st.ubuf[0][5].size, m[3], m[7], m[11]);
-            for (int i = 0; i < st.nattrib; i++) LOG(" a%d(f%#x s%u o%u)", i, st.attrib[i] & 0xFF, (st.attrib[i] >> 8) & 0x1F, st.attrib[i] >> 13);
-            for (int i = 0; i < 12; i++)
-                if (st.vbuf[i].addr && i < st.nstream && st.stream[i][1]) {
-                    const float *v = (const float *)(uintptr_t)st.vbuf[i].addr;
-                    LOG(" vb%d(size %llu stride %u div %u: %.2f %.2f %.2f %.2f | %.2f %.2f %.2f %.2f | %.2f %.2f %.2f %.2f)", i,
-                        st.vbuf[i].size, st.stream[i][0], st.stream[i][1], v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11]);
-                }
-            LOG("\n");
-            for (int i = 0; i < 4; i++)
-                if (st.sbuf[0][i].addr) {
-                    const float *f = (const float *)(uintptr_t)st.sbuf[0][i].addr;
-                    LOG("   ssbo%d size %llu:", i, st.sbuf[0][i].size);
-                    for (int k = 0; k < 48 && k * 4 < (int)st.sbuf[0][i].size; k++) LOG(" %.2f", f[k]);
-                    LOG("\n");
-                }
-        }
-    }
     {  // LARECOMP_LOG_RECOLOUR_AT=<frame>[,<frame>...] (test): each draw of those frames sampling a recognised
        // texture (LARECOMP_RECOLOUR_NAMES=1: any of the overworld's), and the class it is tinted with
         static const char *at;
@@ -5963,7 +5928,7 @@ static void draw_one(CmdRec *r, bool indexed) {
                 }
         }
     }
-    if (pr->fi->uses_tint) {  // per-draw highlight tint (golden unchecked pots, runtime/hle/pot_glow.c)
+    if (pr->fi->uses_tint) {  // per-draw tint (Cosmetics: recolours, heart colour)
         float tint[RECOLOUR_TINT_FLOATS] = {0};
         recolour_tint_draw(draw_recolour, tint);  // (Cosmetics; the highlights below win)
         {   // LARECOMP_RECOLOUR_FLASH=<text> (test, Metal): draws sampling a recognised texture whose name has <text>
@@ -5976,15 +5941,6 @@ static void draw_one(CmdRec *r, bool indexed) {
                 recolour_pack(tint, 0.83f, 4.0f, 1.0f, 0.0f, 0.5f, 0.0f, 0.0f);
             }
         }
-        extern bool pot_tint(const float *m, float tint[8], uint64_t mesh);
-        extern bool pot_glow_active(void);
-        if (model_ubo && st.ubuf[0][2].addr && st.ubuf[0][2].size >= 48 && pot_glow_active())
-            pot_tint((const float *)(uintptr_t)st.ubuf[0][2].addr, tint, st.vbuf[0].addr);
-        if (draw_bottle) {  // the gold Escape Bottle (runtime/hle/escape.c): its item icon / held-up model
-            extern void escape_bottle_tint(int kind, const float *ui, uint32_t ui_size, float tint[8]);
-            int u = draw_bottle == 3 || draw_bottle == 6 ? 3 : 0;  // (fairy / Piece of Power models: their bone matrices, for where they stand - souls.c, triforce.c)
-            escape_bottle_tint(draw_bottle, (const float *)(uintptr_t)st.ubuf[0][u].addr, (uint32_t)st.ubuf[0][u].size, tint);
-        }
         if (draw_heart) { extern void texpatch_heart_tint(int kind, float tint[8]); texpatch_heart_tint(draw_heart, tint); }
         E_bytes(1, tint, sizeof tint, 19);
     }
@@ -5996,43 +5952,12 @@ static void draw_one(CmdRec *r, bool indexed) {
     }
     if (used_streams & (1u << 31)) { static const float zero[4] = {0, 0, 0, 1}; E_bytes(0, zero, 16, 30); }
 
-    // Instanced draws with item spots among their instances (bushsanity: bushes are drawn in batches, each instance's
-    // model matrix in vertex storage buffer 0, indexed by instance id): drawn as runs of instances, gold runs tinted.
-    // (Metal's instance_id includes the base instance, so a run [b + k, b + k + n) draws exactly those instances.)
-    // Only for a vertex shader that reads storage buffer 0: the binding stays from the last draw that set it, so any
-    // other instanced draw (particle effects: leaves, dust, sparkles) took a bush batch's matrices for its own
-    // instances and was tinted wherever that batch had an unchecked bush at the same index - and a batch of a single
-    // bush was never looked at.
     uint32_t inst_all = indexed ? (uint32_t)r->x[6] : (uint32_t)r->x[4], base_all = indexed ? (uint32_t)r->x[5] : (uint32_t)r->x[3];
     if (!inst_all) inst_all = 1;
-    enum { MAX_RUNS = 64 };
-    uint32_t run_at[MAX_RUNS], run_n[MAX_RUNS];
-    bool run_gold[MAX_RUNS];
-    int nruns = 0;
-    if (!g_indirect_args && pr->fi->uses_tint && (pr->vi->ssbo_read & 1) && st.sbuf[0][0].addr) {
-        extern bool pot_glow_active(void);
-        extern bool pot_instance_gold(const float *m);
-        uint64_t recs = st.sbuf[0][0].size / 64;
-        if (pot_glow_active() && (uint64_t)base_all + inst_all <= recs) {
-            const float *m = (const float *)(uintptr_t)st.sbuf[0][0].addr;
-            for (uint32_t k = 0; k < inst_all; k++) {
-                bool g = pot_instance_gold(m + (size_t)(base_all + k) * 16);
-                if (nruns && run_gold[nruns - 1] == g) { run_n[nruns - 1]++; continue; }
-                if (nruns == MAX_RUNS) { nruns = 0; break; }  // (too fragmented: draw as is)
-                run_at[nruns] = k; run_n[nruns] = 1; run_gold[nruns] = g; nruns++;
-            }
-            if (nruns == 1 && !run_gold[0]) nruns = 0;
-        }
-    }
-    if (!nruns) { run_at[0] = 0; run_n[0] = inst_all; nruns = 1; run_gold[0] = false; }
+    // (one run of instances, drawn by the loop below: its `continue` skips the draw)
+    uint32_t run_at[1] = {0}, run_n[1] = {inst_all};
+    const int nruns = 1;
     for (int ri = 0; ri < nruns; ri++) {
-    if (nruns > 1 || run_gold[0]) {
-        float tint[RECOLOUR_TINT_FLOATS] = {0};
-        extern void pot_gold_tint(float tint[8]);
-        if (run_gold[ri]) pot_gold_tint(tint);
-        else recolour_tint_draw(draw_recolour, tint);
-        E_bytes(1, tint, sizeof tint, 19);
-    }
     if (game_other() && st.program) {  // (another game: a GPU error names the shaders of its pass - renderer_submit)
         static __weak id<MTLRenderCommandEncoder> marked;
         static uint64_t last_vs, last_fs;
@@ -6584,7 +6509,6 @@ static void weather_encode(void) {
     static long off = -1;  // (LARECOMP_WEATHER_SKIP=1: the weather computed but not drawn - GPU cost A/B)
     if (off < 0) off = getenv("LARECOMP_WEATHER_SKIP") ? atol(getenv("LARECOMP_WEATHER_SKIP")) : 0;
     uint64_t frame = renderer_exec_frame();
-    weather_cycle_scene();  // (the weather cycle's clock runs while the game draws its scene)
     NvnTexture *win = st.rt.ncolor ? st.rt.color[0] : NULL, *dep = wx_depth;
     extern bool mirror_scene_size(uint32_t sw, uint32_t sh, uint32_t w, uint32_t h);
     int why = off ? 1 : !win ? 2 : !dep ? 3 : wx_depth_frame != frame ? 4 : fabsf(wx_zf - wx_zn) < 1e-6f ? 5 :
@@ -6984,6 +6908,28 @@ static void copy_texture_to_buffer(const TexRefRec *src, uint64_t dst) {
     renderer_flush();  // the CPU may read the result right after the fence
 }
 
+// A layout pane's screen capture on a window that isn't 16:9 (another game: EoW's echo list grabs rows 310-810 of its
+// 1920x1080 frame into a 1920x500 texture, copies that into another, draws the slots into it and shows it as the band
+// behind them). The frame's UI goes into the centred 16:9 box (draw), the band too, so the capture takes the box's
+// part of the frame, what is under the band; the frame's whole width squeezed into the box showed the world beside it
+// (user 2026-11-16). Panes sampling a capture stay in the box (not widened to the window: runtime/hle/pause_fill.c),
+// the layers under them reach the window's edges. Copies out of the presented frame into a texture of its own shape
+// (not window-shaped) only.
+static void capture_from_box(NvnTexture *s, NvnTexture *d, float ssx, float ssy, float dsx, float dsy, const int32_t *sr,
+                             int *sx0, int *sy0, int *sw, int *sh) {
+    if (!game_other() || fabsf(ssx - ssy) <= 0.01f * ssy || fabsf(dsx - dsy) > 0.01f * dsy || !renderer_texture_presented(s) ||
+        renderer_format_is_depth(s->format)) {
+        // (a capture copied whole into another texture stays one)
+        capture_note(d, capture_of(s) && s->width == d->width && s->height == d->height && !sr[0] && !sr[1]);
+        return;
+    }
+    float u = fminf(ssx, ssy);
+    float ox = s->width * (ssx - u) * 0.5f, oy = s->height * (ssy - u) * 0.5f;
+    *sx0 = (int)lroundf(ox + sr[0] * u), *sy0 = (int)lroundf(oy + sr[1] * u);
+    *sw = (int)lroundf((sr[3] ? sr[3] : (int32_t)s->width) * u), *sh = (int)lroundf((sr[4] ? sr[4] : (int32_t)s->height) * u);
+    capture_note(d, true);
+}
+
 static void copy_texture(const TexRefRec *src, const TexRefRec *dst, uint64_t flags) {
     snap_reason = "tex2tex"; snapshots_invalidate(NULL);
     NvnTexture *st_ = (NvnTexture *)(uintptr_t)src->tex, *dt = (NvnTexture *)(uintptr_t)dst->tex;
@@ -7023,6 +6969,7 @@ static void copy_texture(const TexRefRec *src, const TexRefRec *dst, uint64_t fl
     int dx0 = (int)lroundf(dr[0] * dsx), dy0 = (int)lroundf(dr[1] * dsy);
     int sw = sr[3] ? (int)lroundf(sr[3] * ssx) : (int)lroundf(st_->width * ssx), sh = sr[4] ? (int)lroundf(sr[4] * ssy) : (int)lroundf(st_->height * ssy);
     int dw = dr[3] ? (int)lroundf(dr[3] * dsx) : (int)lroundf(dt->width * dsx), dh = dr[4] ? (int)lroundf(dr[4] * dsy) : (int)lroundf(dt->height * dsy);
+    capture_from_box(st_, dt, ssx, ssy, dsx, dsy, sr, &sx0, &sy0, &sw, &sh);
     static int no_depth_scale = -1;
     if (no_depth_scale < 0) no_depth_scale = getenv("LARECOMP_NO_DEPTH_SCALE") != NULL;
     if (!no_depth_scale && renderer_format_is_depth(dt->format) && (sw != dw || sh != dh) && s.sampleCount == 1 && dt->format != 0x31) {

@@ -1,4 +1,4 @@
-// Where EoW Recomp keeps its files (runtime/paths.c).
+// Where ReTri keeps its files (runtime/paths.c).
 //
 // Data root: everything the app writes or the user brings - extracted/ (game files), rando/ (seeds), save/,
 // cache/ (shaders / pipelines), fonts/ (imported), larecomp.ini. rt_paths_init() picks it and makes it the
@@ -35,11 +35,11 @@ bool rt_data_root_early(char *out, size_t n);
 // Choosing another data folder (the start screen). NULL = it can be changed; else why not (rules 1 / 2).
 const char *rt_data_root_fixed(void);
 typedef struct {
-    char path[1100];               // where the data would go: the folder picked, or a "EoW Recomp" folder in it
+    char path[1100];               // where the data would go: the folder picked, or a "ReTri" folder in it
                                    // when it holds other things
     unsigned long long bytes;      // the data now (saves, seeds, settings, fonts, caches, game files)
     unsigned long long need, free; // space a move needs there (little on the same drive: hard links), space there
-    bool has_data;                 // EoW Recomp data already there: used as is, not moved into
+    bool has_data;                 // ReTri data already there: used as is, not moved into
     char refuse[160];              // why it can't be the data folder ("" = it can)
 } RtDataTarget;
 void rt_data_target(const char *picked, RtDataTarget *t);

@@ -1,6 +1,6 @@
 # Debug and test hooks
 
-EoW Recomp reads a set of `LARECOMP_*` environment variables. They are for development and testing, not for players:
+ReTri reads a set of `LARECOMP_*` environment variables. They are for development and testing, not for players:
 scripted test runs, screenshots, warps, logging, and A/B switches for renderer and timing code. Most are read once, at
 startup or at first use, so set them before launching. Hooks that take a frame number act at that presented frame
 (the count starts at 0 when the app starts and goes on across in-game reboots).
@@ -103,14 +103,10 @@ Comma-separated entries, each starting with a frame:
 | `LARECOMP_WARP_MENU_PICK` | text | Warp through the menu's warp tab to the first place whose name matches the text. |
 | `LARECOMP_PLACE` | `frame:x:z[:script]`, several joined with `;` | Put Link at world x, z once the level has been loaded for 60 frames, then run an optional action script (steps `delay:L\|R\|U\|D\|A\|B\|X\|Y:frames` joined with `/`). |
 | `LARECOMP_PLACE_Y` | number | With `LARECOMP_PLACE`: also set the height. |
-| `LARECOMP_DOORJUMP_TEST` | `frame:cell:side[:centre[:floor]]` | Put Link inside a dungeon doorway to test a door jump; 300 frames later log which cell he is in. See `tools/doorjump_test.sh`. |
 | `LARECOMP_GIVE_ITEM` | `frame:id:count:index[:equip],...` | Give items through the game's own add-item function at that frame. |
 | `LARECOMP_SET_FLAGS` | `i,j,...` or `i@frame` | Force those event flags (0-2047) on in the loaded save, optionally from a frame on. |
 | `LARECOMP_CHEATS` | any of `hearts,ammo,rupees` | Turn those cheats on for this run (not saved). |
-| `LARECOMP_RANDO_SEED` | seed folder name | Play this randomizer seed (`rando/<name>/`) instead of the one in the settings. Saves go to the seed's own folder unless `LARECOMP_SAVE_DIR` is set. |
-| `LARECOMP_RANDO_ID` | seed ID | Open the randomizer tab with that seed ID's options. |
-| `LARECOMP_RANDO_GEN_TEST` | `1` or `name[:seed ID]` | Generate a seed as soon as the randomizer tab is shown. |
-| `LARECOMP_RANDO_GEN` | file path | Use this seed generator program instead of the bundled one. |
+| `LARECOMP_RANDO_SEED` | seed folder name | Play this randomizer seed (`rando/<name>/`) instead of the one in the settings, once the randomizer is on (`RANDO_ON`, `runtime/rando.h`). Saves go to the seed's own folder unless `LARECOMP_SAVE_DIR` is set. |
 
 ### LARECOMP_WARP_AT format
 
@@ -139,16 +135,9 @@ Use it with `LARECOMP_INPUT` (to get into a save) and `LARECOMP_SAVE_DIR` (so th
 | `LARECOMP_BLUR_REMOVAL` | 0 / 1 | Override the blur removal setting. |
 | `LARECOMP_PROMPTS` | `xbox`, `playstation`, `nintendo`, other = auto | Force the button icon style. |
 | `LARECOMP_NO_BUFF` | 0 / 1 | Force the "no buff drops" option on or off. |
-| `LARECOMP_ESCAPE` | 0 / 1 | Force the Escape Bottle on or off (also in vanilla). |
-| `LARECOMP_HINT_SHEET` | 0 / 1 | Force the Hint Sheet on or off. |
-| `LARECOMP_ENEMY_RANDOM` | 0 | Turn a seed's enemy randomizer off. |
-| `LARECOMP_NICE_BOMBS` | 0 | Keep the game's one bomb at a time in a randomizer seed. |
 | `LARECOMP_WEATHER` | `off`, `rain`, `snow`, `storm`, `blizzard`, `random` | Override the weather setting. |
-| `LARECOMP_WEATHER_CYCLE` | 0 / 1 | Turn the weather cycle on. |
-| `LARECOMP_WEATHER_CYCLE_START` | `rain`, `snow`, `storm`, `blizzard` | A new weather cycle starts with this weather, 20 seconds before the next change. |
-| `LARECOMP_WEATHER_CYCLE_SPEED` | multiplier | Run the weather cycle's clock this many times faster. |
-| `LARECOMP_WEATHER_HARM` | 1 | Lightning shocks Link outside a Weather Cycle seed too. |
-| `LARECOMP_WEATHER_PUSH` | 1 | Blizzard wind pushes Link outside a Weather Cycle seed too. |
+| `LARECOMP_WEATHER_HARM` | 1 | Lightning shocks Link. |
+| `LARECOMP_WEATHER_PUSH` | 1 | Blizzard wind pushes Link. |
 | `LARECOMP_MENU_AT` | frame | Open the overlay menu at that frame. |
 | `LARECOMP_MENU_TAB` | page number | The page the overlay menu opens on: `2` Save Editor, `3` Randomizer, `4` Warp, `5` Cheats, `7` Cosmetics, `9` Quit, `10` Reset. Other numbers open Settings on that tab (`0` Video, `1` Audio, `6` Gameplay, `8` Controls, `11` General). |
 | `LARECOMP_MENU_BAR` | entry number | Open the menu bar alone, its cursor on that entry: `0` Settings, `1` Cosmetics, `2` Randomizer, `3` Warp, `4` Save Editor, `5` Cheats, `6` Reset, `7` Quit, `8` the close button. |
@@ -167,13 +156,11 @@ All of these write to the log (`eowrecomp.log` in the data folder, or the run's 
 | `LARECOMP_SLOW_FRAME_MS` | ms | Log a `[slow]` line for frames slower than this, with what the renderer did (default 50, 0 off). |
 | `LARECOMP_HANG_DUMP` | seconds | Write a `[hang]` dump when the game or renderer is stuck this long (default 30, 0 off). |
 | `LARECOMP_LOG_FILES` | 1 | Log each game file read. |
-| `LARECOMP_LOG_LEVELREQ` | 1 | Log each level change request (level and spawn point). |
 | `LARECOMP_LOG_LINK` | frames | Log Link's position every N frames. |
 | `LARECOMP_LOG_FLAGS` | 1 | Log event flag changes in the loaded save. |
 | `LARECOMP_LOG_INTERVAL` | 1 | Log each change of the game's present interval (its 60 / 30 fps mode). |
 | `LARECOMP_LOG_DYNRES` | 1 | Log every dynamic resolution decision, not only the steps. |
 | `LARECOMP_LOG_WEATHER` | 1 | Log the weather cycle's clock stopping and going on. |
-| `LARECOMP_LOG_TRACKER` | 1 | Log the Tracker's state for each check, and what the ones out of reach still need, once after each update. |
 | `LARECOMP_METAL_HUD` | 1 | Mac, iPhone and iPad. Set by the app itself when it starts with the Metal HUD setting on; not needed by hand. |
 | `LARECOMP_FNPROF` | `from:to` (frames) | Sample which game functions run between those frames, to `build/fnprof.txt`. `0:<to>` starts at process start. |
 | `LARECOMP_DEBUG_FRAME` | frame | Dump that frame's render passes to `build/pass_NNN.png` and log its draws (F9 does the same for the next frame). |
@@ -203,6 +190,7 @@ These work on both Metal and Vulkan unless noted.
 | `LARECOMP_NO_SCALE` | 1 | Keep all render targets at the game's own size (no resolution scaling). |
 | `LARECOMP_AO_SCALE` | 1 to 4 | Draw the game's ambient occlusion at this many times the Switch's size, whatever the setting and render scale. |
 | `LARECOMP_AO_SCALED` | 1 | Scale the ambient occlusion with the frame, as before issue #356 (shows the old haze and dither). |
+| `LARECOMP_2D_SCALED` | 1 | EoW: scale its 1080-line 2D targets (the composed frame, the HUD) like its 792-line 3D, as before (larger than the window). |
 | `LARECOMP_SHADOW_SCALE` | 0.5 to 4 | Draw the game's shadow map at this many times the Switch's size, whatever the setting. |
 | `LARECOMP_SHADOW_BIAS_RAW` | 1 | Keep the game's polygon offset slope in the shadow map as it is, instead of scaling it with the map's size (A/B tests). |
 | `LARECOMP_AO_NO_GRID` | 1 | Leave the ambient occlusion shaders on the game's own pixel grid when the AO is larger than the Switch's. |
@@ -303,7 +291,6 @@ Read by scripts in `tools/`, not by the app.
 
 | Variable | Values | What it does |
 |---|---|---|
-| `LARECOMP_ROMFS` | folder | The extracted game's romfs folder, for the Python tests that read game files (`test_field_regions.py`, `test_room_crossing.py`, `test_room_ledges.py`). |
 | `LARECOMP_MIN_FREE_GB` | GB | `tools/game_slot.sh`: free memory to wait for before a test copy starts (default 10). |
 
 Narrow one-off probes (memory dumps and watches at fixed addresses, single-shader skips, per-feature tuning, menu

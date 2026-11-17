@@ -16,6 +16,7 @@
 #include "../tex_hash.h"
 #include "../renderer.h"
 #include "../texpatch.h"
+#include "../../game_addresses.h"
 #include "../output_scale.h"
 
 // ================================================================== formats
@@ -223,10 +224,14 @@ static bool tex_scalable(const NvnTexture *t) {
     float a = (float)t->width / (float)t->height;
     return a > 1.74f && a < 1.81f;  // 16:9 (1920x1080 and its fractions, 704x396, 60x33...)
 }
+// EoW's 2D: the 1920x1080 targets its frame is composed and presented in (output_scale_2d).
+static bool tex_2d(const NvnTexture *t) { return game_other() && t->width == 1920 && t->height == 1080; }
 // The scale a scalable texture is allocated and drawn at: the ambient occlusion's own, else the frame's
-// (the AO: uniform, by the height's)
-static float tex_alloc_x(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : g_al_x; }
-static float tex_alloc_y(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : g_al_y; }
+// (the AO: uniform, by the height's; EoW's 2D: a part of the frame's)
+static float tex_alloc_x(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : b->two_d ? g_al_x * output_scale_2d() : g_al_x; }
+static float tex_alloc_y(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : b->two_d ? g_al_y * output_scale_2d() : g_al_y; }
+static float tex_draw_x(const TexBackend *b) { return b->two_d ? g_rs_x * output_scale_2d() : g_rs_x; }
+static float tex_draw_y(const TexBackend *b) { return b->two_d ? g_rs_y * output_scale_2d() : g_rs_y; }
 
 bool renderer_texture_first_write(NvnTexture *t) {
     TexBackend *b = t ? (TexBackend *)t->backend : NULL;
@@ -381,8 +386,8 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     VkFmt mf = fmt_of(t->format);
     b->ax = b->scalable ? tex_alloc_x(b) : 1;
     b->ay = b->scalable ? tex_alloc_y(b) : 1;
-    b->sx = b->scalable ? (b->ao || b->shadow ? b->ax : g_rs_x) : 1;
-    b->sy = b->scalable ? (b->ao || b->shadow ? b->ay : g_rs_y) : 1;
+    b->sx = b->scalable ? (b->ao || b->shadow ? b->ax : tex_draw_x(b)) : 1;
+    b->sy = b->scalable ? (b->ao || b->shadow ? b->ay : tex_draw_y(b)) : 1;
     uint32_t tw = t->width ? t->width : 1, th = t->height ? t->height : 1;
     if (b->scalable) {
         tw = (uint32_t)lroundf(tw * b->ax); th = (uint32_t)lroundf(th * b->ay);
@@ -582,6 +587,7 @@ static TexBackend *tex_backend(NvnTexture *t) {
     b->scalable = tex_scalable(t);
     b->shadow = tex_shadow(t);
     b->ao = b->scalable && !b->shadow && tex_ao(t);
+    b->two_d = b->scalable && !b->shadow && !b->ao && tex_2d(t);
     create_image(t, b);
     t->backend = b;
     live_add(t, b);
@@ -745,7 +751,7 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
                 uint8_t *blocks = malloc((uint64_t)brow * l.hb);
                 if (linear) for (uint32_t y = 0; y < l.hb; y++) memcpy(blocks + (uint64_t)y * brow, src + (uint64_t)y * t->stride, brow);
                 else tegra_deswizzle(src, blocks, l.wb, l.hb, 1, bpb, l.block_height_log2, l.block_depth_log2);
-                if (b->tp > 0 && layer == 0) texpatch_apply(b->tp - 1, lv, blocks, l.w, l.h, brow);
+                if (b->tp > 0) texpatch_apply(b->tp - 1, layer, lv, blocks, l.w, l.h, brow);
                 VkSpan s = vk_transient((uint64_t)l.w * l.h * (b->cpu_bc ? bc_texel_bytes(b->cpu_bc) : 4), 16);
                 if (b->cpu_bc) bc_decode(b->cpu_bc, blocks, l.w, l.h, s.ptr);
                 else astc_decode_ldr(blocks, l.w, l.h, b->astc_bw, b->astc_bh, b->astc_srgb, s.ptr);
@@ -769,7 +775,7 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
             } else {
                 tegra_deswizzle(src, lin, l.wb, l.hb, l.d, fi->bpb, l.block_height_log2, l.block_depth_log2);
             }
-            if (b->tp > 0 && layer == 0) texpatch_apply(b->tp - 1, lv, lin, l.w, l.h, row);
+            if (b->tp > 0) texpatch_apply(b->tp - 1, layer, lv, lin, l.w, l.h, row);
             if (expand) {  // RGB8 -> RGBA8
                 uint8_t *o = s.ptr;
                 uint64_t n = (uint64_t)l.wb * l.hb * l.d;
@@ -812,7 +818,7 @@ TexBackend *vk_tex(NvnTexture *t, bool for_render) {
 void renderer_mark_gpu_owned(NvnTexture *t) {
     TexBackend *b = tex_backend(t);
     b->gpu_owned = true;
-    if (b->scalable && !b->ao && !b->shadow) { b->sx = g_rs_x; b->sy = g_rs_y; }
+    if (b->scalable && !b->ao && !b->shadow) { b->sx = tex_draw_x(b); b->sy = tex_draw_y(b); }
 }
 bool renderer_is_gpu_owned(NvnTexture *t) { return tex_backend(t)->gpu_owned; }
 void backend_pool_written(uint64_t addr, uint64_t size) { (void)addr; (void)size; }

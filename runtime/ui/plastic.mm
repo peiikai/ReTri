@@ -71,7 +71,7 @@ static const PlasticTheme &theme_eow(void) {
     return t;
 }
 
-// EoW's look: its game files, or none chosen yet - the app is TriCompiled, so its first screens look like it
+// EoW's look: its game files, or none chosen yet - the app is ReTri, so its first screens look like it
 // (with no game files it can't tell the game: LA's look and name showed on the first start)
 bool ui_eow_look(void) { return game_other() || !game_version(); }
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# make ipa: build/ios/TriCompiled.app and build/dist/TriCompiled-<version>-iOS.ipa from build/ios/eowrecomp and
+# make ipa: build/ios/ReTri.app and build/dist/ReTri-<version>-iOS.ipa from build/ios/eowrecomp and
 # build/ios/eowgame.dylib. The app is laid out as on macOS: the executable holds no game code; the game code library
 # (built from your own game files) is the embedded Frameworks/LASGame.framework, signed with the app - iOS runs only
 # code signed inside the bundle, so the .ipa holds the game's code: for your own devices, never shared.
@@ -8,7 +8,7 @@
 #
 #   TEAM_ID=<id>          the Apple Developer team (the entitlement in runtime/platform/ios.entitlements: any team)
 #   PROFILE=<.mobileprovision>  a development profile for BUNDLE_ID with those capabilities and this device
-#   BUNDLE_ID=...         default com.peiikai.tricompiled.ios
+#   BUNDLE_ID=...         default com.peiikai.retri.ios
 #   SIGN="Apple Development: ..."  the identity (default: the profile's certificate that is in the keychain)
 #   DEVICE=<devicectl id>  install and launch on that device
 #   SKELETON=1            no game library and no signing: the app without Frameworks/LASGame.framework, which the
@@ -18,20 +18,20 @@
 #                         runtime/platform/ios.entitlements (one entitlement, which a free Apple ID's team grants),
 #                         where such tools read what to ask Apple for
 #   IOS_SIM=1             with SKELETON=1: the app for the iOS Simulator (make ios-sim; the platform names in the
-#                         plists, the simulator's Python slice)
+#                         plists)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 EXE=${1:-build/ios/eowrecomp}
 LIB=${2:-$(dirname "$EXE")/eowgame.dylib}
 SKELETON=${SKELETON:-}
-APP=${APP:-build/ios/TriCompiled.app}
-BUNDLE_ID=${BUNDLE_ID:-com.peiikai.tricompiled.ios}
+APP=${APP:-build/ios/ReTri.app}
+BUNDLE_ID=${BUNDLE_ID:-com.peiikai.retri.ios}
 IOS_MIN=${IOS_MIN:?the Makefile sets IOS_MIN - run as make ipa / ios-skeleton}
 if [ -n "${IOS_SIM:-}" ]; then
     [ -n "$SKELETON" ] || { echo "IOS_SIM=1 needs SKELETON=1 (no game code in the simulator)"; exit 1; }
-    PLATFORM_NAME=iphonesimulator; PLATFORM_KEY=iPhoneSimulator; PYSLICE_NAME=ios-arm64_x86_64-simulator
+    PLATFORM_NAME=iphonesimulator; PLATFORM_KEY=iPhoneSimulator
 else
-    PLATFORM_NAME=iphoneos; PLATFORM_KEY=iPhoneOS; PYSLICE_NAME=ios-arm64
+    PLATFORM_NAME=iphoneos; PLATFORM_KEY=iPhoneOS
 fi
 WORK=$(dirname "$EXE")  # (the icon catalog and the plist scratch next to the executable)
 VERSION=$(sed -n 's/^#define LARECOMP_VERSION "\(.*\)"/\1/p' runtime/ui/launcher.mm)
@@ -82,6 +82,8 @@ EOF
 cp docs/icon/icon_ios_1024.png "$APP/icon.png"
 cp third_party/fonts/Baloo2/Baloo2-SemiBold.ttf "$APP/"
 cp third_party/fonts/Baloo2/OFL.txt "$APP/Baloo2-OFL.txt"
+cp third_party/fonts/HyliaSerif/HyliaSerifBeta-Regular.otf "$APP/"
+cp third_party/fonts/HyliaSerif/README.md "$APP/HyliaSerif-README.md"
 # the game text's fonts (runtime/hle/pl.c: no readable system fonts on iOS, so BIZ UDPGothic serves first) and the
 # last-resort ones, as the desktop packages ship them
 cp third_party/fonts/BIZUDPGothic/BIZUDPGothic-Regular.ttf "$APP/"
@@ -90,14 +92,13 @@ cp third_party/fonts/DejaVu/DejaVuSans.ttf third_party/fonts/DejaVu/DejaVuSans-B
 cp third_party/fonts/DejaVu/LICENSE "$APP/DejaVu-LICENSE.txt"
 # LICENSES/: the texts of what the app links or embeds, unlike the desktops' dynamic libraries and separate
 # helpers (the fonts' above, as the desktops ship them; the README's License section lists each with its version):
-# the ported audio renderer code, Dear ImGui and SMAA from the tree, and the static SDL3 and FFmpeg, the embedded
-# CPython and the seed generator's packages from build/deps-ios/licenses (tools/build_deps_ios.sh)
+# the ported audio renderer code, Dear ImGui and SMAA from the tree, and the static SDL3 and FFmpeg from
+# build/deps-ios/licenses (tools/build_deps_ios.sh)
 DEPS=${DEPS:-build/deps-ios}
 mkdir -p "$APP/LICENSES"
 cp third_party/ryujinx/LICENSE.txt "$APP/LICENSES/audio-renderer-port-LICENSE.txt"
 cp third_party/imgui/LICENSE.txt "$APP/LICENSES/imgui-LICENSE.txt"
 cp third_party/smaa/LICENSE.txt "$APP/LICENSES/SMAA-LICENSE.txt"
-cp third_party/LAS-Randomizer/LICENSE.txt "$APP/LICENSES/LAS-Randomizer-LICENSE.txt"
 [ -d "$DEPS/licenses" ] || { echo "no $DEPS/licenses (make deps-ios again: it collects the licence texts)"; exit 1; }
 cp "$DEPS"/licenses/* "$APP/LICENSES/"
 
@@ -122,11 +123,11 @@ cat > "$APP/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key><string>en</string>
-	<key>CFBundleDisplayName</key><string>TriCompiled</string>
+	<key>CFBundleDisplayName</key><string>ReTri</string>
 	<key>CFBundleExecutable</key><string>eowrecomp</string>
 	<key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-	<key>CFBundleName</key><string>TriCompiled</string>
+	<key>CFBundleName</key><string>ReTri</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>$SHORT</string>
 	<key>CFBundleVersion</key><string>1</string>
@@ -160,7 +161,7 @@ cat > "$APP/Info.plist" <<EOF
 		<key>UIApplicationShortcutItemTitle</key><string>Play Vanilla</string>
 		<key>UIApplicationShortcutItemIconSymbolName</key><string>play.fill</string>
 	</dict></array>
-	<key>NSLocalNetworkUsageDescription</key><string>LiveSplit: TriCompiled connects to LiveSplit's Server on your computer to drive the timer.</string>
+	<key>NSLocalNetworkUsageDescription</key><string>LiveSplit: ReTri connects to LiveSplit's Server on your computer to drive the timer.</string>
 EOF
 cat >> "$APP/Info.plist" <<'EOF'
 </dict>
@@ -177,35 +178,7 @@ EOF
 fi
 plutil -lint "$APP/Info.plist" >/dev/null
 
-# ---- the embedded CPython (runtime/platform/ios_python.m): Python.framework, the stdlib under python/lib, and every
-# C extension (.so: stdlib's and site-packages') as its own Frameworks/<module>.framework, with a <module>.fwork file
-# left in its place for the importer (CPython's iOS loader) - the layout of BeeWare's testbed, build/utils.sh.
-DEPS=${DEPS:-build/deps-ios}
-PYV=${PYV:-3.13}  # (the Makefile's)
-PYSLICE=$DEPS/Python.xcframework/$PYSLICE_NAME
-if [ -f "$PYSLICE/Python.framework/Python" ]; then
-    cp -R "$PYSLICE/Python.framework" "$APP/Frameworks/Python.framework"
-    mkdir -p "$APP/python/lib"
-    rsync -a "$DEPS/Python.xcframework/lib/" "$APP/python/lib/"  # (the pure-Python stdlib, shared by the slices)
-    rsync -a --exclude 'libpython*.dylib' "$PYSLICE/lib-arm64/" "$APP/python/lib/"  # (this slice's extensions)
-    # (no tests, no idle / tkinter: size)
-    rm -rf "$APP"/python/lib/python$PYV/{test,idlelib,tkinter,turtledemo,ensurepip,lib2to3,pydoc_data,__pycache__}
-    find "$APP/python/lib" -name "__pycache__" -type d -prune -exec rm -rf {} +
-    find "$APP/python/lib" -name "*_test*.so" -o -name "xx*.so" | xargs rm -f  # (the test extensions)
-    [ -d "$DEPS/python/site-packages" ] && cp -R "$DEPS/python/site-packages" "$APP/python/site-packages"
-    cp runtime/platform/ios_pyproc.py "$APP/python/site-packages/"  # (what runs the scripts: ios_python.m)
-    # the generator's sources: tools/rando as it is (less the desktop helper's venv / spec and caches), the randomizer's
-    # core and resources
-    mkdir -p "$APP/rando-gen"
-    rsync -a --exclude '__pycache__' --exclude 'venv' --exclude '*.spec' --exclude '.*' tools/rando/ "$APP/rando-gen/"
-    rsync -a --exclude '__pycache__' third_party/LAS-Randomizer/RandomizerCore third_party/LAS-Randomizer/Resources "$APP/rando-gen/"
-    # every .so / .dylib under python/ -> a framework (tools/ios_frameworks.py)
-    n=$(python3 tools/ios_frameworks.py "$APP" "$BUNDLE_ID" "$IOS_MIN" --platform $PLATFORM_KEY)
-    echo "python: $n extension frameworks, $(du -sh "$APP/python" | cut -f1) stdlib + packages, $(du -sh "$APP/rando-gen" | cut -f1) generator"
-fi
-
-# no path of this machine inside (debug paths, the wheels' source file names), as tools/bundle_macos.sh checks. Not
-# on CI: its paths name no one, and BeeWare's prebuilt Pillow holds the CI runner's own
+# no path of this machine inside (debug paths), as tools/bundle_macos.sh checks. Not on CI: its paths name no one
 if [ "${CI:-}" != true ]; then
     case "$(basename "$HOME")" in runner|runneradmin) home=() ;; *) home=(-e "$HOME") ;; esac
     if grep -rlaF -e "$PWD" ${home[@]+"${home[@]}"} "$APP"; then echo "^ these hold a path of this machine"; exit 1; fi
@@ -270,7 +243,7 @@ fi
 
 mkdir -p build/dist && rm -rf build/ios/Payload && mkdir build/ios/Payload
 cp -R "$APP" build/ios/Payload/
-IPA="build/dist/TriCompiled-$VERSION-iOS.ipa"
+IPA="build/dist/ReTri-$VERSION-iOS.ipa"
 rm -f "$IPA"
 (cd build/ios && zip -qr "../../$IPA" Payload)
 rm -rf build/ios/Payload
