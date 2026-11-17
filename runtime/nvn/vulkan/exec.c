@@ -3798,6 +3798,15 @@ static VkSpan drv_dedupe(int stage, uint64_t size) {
 }
 
 // Constant buffer k of a stage (renderer.m bind_cbufs), copied into transient memory.
+// EoW's rift: the map's draw (its vertex cb4 rows 0-1) and the mask's (fragment cb4 rows 33-34): see cbuf_info.
+// LARECOMP_RIFT_ROWS_OFF=1: the game's rows as they are.
+#define RIFT_MAP_FS 0xd6c58a42e55a9f9eull
+#define RIFT_MASK_FS 0x44b584f0d922d49dull
+static bool rift_rows_on(void) {
+    static int on = -1;
+    if (on < 0) on = game_other() && !getenv("LARECOMP_RIFT_ROWS_OFF");
+    return on;
+}
 static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32_t gx, uint32_t gy, uint32_t gz) {
     static const uint8_t zeros[0x10000];
     if (k == 0) {
@@ -3853,18 +3862,16 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
         // view's constants (the same projection halved into texture space). The game rewrites both, rotated to its final
         // map view, a few ms after submitting the frame; copied at record time, the two could come from either side of
         // that. So the mask's rows are made from the projection the map was drawn with: the map and its lookup agree.
-        // LARECOMP_RIFT_ROWS_OFF=1: the game's rows as they are.
+        // Both read cb4 from a CPU copy, never the GPU's copy of a dispatch's results: draw_ waits for those first.
         static float map_rows[8];
         static uint64_t map_frame = ~0ull;
-        static int off = -1;
-        if (off < 0) off = getenv("LARECOMP_RIFT_ROWS_OFF") ? 1 : 0;
         extern uint64_t renderer_exec_frame(void);
-        if (!off && game_other() && stage == 0 && k == 4 && g_cur_fs_hash == 0xd6c58a42e55a9f9eull && r.size >= 32) {
+        if (rift_rows_on() && stage == 0 && k == 4 && g_cur_fs_hash == RIFT_MAP_FS && r.size >= 32) {
             memcpy(map_rows, (const void *)(uintptr_t)r.addr, 32);
             map_frame = renderer_exec_frame();
             return ubo_span(guest_copy(r.addr, size), size);  // (the map with these rows too: not a GPU copy)
         }
-        if (!off && game_other() && stage == 1 && k == 4 && g_cur_fs_hash == 0x44b584f0d922d49dull && size >= 35 * 16 &&
+        if (rift_rows_on() && stage == 1 && k == 4 && g_cur_fs_hash == RIFT_MASK_FS && size >= 35 * 16 &&
             map_frame == renderer_exec_frame()) {
             static uint8_t buf[0x10000];
             memcpy(buf, (const void *)(uintptr_t)r.addr, size);
@@ -6564,15 +6571,16 @@ static void gwp_note_dispatch(VkCommandBuffer cb) {
 }
 // (gwp) Before a draw or dispatch is recorded: a uniform buffer a stage reads that a pending dispatch may have written
 // waits for the GPU (renderer_flush: the GPU's writes in guest memory), so cbuf_info's copy has the results
-static void gwp_wait(int stage, const ShaderInfo *si) {
+// kmask: the uniform slots to check; no_copy: slots whose CPU copy is used even when a GPU copy exists (the rift rows)
+static void gwp_wait_k(int stage, const ShaderInfo *si, uint32_t kmask, bool no_copy) {
     if ((!ngwp && !gwp_full) || g_interp_replaying) return;  // (a replay: no waits, as the indirect draws)
     for (int k = 3; k < 18; k++) {
-        if (!(si->cbuf_mask & (1u << k))) continue;
+        if (!(si->cbuf_mask & kmask & (1u << k))) continue;
         Range r = st.ubuf[stage][k - 3];
         if (!r.addr) continue;
         uint64_t size = r.size ? r.size : si->cbuf_size[k];
         VkDescriptorBufferInfo b;
-        if (gwc_find(r.addr, size, &b)) continue;  // (bound to the GPU's copy: cbuf_info)
+        if (!no_copy && gwc_find(r.addr, size, &b)) continue;  // (bound to the GPU's copy: cbuf_info)
         if (gwc_on() && gmir_on() && !gmir_overlaps(r.addr, size)) continue;  // (the GPU can't have written it)
         bool hit = gwp_full;
         for (int j = 0; j < ngwp && !hit; j++) hit = r.addr < gwp[j].addr + gwp[j].size && gwp[j].addr < r.addr + size;
@@ -6588,6 +6596,7 @@ static void gwp_wait(int stage, const ShaderInfo *si) {
         return;
     }
 }
+static void gwp_wait(int stage, const ShaderInfo *si) { gwp_wait_k(stage, si, ~0u, false); }
 
 static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     snap_reason = "compute"; snapshots_invalidate(NULL);
@@ -7211,6 +7220,11 @@ static void draw_(CmdRec *r, bool indexed) {
         if (last_hash == 0xa2177dbb72197bd9ull && pot_level_active()) { SKIP(SK_HIDDEN); return; }
         if (g_debug_frame && getenv("LARECOMP_LOG_FSHASH")) LOG("[fshash] fs=%llx hash %016llx\n", (unsigned long long)fs, (unsigned long long)last_hash);
         g_cur_fs_hash = last_hash;
+        // (the rift's map and mask make their cb4 from a CPU copy, cbuf_info: a dispatch's results in it, GPU-copied
+        // for other draws, are waited for here - with the GPU's copy left aside the mask read stale rows and the
+        // opening dungeon went black, frames ~1650-1860 on an RTX 3080 Ti)
+        if (rift_rows_on() && (last_hash == RIFT_MAP_FS || last_hash == RIFT_MASK_FS))
+            gwp_wait_k(last_hash == RIFT_MAP_FS ? 0 : 1, last_hash == RIFT_MAP_FS ? pr->vi : pr->fi, 1u << 4, true);
         extern void widescreen_backdrop_seen(uint64_t hash);
         if (last_hash) widescreen_backdrop_seen(last_hash);
         extern void widescreen_scene_ubo(const float *u, uint64_t size);  // (the camera's view-projection)
