@@ -1,4 +1,4 @@
-# EoW Recomp build
+# ReTri build
 # macOS: Homebrew clang/SDL3/FFmpeg, Metal renderer.
 # Windows: MSYS2 UCRT64 shell (see docs/BUILD-windows.md), clang + Vulkan renderer.
 # Linux: clang + Vulkan renderer, x86-64 or aarch64 (see docs/linux.md).
@@ -347,7 +347,7 @@ $(B)/rt/platform/windows_rc.o: runtime/platform/windows.rc docs/icon/icon.ico ru
 
 VERSION  := $(shell sed -n 's/^\#define LARECOMP_VERSION "\(.*\)"/\1/p' runtime/ui/launcher.mm)
 
-# macOS: build/EoW Recomp.app, runs on macOS $(APP_MIN)+: the game rebuilt for that in build/mac15 against build/deps
+# macOS: build/ReTri.app, runs on macOS $(APP_MIN)+: the game rebuilt for that in build/mac15 against build/deps
 # (`make deps`: SDL3, LGPL FFmpeg, Python, from pinned sources), the generator helper when built
 # (`make gen-helper` after `make deps`), packaged by tools/bundle_macos.sh. No game files or fonts.
 APP_MIN  := 15.0
@@ -358,7 +358,7 @@ deps-ios:
 	IOS_MIN=$(IOS_MIN) tools/build_deps_ios.sh
 deps-ios-sim:
 	SIM=1 IOS_MIN=$(IOS_MIN) tools/build_deps_ios.sh
-# iOS: build/ios/EoW Recomp.app and build/dist/EoW Recomp-<version>-iOS.ipa, signed with TEAM_ID / PROFILE
+# iOS: build/ios/ReTri.app and build/dist/ReTri-<version>-iOS.ipa, signed with TEAM_ID / PROFILE
 # (tools/bundle_ios.sh); DEVICE=<devicectl id> installs and launches it. Holds the game code: for your own devices only.
 ipa:
 	$(MAKE) PLATFORM=ios
@@ -367,26 +367,26 @@ app:
 	@[ -f build/deps/lib/libSDL3.0.dylib ] || { echo "make deps first"; exit 1; }
 	$(MAKE) B=$(APP_B) MACOS_MIN=$(APP_MIN) DEPS=$(CURDIR)/build/deps $(APP_B)/eowrecomp
 	MACOS_MIN=$(APP_MIN) tools/bundle_macos.sh $(APP_B)/eowrecomp
-# The iOS app without game code (build/ios-skeleton/EoW Recomp.app), and the release's iOS kit around it
-# (build/dist/EoW Recomp-<version>-iOS.laskit: a zip with the app as Payload/, a linker for each desktop, the Darwin
+# The iOS app without game code (build/ios-skeleton/ReTri.app), and the release's iOS kit around it
+# (build/dist/ReTri-<version>-iOS.laskit: a zip with the app as Payload/, a linker for each desktop, the Darwin
 # headers), which the start screen on any desktop completes with the library it builds there (runtime/iosexport.c).
 # Needs `make deps-ios`; the kit needs the five linkers (tools/fetch_lld.sh for each LLD_TARGET).
 ios-skeleton:
 	$(MAKE) PLATFORM=ios build/ios/eowrecomp
-	SKELETON=1 APP="build/ios-skeleton/EoW Recomp.app" IOS_MIN=$(IOS_MIN) tools/bundle_ios.sh build/ios/eowrecomp
+	SKELETON=1 APP="build/ios-skeleton/ReTri.app" IOS_MIN=$(IOS_MIN) tools/bundle_ios.sh build/ios/eowrecomp
 ios-kit: ios-skeleton $(MINIZ)/.fetched  # (the kit carries miniz's licence: the desktops' export reads it with miniz)
 	tools/ios_kit.sh
-# The simulator app (build/ios-sim/EoW Recomp.app, no game code, ad-hoc signed): what CI builds on a Mac runner. Needs
+# The simulator app (build/ios-sim/ReTri.app, no game code, ad-hoc signed): what CI builds on a Mac runner. Needs
 # `make deps-ios-sim`.
 ios-sim:
 	$(MAKE) PLATFORM=ios IOS_SIM=1 build/ios-sim/eowrecomp
-	SKELETON=1 IOS_SIM=1 APP="build/ios-sim/EoW Recomp.app" IOS_MIN=$(IOS_MIN) DEPS=build/deps-ios-sim tools/bundle_ios.sh build/ios-sim/eowrecomp
+	SKELETON=1 IOS_SIM=1 APP="build/ios-sim/ReTri.app" IOS_MIN=$(IOS_MIN) DEPS=build/deps-ios-sim tools/bundle_ios.sh build/ios-sim/eowrecomp
 
-# macOS release disk image (the .app + an Applications shortcut to drag it onto): build/dist/EoW Recomp-<v>-macOS.dmg
+# macOS release disk image (the .app + an Applications shortcut to drag it onto): build/dist/ReTri-<v>-macOS.dmg
 dmg: app
 	tools/make_dmg.sh
 
-# Windows: build/dist/EoW Recomp-<version>-windows.zip, top folder "EoW Recomp/": the exe, what the start screen
+# Windows: build/dist/ReTri-<version>-windows.zip, top folder "ReTri/": the exe, what the start screen
 # builds the game code with on the player's machine (make gen-helper,
 # tools/fetch_zig.sh slimmed by tools/zig_slim.sh: its runtime built ahead of time, gamelib-src/, the exe's import library)
 # and the DLLs they load (runs without MSYS2). No game code. The exe is a release build in $(WIN_B):
@@ -396,10 +396,10 @@ dmg: app
 # with build/deps-win/bin first (the FFmpeg DLL names are the same as MSYS2's GPL ones). vulkan-1.dll is left
 # out: every Vulkan driver installs the loader in System32. Saves and game files go next to the exe at run time.
 # Needs: Windows 10+ x64, a Vulkan 1.3 driver, an AVX2 CPU (GENARCH x86-64-v3; checked at startup).
-# ARM64 (experimental, from an MSYS2 CLANGARM64 shell): the same steps give EoW Recomp-<version>-windows-arm64.zip; its
+# ARM64 (experimental, from an MSYS2 CLANGARM64 shell): the same steps give ReTri-<version>-windows-arm64.zip; its
 # helper is built with an x64 Python 3.12 (GEN_PY=...: capstone / unicorn have no ARM64 Windows wheels) and run
 # under emulation, everything else is ARM64.
-DIST     := build/dist/EoW Recomp
+DIST     := build/dist/ReTri
 WIN_B    := build/win-release
 # the zip's platform name, as the update check names it (runtime/ui/launcher.mm LARECOMP_PLATFORM)
 WINZIP   := windows$(if $(filter aarch64,$(WINARCH)),-arm64)
@@ -434,9 +434,9 @@ dist:
 	    case "$$(basename "$$(cygpath -u "$$USERPROFILE")")" in runner|runneradmin) h= ;; *) h=$$(cygpath -m "$$USERPROFILE") ;; esac; \
 	    ! grep -rlaiF -e "$(CURDIR)" -e "$$(cygpath -m '$(CURDIR)')" -e "$$(cygpath -w '$(CURDIR)')" \
 	        $${h:+-e "$$h" -e "$$(cygpath -w "$$h")"} "$(DIST)"; fi
-	cd build/dist && if command -v zip >/dev/null; then zip -qr "EoW Recomp-$(VERSION)-$(WINZIP).zip" "EoW Recomp"; \
-	    else /c/Windows/System32/tar.exe -a -cf "EoW Recomp-$(VERSION)-$(WINZIP).zip" "EoW Recomp"; fi
-	@echo "build/dist/EoW Recomp-$(VERSION)-$(WINZIP).zip"
+	cd build/dist && if command -v zip >/dev/null; then zip -qr "ReTri-$(VERSION)-$(WINZIP).zip" "ReTri"; \
+	    else /c/Windows/System32/tar.exe -a -cf "ReTri-$(VERSION)-$(WINZIP).zip" "ReTri"; fi
+	@echo "build/dist/ReTri-$(VERSION)-$(WINZIP).zip"
 
 # The game code generator as a standalone helper, so players need no Python: build/helper/lasgen/ (lasgen[.exe] +
 # _internal/), frozen by PyInstaller from tools/lasgen.spec in its own venv (build/gen-venv). Shipped as lasgen/ next to
@@ -466,7 +466,7 @@ build/gen-venv/.ok:
 	$(GEN_VPY) -m pip install -q capstone==5.0.9 unicorn==2.1.4 lz4==4.4.5 pyinstaller==6.22.3
 	touch $@
 
-# Linux: build/dist/EoW Recomp-<version>-linux-<arch>.AppImage, built in Ubuntu 22.04 containers (podman) with SDL3, LGPL
+# Linux: build/dist/ReTri-<version>-linux-<arch>.AppImage, built in Ubuntu 22.04 containers (podman) with SDL3, LGPL
 # FFmpeg, shaderc and the game code generator helper inside; the Vulkan loader and GPU drivers are the system's.
 # `make appimage` (ARCH: this machine's, or aarch64 cross-compiled), `make appimages` both. See docs/linux.md.
 appimage:

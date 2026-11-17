@@ -1,6 +1,6 @@
 # Notes for agents
 
-- **What this is.** EoW Recomp statically recompiles the Switch release of *Echoes of Wisdom* into a native macOS app. It runs on the LAS Recomp runtime, which still supports *Link's Awakening*; much of this file is that runtime's.
+- **What this is.** ReTri statically recompiles the Switch release of *Echoes of Wisdom* into a native macOS app. It runs on the LAS Recomp runtime, which still supports *Link's Awakening*; much of this file is that runtime's.
   - `tools/gen.py` turns the game's executables into C, which is built on the player's machine from their own
     extracted game files.
   - A host stands in for the Switch OS and services (`runtime/kernel.c`, `loader.c`, `services/`).

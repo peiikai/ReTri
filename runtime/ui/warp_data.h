@@ -1,4 +1,4 @@
-// Generated from the level files (TagPlayerStart actors) by LAS Recomp's tools/warp_table.py (not in EoW Recomp:
+// Generated from the level files (TagPlayerStart actors) by LAS Recomp's tools/warp_table.py (not in ReTri:
 // it read them with LAS-Randomizer's parser, removed with the LA randomizer). Do not edit.
 #pragma once
 

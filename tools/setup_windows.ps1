@@ -1,4 +1,4 @@
-# One-time setup of a Windows machine for building EoW Recomp (see docs/BUILD-windows.md).
+# One-time setup of a Windows machine for building ReTri (see docs/BUILD-windows.md).
 # Installs MSYS2 (clang, lld, make, SDL3, FFmpeg, Vulkan loader/headers, shaderc) and Python 3.12, then creates
 # tools/venv (lifter: unicorn, capstone, lz4). Safe to re-run.
 # On Windows on ARM (experimental): MSYS2 CLANGARM64 instead of UCRT64, and an x64 Python 3.12 (unicorn / capstone

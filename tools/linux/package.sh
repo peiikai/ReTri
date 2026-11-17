@@ -2,7 +2,7 @@
 # tools/linux/package.sh <x86_64|aarch64> (inside a build container, tools/linux/appimage.sh: the AppImage's own arch
 # when the host has it, else amd64 cross-compiling): the game built
 # against build/linux/<arch>/deps and the game code generator helper (tools/linux/gen_helper.sh) put together
-# as an AppDir and packed by appimagetool: build/dist/EoW Recomp-<version>-linux-<arch>.AppImage
+# as an AppDir and packed by appimagetool: build/dist/ReTri-<version>-linux-<arch>.AppImage
 # (named like the macOS / Windows releases; GitHub shows it as LAS.Recomp-<version>-linux-<arch>.AppImage).
 # Shipped next to the executable (usr/bin, where runtime/paths.c rt_resource looks): what the start screen
 # builds the game code with on the player's machine (runtime/gamebuild.c: lasgen/, zig/ from tools/fetch_zig.sh,
@@ -16,7 +16,7 @@ P=$L/deps
 B=$L/game
 APPDIR=$L/AppDir
 VERSION=$(sed -n 's/^#define LARECOMP_VERSION "\(.*\)"/\1/p' runtime/ui/launcher.mm)
-OUT="build/dist/EoW Recomp-$VERSION-linux-$ARCH.AppImage"
+OUT="build/dist/ReTri-$VERSION-linux-$ARCH.AppImage"
 JOBS=$(nproc)
 
 tools/linux/build_deps.sh "$ARCH"

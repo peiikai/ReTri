@@ -1,4 +1,4 @@
-# EoW Recomp
+# ReTri
 
 > [!IMPORTANT]
 > **This project was made almost exclusively with AI.** Nearly all of the code, tooling, reverse engineering and
@@ -8,7 +8,7 @@
 > in the controversy in relation to this project. You may simply ignore this project and its code.
 > As with anything on the internet, you run the code at your own discretion.
 
-**EoW Recomp** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch) into a native
+**ReTri** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch) into a native
 macOS application (Apple Silicon, Metal). It is built on the LAS Recomp runtime, which still supports *Link's
 Awakening*; much of the text below is that runtime's and describes Link's Awakening.
 
@@ -67,7 +67,7 @@ These are the minimums during the beta and may change as development continues.
 ![Mabe Village in a 21:9 window: the unlocked aspect ratio shows more of the island](docs/ultrawide.jpg)
 
 > [!NOTE]
-> **No game files are included.** EoW Recomp needs your own legally obtained copy of the extracted game files of
+> **No game files are included.** ReTri needs your own legally obtained copy of the extracted game files of
 > *Link's Awakening* **v1.0.0, v1.0.1 or v1.1.0**. When setting up, choose a folder that contains the `exefs`
 > and `romfs` folders, or their contents. Instructions on how to obtain these files will **NOT** be provided.
 > On first launch the app sets up what it needs, including the actual recompilation locally. No game files, assets or fonts are included.
@@ -96,27 +96,27 @@ Known issues and their status are on the [GitHub issues page](https://github.com
 
 The iOS app is made on your computer from your own game files, then sideloaded.
 
-1. Set up EoW Recomp on a Mac, Windows or Linux computer as usual.
-2. From the same release, download `EoW Recomp-<version>-iOS.laskit`.
+1. Set up ReTri on a Mac, Windows or Linux computer as usual.
+2. From the same release, download `ReTri-<version>-iOS.laskit`.
 3. On the start screen, open Settings > System > Recomp for iOS..., choose the kit, then Export iOS app.
-   The app is saved to your Downloads folder as `EoW Recomp-<version>-iOS.ipa`.
+   The app is saved to your Downloads folder as `ReTri-<version>-iOS.ipa`.
 4. Install the .ipa with a sideloading tool such as SideStore, AltStore or Sideloadly. A free Apple account works,
-   but the app then has to be refreshed every 7 days. EoW Recomp only makes the .ipa. Installing it is up to you,
+   but the app then has to be refreshed every 7 days. ReTri only makes the .ipa. Installing it is up to you,
    and we can't help with these tools since they're made by others. The extra steps come from Apple's limits on
-   installing apps, not from EoW Recomp.
+   installing apps, not from ReTri.
 5. Copy your game files folder (with `exefs` and `romfs` in it) to the phone or iPad:
    - Mac: connect it with a cable, select it in Finder's sidebar, open the Files tab and drag the folder onto
-     EoW Recomp.
-   - Windows: the same in the Apple Devices app (or iTunes), under Files > EoW Recomp.
+     ReTri.
+   - Windows: the same in the Apple Devices app (or iTunes), under Files > ReTri.
    - USB-C drive: put the folder on the drive and plug it in (iPhone 15 or newer, USB-C iPads).
-   - iCloud Drive: upload the folder, then in the Files app move it to On My iPhone (or On My iPad). EoW Recomp
+   - iCloud Drive: upload the folder, then in the Files app move it to On My iPhone (or On My iPad). ReTri
      won't use game files that are still on iCloud Drive.
 6. Open the app and choose that folder when it asks for your game files. Use the same game version as the files
    on your computer.
 
 ### Increased Memory Limit
 
-EoW Recomp asks iOS for more memory than a normal app gets. iOS only grants it when the tool that signs the app also
+ReTri asks iOS for more memory than a normal app gets. iOS only grants it when the tool that signs the app also
 turns on Increased Memory Limit for the app's App ID. Not every tool does. Without it, iOS may close the game when it
 needs more memory, and the start screen says "Installed without the increased memory limit".
 
@@ -169,7 +169,7 @@ Python 3.12.
 2. Run: `./build/eowrecomp extracted` (start screen) or `./build/eowrecomp extracted --play` (straight into the game).
 3. Package: `make deps` (once: SDL3, FFmpeg and Python from pinned sources, built for macOS 15), `make gen-helper` and
    `tools/fetch_zig.sh` (what the start screen builds the game code with), then `make app` ->
-   `build/EoW Recomp.app` (macOS 15+, Apple Silicon) and `make dmg` -> `build/dist/EoW Recomp-<version>-macOS.dmg`.
+   `build/ReTri.app` (macOS 15+, Apple Silicon) and `make dmg` -> `build/dist/ReTri-<version>-macOS.dmg`.
 
 ### Windows
 
@@ -184,7 +184,7 @@ that page.
    `make -j` -> `build/eowrecomp.exe`. Set up your game files (above), then `make gen` and `make -j` again.
 3. Run: `./build/eowrecomp.exe extracted`, from a shell with `C:\msys64\ucrt64\bin` on PATH (for the DLLs).
 4. Package: `make deps-windows` (once: LGPL FFmpeg), `make gen-helper GEN_PY="<path to python.org Python 3.12>"`
-   and `tools/fetch_zig.sh`, then `make dist` -> `build/dist/EoW Recomp-<version>-windows.zip`.
+   and `tools/fetch_zig.sh`, then `make dist` -> `build/dist/ReTri-<version>-windows.zip`.
 
 ### Linux
 
@@ -195,15 +195,15 @@ Vulkan Memory Allocator from your distribution, Python 3.12. Packages, cross bui
 1. Build: `make -j` -> `build/eowrecomp`. Set up your game files (above), then `make gen` and `make -j` again.
 2. Run: `./build/eowrecomp extracted`.
 3. Package: `make appimage` (this machine's arch; `ARCH=aarch64` cross-compiles) or `make appimages` (both) ->
-   `build/dist/EoW Recomp-<version>-linux-<arch>.AppImage`, built in Ubuntu 22.04 containers (podman). `make smoketest`
+   `build/dist/ReTri-<version>-linux-<arch>.AppImage`, built in Ubuntu 22.04 containers (podman). `make smoketest`
    checks the x86-64 AppImage before a release.
 
 Where files live (game files, saves, settings and logs):
 - macOS: `~/Library/Application Support/com.peiikai.eowrecomp/`
-- Windows: next to `eowrecomp.exe`, so keep the `EoW Recomp` folder somewhere writable (not Program Files).
+- Windows: next to `eowrecomp.exe`, so keep the `ReTri` folder somewhere writable (not Program Files).
 - Linux: `~/.local/share/eowrecomp/`
 - Android: `Android/data/com.lasrecomp.android/files` in the phone's storage.
-- iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > EoW Recomp).
+- iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > ReTri).
 - You can move it to another folder or drive in Settings > System > Data folder.
 - `LARECOMP_DATA_ROOT=<dir>` overrides all of these.
 - For a bug report, attach `eowrecomp.log` from that folder.
@@ -220,7 +220,7 @@ Python 3. Details in [docs/android.md](docs/android.md).
 ### Resuming game-code builds
 
 If the game-code build is cancelled or interrupted, **Resume game code** continues where it stopped. It also resumes
-by itself the next time EoW Recomp starts. **System > Clear build cache** removes the build's leftover files
+by itself the next time ReTri starts. **System > Clear build cache** removes the build's leftover files
 without touching the installed game, your game files or your saves.
 
 ## Credits
@@ -320,13 +320,13 @@ none of their files are used):
 
 ## Legal
 
-EoW Recomp is a fan project. It is not affiliated with, endorsed by or sponsored by Nintendo. *The Legend of Zelda*
+ReTri is a fan project. It is not affiliated with, endorsed by or sponsored by Nintendo. *The Legend of Zelda*
 and *Link's Awakening* are trademarks of Nintendo. No game files, game code, assets or fonts are included - not in
 this repository and not in release builds. You must provide your own legally obtained copy of the game files to play.
 
 ## License
 
-EoW Recomp's own code (the recompiler tools, the runtime) is open source under the
+ReTri's own code (the recompiler tools, the runtime) is open source under the
 [MIT License](LICENSE). Third-party components keep their own licenses: ported audio renderer code (MIT, see `third_party/`), Dear ImGui (MIT),
 Vulkan Memory Allocator (MIT), SMAA (MIT), AMD FSR 1 (MIT), the Baloo 2 and BIZ UDPGothic fonts (SIL OFL 1.1), the Hylia Serif font (free, not for profit), the DejaVu Sans font (Bitstream Vera / DejaVu license), SDL 3 (zlib), FFmpeg (LGPL 2.1+, linked dynamically, and statically in the iOS app), the
 Zig compiler (MIT; its LLVM / Clang / LLD: Apache 2.0 with LLVM exceptions; its C library headers keep their own
@@ -336,7 +336,7 @@ in the game code generator is under the GPL, version in the table below: the hel
 runs, and its sources are this repository plus those projects' published sources). The iOS app links SDL 3 and FFmpeg
 (LGPL 2.1+) statically; the app's `LICENSES/` folder carries each one's licence text, its sources are this repository
 plus the versions in the table (the LGPL libraries can be relinked: `make deps-ios` builds them from source, `make ipa`
-the app), and the game code library it embeds is built from the player's own game files and never shared. The license covers EoW Recomp's code only - it grants
+the app), and the game code library it embeds is built from the player's own game files and never shared. The license covers ReTri's code only - it grants
 nothing for Nintendo's game, which you must supply yourself.
 
 ### Source code of bundled third-party components

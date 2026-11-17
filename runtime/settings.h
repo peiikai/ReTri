@@ -52,7 +52,7 @@ typedef struct {
     bool reverb;         // room reverb effect
     bool movie_audio;
     bool powerup_music;  // Guardian Acorn / Piece of Power music (hle/powerup_music.c)
-    bool menu_sounds;    // EoW Recomp's own menu sounds (runtime/menu_sfx.c)
+    bool menu_sounds;    // ReTri's own menu sounds (runtime/menu_sfx.c)
     bool frame_interp;   // Frame Generation: extra images between the game's frames (runtime/nvn/interp.c)
     bool metal_hud;      // macOS: Apple's Metal Performance HUD over the game (runtime/nvn/metal.m metal_hud_apply)
     int show_fps;        // FPS_*: the frame rate counter's corner (FPS_OFF: none)
