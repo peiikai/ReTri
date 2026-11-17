@@ -439,6 +439,8 @@ const char *warp_other_place_level(int i) { return i >= 0 && i < g_nplaces ? g_p
 const char *warp_other_place_locator(int i) { return i >= 0 && i < g_nplaces ? g_places[i].locator : ""; }
 
 // ---- level loads (fs.c: the first read of each romfs file)
+// in play: a level registered its jump request (none on the title and the file select; --load-save, load_save.c)
+int warp_other_in_play(void) { return g_req != 0; }
 // The current level: where the last level jump went, else the last level file read
 const char *warp_other_current_level(void) { return g_current[0] ? g_current : g_loaded; }
 void warp_other_file_read(const char *path) {

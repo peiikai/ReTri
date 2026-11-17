@@ -29,6 +29,8 @@
 #define FS_NOT_EMPTY MAKE_RESULT(2, 8)
 
 const char *g_save_dir = "save";
+static _Atomic uint64_t g_mounts;  // save folder mounts (--load-save: the load began, runtime/hle/load_save.c)
+uint64_t fs_mount_count(void) { return g_mounts; }
 
 // ------------------------------------------------------------------ the base RomFS image
 // The game reads its data as one raw RomFS image. It's served from the player's romfs/ folder: the header and tables
@@ -1075,6 +1077,7 @@ static Service *open_host_fs(const char *sub) {
         if (!g_live_mounts[i]) { g_live_mounts[i] = fs, fs->live = true; break; }
     pthread_mutex_unlock(&g_mount_lock);
     LOG("[fs] mounted host directory %s\n", fs->root);
+    g_mounts++;
     Service *svc = service_new("IFileSystem", filesystem, fs);
     svc->on_close = fs_unmount;
     return svc;
