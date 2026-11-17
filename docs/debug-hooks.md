@@ -98,6 +98,7 @@ Comma-separated entries, each starting with a frame:
 
 | Variable | Values | What it does |
 |---|---|---|
+| `--load-save` / `LARECOMP_LOAD_SAVE` | `1`, `2`, `1:3` or a save folder path | Boot straight into a save (see below). |
 | `LARECOMP_WARP_AT` | `frame:level:locator,...` (see below) | Warp to that level and spawn point at each frame. |
 | `LARECOMP_WARP_ON_LOAD` | `level:locator` | Warp once, about a second after a save is loaded. |
 | `LARECOMP_WARP_MENU_PICK` | text | Warp through the menu's warp tab to the first place whose name matches the text. |
@@ -107,6 +108,30 @@ Comma-separated entries, each starting with a frame:
 | `LARECOMP_SET_FLAGS` | `i,j,...` or `i@frame` | Force those event flags (0-2047) on in the loaded save, optionally from a frame on. |
 | `LARECOMP_CHEATS` | any of `hearts,ammo,rupees` | Turn those cheats on for this run (not saved). |
 | `LARECOMP_RANDO_SEED` | seed folder name | Play this randomizer seed (`rando/<name>/`) instead of the one in the settings, once the randomizer is on (`RANDO_ON`, `runtime/rando.h`). Saves go to the seed's own folder unless `LARECOMP_SAVE_DIR` is set. |
+
+### Loading a save from the command line (Echoes of Wisdom)
+
+```sh
+./build/eow/eowrecomp game --load-save 1                       # File 1, its newest data
+./build/eow/eowrecomp game --load-save 2:3                     # File 2, the third row of its data list
+./build/eow/eowrecomp game --load-save ~/Downloads/save_0      # a save folder from elsewhere
+```
+
+Skips the start screen, the title and the file select, and loads the save the game's own way: it presses what a
+player would (A on the title, Down for File 2, A, Down to the row, A, Up to Yes on "Load this data?", A), so the game
+lands where that save puts you. Combine with `LARECOMP_WARP_TOUR` or `LARECOMP_WARP_AT` to go somewhere from there.
+It is a debug option: the shader list is not prepared first (as with `--play`).
+
+- `1`, `2`: File 1 or File 2 of the file select (`save/save_0/slot00`, `slot01`), its newest data. `1:3`: the third
+  row of File 1's data list (newest first). `LARECOMP_SAVE_DIR` applies as usual.
+- A path: the save folder holding `save.meta` (`save_0`), the folder above it, or anything inside it (a `slot0N` or
+  `fileNN` folder, a `main.bin`). It is copied into a scratch save folder, `load_save/` in the data folder, and loaded
+  from there. The game saves there for the rest of the session, so your own saves are never read or written. A path
+  inside `slot01` picks File 2; one inside a `fileNN` folder picks that data (by its save time).
+- The save is checked first (`save.meta`, and each data's `main.bin`: tag, size, checksum). A missing or damaged one
+  gives one line in the log and on the terminal, and the app starts as it would without the option.
+- Log lines start with `[loadsave]`: which file and row, each screen passed, and when it is in play. It stops pressing
+  once in play, and gives up (leaving the game as it is) if it isn't in play 90 s after boot.
 
 ### LARECOMP_WARP_AT format
 
