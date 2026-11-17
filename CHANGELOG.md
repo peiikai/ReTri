@@ -39,6 +39,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Vulkan (Windows, Linux, Android): the hearts show as red hearts, not dark hearts in a red box.
 - Vulkan: draws that read what a compute pass just wrote get it, as on Mac (EoW's interiors were darker).
 - Vulkan: the rifts read the scene's stencil and line their map up, as on Mac.
+- Memory no longer grows during play: the extra command memory the game runs out of is reused instead of leaked.
 - The start screen's game folder help names Echoes of Wisdom and ReTri, not Link's Awakening (all languages).
 - The start screen accepts EoW's game files (it said "Wrong version of the game").
 - The Shadows setting changes EoW's shadows (it only knew LA's shadow map).
