@@ -45,6 +45,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - A cold first start is much faster on Mac (shader preparation 19.5 min -> about 1 min on an M3 Max).
 - The underwater area is no longer black (shader builds run at the default priority).
 - The start screen builds EoW's game code with EoW's own layout (it used LA's).
+- The start screen's game code generator knows Echoes of Wisdom (the packaged one said "unknown game eow").
 - The start screen's shader preparation no longer fails EoW's compute shaders with surface stores.
 - The echo list and the pause screen fill windows of any shape with Aspect ratio Unlocked; the echo list's band behind
   the echoes no longer shows the world squeezed (it showed the window's whole width in the 16:9 middle).
