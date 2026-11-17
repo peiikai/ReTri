@@ -135,8 +135,11 @@ bool pace_target_30(void) {
     return false;
 #else
     extern const char *game_level_name(void);  // hle/widescreen.c
+    extern const char *warp_other_current_level(void);  // hle/warp_other.c: another game's level, from its file read
     int t = settings_fps_target();
-    return t == FPS_TARGET_30 || (t == FPS_TARGET_MIXED && !strcmp(game_level_name(), "Field"));
+    // (EoW's overworld is a level named Field too: its level file, the last one read)
+    return t == FPS_TARGET_30 ||
+           (t == FPS_TARGET_MIXED && !strcmp(game_other() ? warp_other_current_level() : game_level_name(), "Field"));
 #endif
 }
 
@@ -623,7 +626,17 @@ static bool other_try_on(void) {
         const char *e = getenv("LARECOMP_OTHER_TRY");
         on = e ? atoi(e) != 0 : OTHER_TRY_DEFAULT;
     }
-    return on;
+    return on && !g_settings.dyn_res;  // (Dynamic resolution: the FPS target holds it, rt_other_fps_limit)
+}
+
+// The frame time the frame controller calls slow (tools/gen.py: its 1/60 s, in its 30 and its 60 fps branch), as float
+// bits. With Dynamic resolution the game's own 60 / 30 choice is out of it: the FPS target holds its mode and the
+// resolution does the rest, as in LAS - target 60: no frame is slow (1 s), it stays at 60 or goes straight back;
+// target 30 (pace_target_30): every frame is, its 30 fps mode (two world steps a frame) for good. Without it: 1/60 s.
+uint32_t rt_other_fps_limit(int at30) {
+    (void)at30;
+    if (!g_settings.dyn_res) return 0x3c888889u;  // 1/60 s
+    return pace_target_30() ? 0u /* 0.0 */ : 0x3f800000u /* 1.0 */;
 }
 uint32_t rt_other_fps_window(uint32_t slow) {
     if (!other_try_on() || !slow) return slow;

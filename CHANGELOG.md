@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   Xbox pads their own letters, in the HUD, menu prompts and text. "Button icons" setting (Controls tab).
 
 ### Changed
+- With Dynamic resolution on, the FPS target sets EoW's frame rate (60, 30, or 30 outdoors and 60 indoors) and the
+  resolution does the rest, as in LAS Recomp; the game's own 60 / 30 switching is off.
 - The start screen title is in Hylia Serif, a free fan font by Omni Jacala (credited in the README).
 - The window and error dialogs are titled "ReTri", the project's new name (a play on recomp and Tri).
 - All app text says ReTri: menus, the start screen, error and crash messages, in every language. The app,

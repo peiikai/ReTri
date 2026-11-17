@@ -601,6 +601,17 @@ def main():
                         'c->x[10] = rt_other_slow60(LD32(c->x[26] + 0x500)); }'
                         f'  /* {a:#x}: ldr w10, [x26, #0x500] (60 fps: frames over 1/60 s in a row) */')
             PATCHES[0x7000347668] = _eow_slow60
+            # ... and the frame time it calls slow, 1/60 s (`movk w9, #0x3c88, lsl #16` after `mov w9, #0x8889`), in its 30
+            # and its 60 fps branch: with Dynamic resolution the FPS target decides instead (rt_other_fps_limit)
+            def _eow_fps_limit(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0x72a79109, hex(w)  # movk w9, #0x3c88, lsl #16
+                at30 = 1 if a == 0x7000347340 else 0
+                return ('{ extern uint32_t rt_other_fps_limit(int); '
+                        f'c->x[9] = rt_other_fps_limit({at30}); }}'
+                        f'  /* {a:#x}: movk w9, #0x3c88, lsl #16 (1/60 s: a slow frame, {"30" if at30 else "60"} fps branch) */')
+            for a in (0x7000347340, 0x700034756c):
+                PATCHES[a] = _eow_fps_limit
             # (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
             # `movz wD, #0x8e39; movk wD, #0x3fe3, lsl #16`: the movk gets the runtime's aspect instead
             eow_aspect = [0x700033d32c, 0x700033e6f8, 0x7000348b70, 0x7000351e20, 0x7000c2bd3c, 0x7000c2c8b4,
