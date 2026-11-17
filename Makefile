@@ -12,6 +12,15 @@ PLATFORM := linux
 else
 PLATFORM ?= macos
 endif
+# (Windows) Started from a shell that doesn't pass them on, MSYS2's make runs recipes with TMP, TEMP and USERPROFILE
+# empty: clang couldn't write the response file it gives lld ("unable to make temporary file"), dlltool fell back to
+# C:\WINDOWS (FFmpeg's import libraries came out empty) and make dist's home-path check was skipped. Set when empty.
+ifeq ($(PLATFORM),windows)
+export TMP := $(or $(TMP),$(shell cygpath -w /tmp))
+export TEMP := $(or $(TEMP),$(TMP))
+# (CSIDL_PROFILE: C:\Users\<name>; ~ is MSYS2's own home. No comment after a value: make keeps the spaces before it)
+export USERPROFILE := $(or $(USERPROFILE),$(shell cygpath -w -F 40))
+endif
 
 # iOS: the same generated code with the moving guest window (DYN_BASE=1 below: an iOS process has 58 GB of address
 # space, but the kernel's reserves cut it into a few free gaps that move with every launch - runtime/rt.h packs the
@@ -267,8 +276,9 @@ $(B)/inc/shader_variants.inc: runtime/nvn/shader_variants.txt
 	@mkdir -p $(dir $@)
 	(LC_ALL=C tr -d '\r' < $< | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$$/\\n"/'; echo '""') > $@
 $(B)/rt/nvn/shader_prep.o: $(B)/inc/shader_variants.inc
-# EoW's own list, from the shader tours (tools/shader_list_merge.py), in every build: the iOS and Android builds'
-# generated code is generated-dyn, so it can't go by the folder's name (EOW_SHADER_LIST= builds without it)
+# EoW's own list, from the shader tours (tools/shader_list_merge.py), in every build: a release (make app, make dist)
+# holds no game code and the iOS and Android builds' is generated-dyn, so it can't go by GEN or the folder's name
+# (EOW_SHADER_LIST= builds without it)
 EOW_SHADER_LIST ?= runtime/nvn/shader_variants_eow.txt
 $(B)/inc/shader_variants_other.inc: $(wildcard $(EOW_SHADER_LIST))
 	@mkdir -p $(dir $@)
@@ -298,8 +308,15 @@ $(EXE): $(RT_OBJ) $(BACKEND_OBJ) $(UI_OBJ) $(IMGUI_OBJ) $(MINIZ_OBJ)
 	mv -f $(dir $@)link/$(notdir $@) $@
 
 # its id file (<library>.id) says what it was built from without loading it (runtime/gamelib.c)
+# (Windows: EoW's ~1430 objects go past the 32 KB command line - "Argument list too long" - so they go in a response
+# file. $(file) needs make 4; macOS's is 3.81, where the command line is long enough.)
 $(GAMELIB): $(GEN_OBJ) | $(EXE)
+ifeq ($(PLATFORM),windows)
+	$(file >$@.rsp,$^)
+	$(CC) $(GAMELIB_LDFLAGS) -o $@.tmp @$@.rsp
+else
 	$(CC) $(GAMELIB_LDFLAGS) -o $@.tmp $^
+endif
 	mv -f $@.tmp $@
 	echo $(GAMELIB_FULL_ID) > $@.id
 
@@ -332,9 +349,17 @@ $(B)/rt/zipfile.o: RTFLAGS += -I$(MINIZ)
 # Python: tools/venv (macOS, Linux: bin/python, Windows: Scripts/python.exe)
 PY := $(firstword $(wildcard tools/venv/bin/python) $(wildcard tools/venv/Scripts/python.exe))
 
+# GAME=eow (the default when GEN names it, as GEN=generated-eow): EoW's sdk loads higher than LA's
+# (runtime/game_addresses/games.h). EXTRACTED: the folder with exefs/ (default ./extracted; an absolute path such as
+# C:/games/eow works on Windows too, as the generator's Python reads it).
+GAME      ?= $(if $(findstring eow,$(GEN)),eow,la)
+EXTRACTED ?= extracted
+GEN_XD   := $(if $(or $(filter /%,$(EXTRACTED)),$(findstring :,$(EXTRACTED))),$(EXTRACTED),../$(EXTRACTED))
+GEN_SDK_BASE := $(if $(filter eow,$(GAME)),0x7008000000,0x7004000000)
+GENGAME  := $(if $(filter la,$(GAME)),,--game $(GAME))
 gen:
-	cd tools && ../$(PY) gen.py sdk ../extracted/exefs/sdk 0x7004000000 ../$(GEN)/sdk --hle ../runtime/hle/hle_symbols.txt $(GENSIMD)
-	cd tools && ../$(PY) gen.py main ../extracted/exefs/main 0x7000000000 ../$(GEN)/main $(GENSIMD)
+	cd tools && ../$(PY) gen.py sdk "$(GEN_XD)/exefs/sdk" $(GEN_SDK_BASE) ../$(GEN)/sdk --hle ../runtime/hle/hle_symbols.txt $(GENSIMD) $(GENGAME)
+	cd tools && ../$(PY) gen.py main "$(GEN_XD)/exefs/main" 0x7000000000 ../$(GEN)/main $(GENSIMD) $(GENGAME)
 
 gen-objs: $(GEN_OBJ)
 

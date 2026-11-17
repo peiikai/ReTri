@@ -19,6 +19,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   control movable and resizable in the layout editor. A controller hides them, a touch brings them back.
 - Button icons follow the controller, as in LAS Recomp: PlayStation pads show Cross, Circle, Square and Triangle,
   Xbox pads their own letters, in the HUD, menu prompts and text. "Button icons" setting (Controls tab).
+- Windows (x86-64, Vulkan): plays Echoes of Wisdom at 60 fps, with the same picture as on Mac. The zip sets the game
+  up from your own extracted files and builds the game code on your PC (about an hour the first time).
 - The EoW touch controls look like the inventory screen's background (its felt and colour, the item slots'
   edges, see-through and lit when pressed as in LAS), laid out as in LAS. Y shows the echo or item on the HUD's Y slot.
 - Phones and tablets, EoW: the hearts go to the screen's upper left corner, the mini map to the upper right with the
@@ -53,6 +55,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- Vulkan (Windows, Linux, Android): the hearts show as red hearts, not dark hearts in a red box.
+- Vulkan: draws that read what a compute pass just wrote get it, as on Mac (EoW's interiors were darker).
+- Vulkan: the rifts read the scene's stencil and line their map up, as on Mac.
 - Rift edges are clean lines instead of steps: the rift map now uses the game's final, closer view, as on the Switch.
 - On iPhone, iPad and Android the game no longer stays at 30 fps after a brief dip: it tries 60 again after a
   second (the GPU slows its clock at 30, and the game read that as too slow for 60).
@@ -66,6 +71,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The app shows its version as v0.1.0 and looks for updates on EoW Recomp's own releases, not LAS Recomp's.
 - A cold first start is much faster on Mac (shader preparation 19.5 min -> about 1 min on an M3 Max).
 - The underwater area is no longer black (shader builds run at the default priority).
+- The start screen builds EoW's game code with EoW's own layout (it used LA's).
+- The start screen's game code generator knows Echoes of Wisdom (the packaged one said "unknown game eow").
+- The start screen's shader preparation no longer fails EoW's compute shaders with surface stores.
 - Building the game code no longer spends half an hour on one file (a function the game rarely runs is built
   without optimisation).
 - The echo list and the pause screen fill windows of any shape with Aspect ratio Unlocked; the echo list's band behind

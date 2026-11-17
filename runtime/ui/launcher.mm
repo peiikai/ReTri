@@ -2465,7 +2465,9 @@ extern "C" void launcher_run(const char *root) {
     // An update: the game files are there and only the game code is out of date - rebuilt at once, by itself (only
     // the pieces that changed: runtime/gamebuild.c), with the progress bar; then the start screen as usual. A failure
     // stays on the setup page with what went wrong.
-    if (!status.empty() && check_copied_files(g_root).empty() && gamebuild_available() &&
+    // (not with a setup already started above - the test hooks: two setups at once, one read exefs while the other
+    // relinked it, "the game files' exefs/main is missing", seen testing the Windows zip)
+    if (!g_busy && !status.empty() && check_copied_files(g_root).empty() && gamebuild_available() &&
         !getenv("LARECOMP_LAUNCHER_DELETE")) {
         fprintf(stderr, "[launcher] game code out of date: updating it\n");
         g_src.clear();
