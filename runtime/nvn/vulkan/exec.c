@@ -3800,6 +3800,19 @@ static VkSpan drv_dedupe(int stage, uint64_t size) {
 // Constant buffer k of a stage (renderer.m bind_cbufs), copied into transient memory.
 // EoW's rift: the map's draw (its vertex cb4 rows 0-1) and the mask's (fragment cb4 rows 33-34): see cbuf_info.
 // LARECOMP_RIFT_ROWS_OFF=1: the game's rows as they are.
+// (debug) LARECOMP_LOG_GW=1: the [gw] lines, 100 each from the start; LARECOMP_LOG_GW_FROM=<frame>: up to 600 from that
+// frame on, each with its frame and fragment shader (the frames that went wrong, not the first second)
+uint64_t renderer_exec_frame(void);
+static bool gw_log(int *n) {
+    static int on = -1;
+    static long from = -1;
+    if (on < 0) { on = getenv("LARECOMP_LOG_GW") != NULL; from = getenv("LARECOMP_LOG_GW_FROM") ? atol(getenv("LARECOMP_LOG_GW_FROM")) : -1; }
+    if (!on) return false;
+    if (from < 0) return (*n)++ < 100;
+    static int total;
+    return (long)renderer_exec_frame() >= from && total++ < 600;
+}
+#define GW_AT() (unsigned long long)renderer_exec_frame(), (unsigned long long)g_cur_fs_hash
 #define RIFT_MAP_FS 0xd6c58a42e55a9f9eull
 #define RIFT_MASK_FS 0x44b584f0d922d49dull
 static bool rift_rows_on(void) {
@@ -3869,6 +3882,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
         if (rift_rows_on() && stage == 0 && k == 4 && g_cur_fs_hash == RIFT_MAP_FS && r.size >= 32) {
             memcpy(map_rows, (const void *)(uintptr_t)r.addr, 32);
             map_frame = renderer_exec_frame();
+            { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: rift map cb4 %llx+%llu (CPU copy, pending dispatches %d, copies %d)\n", GW_AT(), (unsigned long long)r.addr, (unsigned long long)size, ngwp, ngwc); }
             return ubo_span(guest_copy(r.addr, size), size);  // (the map with these rows too: not a GPU copy)
         }
         if (rift_rows_on() && stage == 1 && k == 4 && g_cur_fs_hash == RIFT_MASK_FS && size >= 35 * 16 &&
@@ -3876,6 +3890,7 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
             static uint8_t buf[0x10000];
             memcpy(buf, (const void *)(uintptr_t)r.addr, size);
             float *row = (float *)buf + 33 * 4;
+            { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: rift mask cb4 %llx+%llu rows 33-34 from the map (pending dispatches %d, copies %d)\n", GW_AT(), (unsigned long long)r.addr, (unsigned long long)size, ngwp, ngwc); }
             for (int i = 0; i < 8; i++) row[i] = map_rows[i] * 0.5f + ((i & 3) == 3 ? 0.5f : 0.0f);
             return ubo_span(vk_transient_copy(buf, size, 256), size);
         }
@@ -3887,11 +3902,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     }
     VkDescriptorBufferInfo gb;
     if (ngwc && gwc_find(r.addr, size, &gb)) {  // (a storing dispatch's results this submission: the GPU's copy)
-        if (getenv("LARECOMP_LOG_GW")) {
-            static int n;
-            if (n++ < 100) LOG("[gw] stage %d cb%d %llx+%llu: the GPU's copy of a dispatch's results\n", stage, k,
-                               (unsigned long long)r.addr, (unsigned long long)size);
-        }
+        { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: stage %d cb%d %llx+%llu: the GPU's copy of a dispatch's results\n", GW_AT(), stage, k,
+                                             (unsigned long long)r.addr, (unsigned long long)size); }
         return gb;
     }
     if (gc_lazy && si->uses_gmem && scan_once) return ubo_span(guest_copy_ex(r.addr, size, true), size);
@@ -6529,6 +6541,8 @@ static void gwc_note(VkCommandBuffer cb, uint64_t a, uint64_t n, uint64_t slot_s
     VkBufferCopy c = {so, d.off + (a & 255), m};
     rec_CmdCopyBuffer(cb, sb, d.buf, 1, &c);
     gwc[ngwc].addr = a, gwc[ngwc].size = m, gwc[ngwc].buf = d.buf, gwc[ngwc++].off = c.dstOffset;
+    { static int nl; if (gw_log(&nl)) LOG("[gw] frame %llu: dispatch cs %llx stored to %llx+%llu: GPU copy %d\n", (unsigned long long)renderer_exec_frame(),
+                                         (unsigned long long)st.program->stages[5].code_addr, (unsigned long long)a, (unsigned long long)m, ngwc); }
 }
 // (gwc, shader global memory copies) Does any slot hold part of [addr, addr + size)? The GPU writes only there: a range
 // outside every slot (past a slot, in GWP_MIN's margin) can't hold a dispatch's results, and needs no wait
@@ -6585,11 +6599,8 @@ static void gwp_wait_k(int stage, const ShaderInfo *si, uint32_t kmask, bool no_
         bool hit = gwp_full;
         for (int j = 0; j < ngwp && !hit; j++) hit = r.addr < gwp[j].addr + gwp[j].size && gwp[j].addr < r.addr + size;
         if (!hit) continue;
-        if (getenv("LARECOMP_LOG_GW")) {
-            static int n;
-            if (n++ < 100) LOG("[gw] stage %d cb%d %llx+%llu: written by a dispatch not run yet - waiting\n", stage, k,
-                               (unsigned long long)r.addr, (unsigned long long)size);
-        }
+        { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: stage %d cb%d %llx+%llu: written by a dispatch not run yet - waiting\n", GW_AT(), stage, k,
+                                             (unsigned long long)r.addr, (unsigned long long)size); }
         wait_why = "uniforms a dispatch writes";
         renderer_flush();
         gw_inval_done(vk_completed_seq());  // (non-coherent heap: the dispatches' writes, seen by the CPU)
