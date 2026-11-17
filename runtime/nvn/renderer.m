@@ -2685,8 +2685,8 @@ static void bind_textures(int stage, ShaderInfo *si) {
                 extern int renderer_texpatch_of(NvnTexture *t);
                 extern int texpatch_heart_kind(int id);
                 int id = renderer_texpatch_of(e->tex);
-                extern void texpatch_note_draw(int id);
-                texpatch_note_draw(id);
+                extern void texpatch_note_draw_at(int id, const float *ui, uint64_t size);
+                texpatch_note_draw_at(id, (const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size);
                 if (!draw_heart) draw_heart = texpatch_heart_kind(id);
                 recolour_add(draw_recolour, recolour_class_of(id));
                 if (recolour_name(id)) {

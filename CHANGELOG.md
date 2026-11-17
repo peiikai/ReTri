@@ -16,6 +16,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   control movable and resizable in the layout editor. A controller hides them, a touch brings them back.
 - Button icons follow the controller, as in LAS Recomp: PlayStation pads show Cross, Circle, Square and Triangle,
   Xbox pads their own letters, in the HUD, menu prompts and text. "Button icons" setting (Controls tab).
+- The EoW touch controls look like the inventory screen's background (its felt and colour, the item slots'
+  edges, see-through and lit when pressed as in LAS), laid out as in LAS. Y shows the echo or item on the HUD's Y slot.
+- Phones and tablets, EoW: the hearts go to the screen's upper left corner, the mini map to the upper right with the
+  Y / X buttons beside it. "Hide X/Y item HUD" works for EoW, and the touch X shows the HUD's X item.
+- Phones and tablets, EoW: a drag on the game's screen moves the camera, as the right stick.
 
 ### Changed
 - The start screen title is in Hylia Serif, a free fan font by Omni Jacala (credited in the README).
