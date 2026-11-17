@@ -7,6 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- Controls > Configure inputs > ReTri Menu: choose the controller buttons for Confirm, Back, Option and Confirm text
+  in ReTri's own menus. Tabs (L / R) and the D-pad stay fixed. Until you change one, the menus follow the Confirm
+  button setting.
 - Unlocked aspect ratio: the camera fills wide windows.
 - Logging of shader records the shipped list lacks, once per run.
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
@@ -25,6 +28,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 - With Dynamic resolution on, the FPS target sets EoW's frame rate (60, 30, or 30 outdoors and 60 indoors) and the
   resolution does the rest, as in LAS Recomp; the game's own 60 / 30 switching is off.
+- "Button layout" is now "Confirm button" (Right or Bottom). It applies the same way to every controller, in the
+  game and in ReTri's menus. Before, ReTri's menus could confirm with the other button when "Button icons" was set
+  to a different controller style than the one plugged in.
 - The start screen title is in Hylia Serif, a free fan font by Omni Jacala (credited in the README).
 - The window and error dialogs are titled "ReTri", the project's new name (a play on recomp and Tri).
 - All app text says ReTri: menus, the start screen, error and crash messages, in every language. The app,
@@ -49,6 +55,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 - On iPhone, iPad and Android the game no longer stays at 30 fps after a brief dip: it tries 60 again after a
   second (the GPU slows its clock at 30, and the game read that as too slow for 60).
+- Settings tabs keep their box under the mouse or the controller cursor (it was see-through).
 - Memory no longer grows during play: the extra command memory the game runs out of is reused instead of leaked.
 - The start screen's game folder help names Echoes of Wisdom and ReTri, not Link's Awakening (all languages).
 - The start screen accepts EoW's game files (it said "Wrong version of the game").
