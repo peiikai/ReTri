@@ -41,13 +41,13 @@ void input_script_state(uint64_t *buttons, int32_t *lx, int32_t *ly);
 bool menu_input_captured(void);      // runtime/ui/menu.mm
 void menu_toggle(void);
 int game_in_play(void);              // runtime/hle/warp.c
-int inventory_items_cursor(void);    // runtime/ui/inventory_overlay.mm
-bool tracker_map_page_shown(void);   // runtime/ui/tracker_overlay.mm
-bool chaos_dgnmap_shown(void);       // runtime/ui/chaos_overlay.mm
-bool pause_menu_shown(void);         // runtime/ui/inventory_overlay.mm
+int inventory_items_cursor(void);    // runtime/ui/pause_pages.mm
+bool map_page_shown(void);           // runtime/ui/pause_pages.mm
+bool dgnmap_shown(void);
+bool pause_menu_shown(void);         // runtime/ui/pause_pages.mm
 int texpatch_title_screen(void);     // runtime/nvn/texpatch.c
 }
-ImTextureID ui_game_icon(const char *name);  // runtime/ui/triforce_icons.mm
+ImTextureID ui_game_icon(const char *name);  // runtime/ui/game_icons.mm
 
 enum { BTN_A = 0, BTN_B, BTN_X, BTN_Y, BTN_L = 6, BTN_R, BTN_ZL, BTN_ZR, BTN_PLUS, BTN_MINUS,
        BTN_LEFT, BTN_UP, BTN_RIGHT, BTN_DOWN };  // (input.c's bits)
@@ -294,7 +294,7 @@ static int file_at(float x, float y) {
 }
 // The file select's "load this file?" is up: a file was tapped and the file select is still shown
 static bool g_file_picked;
-extern "C" void file_select_jump(int file);  // runtime/ui/inventory_overlay.mm
+extern "C" void file_select_jump(int file);  // runtime/ui/pause_pages.mm
 
 // What the game shows before play, from what it draws: 1 the title, 2 the file select, 0 else (a movie, loading)
 static int title_screen(void) {
@@ -326,7 +326,7 @@ static void title_tap(float x, float y) {
 
 // (each frame drawn) the presses for taps: the queue, then the items cursor to the tapped slot - a press (60 ms) whose
 // move the game takes straight there (inventory_items_jump), again after 60 ms let go until the game's cursor is there
-extern "C" void inventory_items_jump(int cell);  // runtime/ui/inventory_overlay.mm
+extern "C" void inventory_items_jump(int cell);  // runtime/ui/pause_pages.mm
 static void nav_tick(void) {
     static double phase_until;
     static uint64_t phase_bits;
@@ -559,7 +559,7 @@ static int context(void) {
     if (!game_in_play()) return X_TITLE;
     if (inventory_items_cursor() >= 0) return X_ITEMS;
     // (the Map and System pages, and the turn between pages: the menu's buttons - L / R turn pages, their letters)
-    if (tracker_map_page_shown() || chaos_dgnmap_shown() || pause_menu_shown()) return X_MAP;
+    if (map_page_shown() || dgnmap_shown() || pause_menu_shown()) return X_MAP;
     return X_PLAY;
 }
 

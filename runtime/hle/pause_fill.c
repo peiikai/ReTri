@@ -10,11 +10,15 @@
 //   HUD: an unmoved point lands on the same pixels), their edges at the box's border moved out to the window's and
 //   their texture coordinates carried on at the same rate. Inside the box nothing changes;
 // - everything else (items, text, the gold lines) stays in the box.
+// Another game (EoW): the echo list and the pause screen blur a 480x270 copy; their darkening comes in four pieces, one
+// per corner, each reaching two of the box's edges, so large panes reaching two edges go out too. The echo list's band
+// (a screen capture with the echoes drawn into it) stays in the box: runtime/nvn/renderer.m capture_from_box.
 // In a boxed room (interiors, dungeons) the frame is shown whole rather than cropped to 16:9, its bars cleared after
 // the blurred scene (hud_corners.c's bars).
 #include <stdbool.h>
 #include <string.h>
 
+#include "../game_addresses.h"
 #include "../hle.h"
 #include "../settings.h"
 
@@ -28,9 +32,10 @@ static volatile uint64_t g_frame = ~0ull;  // the frame being translated drew th
 bool pause_fill_frame(uint64_t frame) { return g_frame != ~0ull && frame >= g_frame && frame - g_frame <= 2; }
 
 // (render thread) a composite sampling a w x h texture: the pause screen's blurred scene?
+// (another game: EoW's echo list and pause screen blur a 480x270 copy of the window-shaped frame; it has no LA play state)
 bool pause_fill_backdrop(int w, int h) {
-    if (w != 192 || h != 108 || g_settings.aspect != ASPECT_UNLOCKED || ENV("LARECOMP_NO_PAUSE_FILL") || !game_in_play())
-        return false;
+    bool ours = game_other() ? w == 480 && h == 270 : w == 192 && h == 108 && game_in_play();
+    if (!ours || g_settings.aspect != ASPECT_UNLOCKED || ENV("LARECOMP_NO_PAUSE_FILL")) return false;
     g_frame = renderer_exec_frame();
     return true;
 }
@@ -77,7 +82,11 @@ const void *pause_fill_ubo(const float *u, uint64_t size, float k, float ky) {
     // edges of the box (the window pane's two pieces: the frame's right end reaches three), so a piece sliding in at an
     // edge isn't smeared
     bool tl = xl <= -0.99f, tr = xr >= 0.99f, tlo = ylo <= -0.99f, thi = yhi >= 0.99f;
-    if (tl + tr + tlo + thi < 3) return NULL;
+    // (another game: EoW's menus darken the box with four pieces, each in a corner and reaching two edges, and draw full-width
+    // bands; large panes reaching two edges go out too - 15% of the box or more, so a small piece in a corner stays)
+    int edges = tl + tr + tlo + thi;
+    bool big = (xr - xl) * (yhi - ylo) >= 4 * 0.15f;
+    if (edges < 3 && !(game_other() && edges == 2 && big)) return NULL;
     float el = 0, er = 0, elo = 0, ehi = 0;  // in ndc of the box
     if (tl) el = xl + k + 0.01f;
     if (tr) er = k + 0.01f - xr;

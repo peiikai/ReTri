@@ -1,10 +1,10 @@
 #!/bin/bash
 # tools/linux/package.sh <x86_64|aarch64> (inside a build container, tools/linux/appimage.sh: the AppImage's own arch
 # when the host has it, else amd64 cross-compiling): the game built
-# against build/linux/<arch>/deps and the seed generator helper (tools/linux/rando_helper.sh) put together
-# as an AppDir and packed by appimagetool: build/dist/EoW Recomp-<version>-linux-<arch>.AppImage
+# against build/linux/<arch>/deps and the game code generator helper (tools/linux/gen_helper.sh) put together
+# as an AppDir and packed by appimagetool: build/dist/ReTri-<version>-linux-<arch>.AppImage
 # (named like the macOS / Windows releases; GitHub shows it as LAS.Recomp-<version>-linux-<arch>.AppImage).
-# Shipped next to the executable (usr/bin, where runtime/paths.c rt_resource looks): rando-gen/, what the start screen
+# Shipped next to the executable (usr/bin, where runtime/paths.c rt_resource looks): what the start screen
 # builds the game code with on the player's machine (runtime/gamebuild.c: lasgen/, zig/ from tools/fetch_zig.sh,
 # gamelib-src/), the window icon, the start screen font. No game code: that's built from the player's own files. usr/lib: the libraries from deps/ only - glibc, libstdc++, the Vulkan loader and the
 # GPU drivers are the system's (a bundled loader would not find the user's drivers). No game files or fonts.
@@ -16,7 +16,7 @@ P=$L/deps
 B=$L/game
 APPDIR=$L/AppDir
 VERSION=$(sed -n 's/^#define LARECOMP_VERSION "\(.*\)"/\1/p' runtime/ui/launcher.mm)
-OUT="build/dist/EoW Recomp-$VERSION-linux-$ARCH.AppImage"
+OUT="build/dist/ReTri-$VERSION-linux-$ARCH.AppImage"
 JOBS=$(nproc)
 
 tools/linux/build_deps.sh "$ARCH"
@@ -42,14 +42,14 @@ llvm-strip --strip-debug "$APPDIR/usr/bin/eowrecomp"  # (symbols stay: crash bac
 cp docs/icon/icon_1024.png "$APPDIR/usr/bin/icon.png"
 cp third_party/fonts/Baloo2/Baloo2-SemiBold.ttf "$APPDIR/usr/bin/"  # (start screen font, OFL)
 cp third_party/fonts/Baloo2/OFL.txt "$APPDIR/usr/bin/Baloo2-OFL.txt"
+cp third_party/fonts/HyliaSerif/HyliaSerifBeta-Regular.otf "$APPDIR/usr/bin/"  # (start screen title)
+cp third_party/fonts/HyliaSerif/README.md "$APPDIR/usr/bin/HyliaSerif-README.md"
 cp third_party/fonts/BIZUDPGothic/BIZUDPGothic-Regular.ttf "$APPDIR/usr/bin/"  # (game text font on Linux, OFL)
 cp third_party/fonts/BIZUDPGothic/OFL.txt "$APPDIR/usr/bin/BIZUDPGothic-OFL.txt"
 cp third_party/fonts/DejaVu/DejaVuSans.ttf third_party/fonts/DejaVu/DejaVuSans-Bold.ttf "$APPDIR/usr/bin/"  # (last-resort fonts, free license)
 cp third_party/fonts/DejaVu/LICENSE "$APPDIR/usr/bin/DejaVu-LICENSE.txt"
 cp README.md LICENSE "$APPDIR/usr/bin/"  # (licenses and source links of the bundled components: README "License")
-[ -d "$L/helper/rando-gen" ] || { echo "no seed generator helper: tools/linux/rando_helper.sh $ARCH first"; exit 1; }
-cp -R "$L/helper/rando-gen" "$APPDIR/usr/bin/"
-[ -d "$L/helper/lasgen" ] || { echo "no game code generator helper: tools/linux/rando_helper.sh $ARCH first"; exit 1; }
+[ -d "$L/helper/lasgen" ] || { echo "no game code generator helper: tools/linux/gen_helper.sh $ARCH first"; exit 1; }
 cp -R "$L/helper/lasgen" build/zig "$APPDIR/usr/bin/"
 mkdir "$APPDIR/usr/bin/gamelib-src"
 cp runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/gamelib_entry.c runtime/hle/hle_symbols.txt \

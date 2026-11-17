@@ -35,7 +35,7 @@ void weather_scene_vp(const float *vp, uint64_t frame) {
     g_cam_frame = frame, g_cam_view = false;
 }
 
-// LARECOMP_WEATHER=off|rain|snow|storm|blizzard|random (test): instead of the setting, and of a seed's own (-1: none)
+// LARECOMP_WEATHER=off|rain|snow|storm|blizzard|random (test): instead of the setting (-1: none)
 static int env_weather(void) {
     static int env = -2;
     if (env == -2) {
@@ -58,7 +58,6 @@ static bool snowy(int kind) { return kind == WEATHER_SNOW || kind == WEATHER_BLI
 static bool g_outdoors;
 
 int weather_current(void) {
-    if (weather_cycle_on()) return weather_cycle_kind(NULL);
     int s = setting();
     return s == WEATHER_RANDOM ? g_random : s;
 }
@@ -223,12 +222,11 @@ void weather_player_tick(Cpu *c, uint64_t frame) {
 }
 static void strike_tick(Cpu *c);
 void weather_player_tick_(Cpu *c, uint64_t frame) {
-    weather_cycle_tick();
     int kind = weather_current();
     if (!g_outdoors || !(snowy(kind) || kind == WEATHER_STORM) || !level_is_field()) return;
     if (kind == WEATHER_STORM) strike_tick(c);
-    extern uint64_t doorjump_player(uint64_t frame);  // runtime/hle/doorjump.c (the PlayerCollision component)
-    uint64_t pc = doorjump_player(frame);
+    extern uint64_t player_find(uint64_t frame);  // runtime/hle/player.c (the PlayerCollision component)
+    uint64_t pc = player_find(frame);
     if (!pc) return;
     const float *p = (const float *)(uintptr_t)(pc + 0x80);
     pthread_mutex_lock(&g_link_lock);
@@ -437,8 +435,8 @@ bool weather_snow_cover(SnowFrame *s, const float vp[16]) {
 }
 
 // ---- a storm's lightning strikes (weather.h): every 20-40 s a bolt at a spot near Link - half the time his own,
-// ~1 s ahead (a glow and crackling sparks there). Looks only (the Cosmetics tab's weather, a seed's own); with
-// weather_lightning_harm on (for a randomizer weather option to come), Link still standing there when it strikes
+// ~1 s ahead (a glow and crackling sparks there). Looks only (the Cosmetics tab's weather); with
+// weather_lightning_harm on (off by default; LARECOMP_WEATHER_HARM=1), Link still standing there when it strikes
 // gets a Buzz Blob's shock (the game's own: strike_tick, game thread)
 static struct {
     float x, y, z;
@@ -533,9 +531,9 @@ static void storm_strikes(void) {
         float p[3];
         bool hit = link_now(p) && hypotf(p[0] - g_strike.x, p[2] - g_strike.z) < 0.9f &&
                    __atomic_load_n(&g_link_ok, __ATOMIC_ACQUIRE);
-        static int harm_env = -1;  // LARECOMP_WEATHER_HARM=1 (test): the shock on, as the randomizer's option will
+        static int harm_env = -1;  // LARECOMP_WEATHER_HARM=1 (test): the shock on
         if (harm_env < 0) harm_env = getenv("LARECOMP_WEATHER_HARM") != NULL;
-        bool harm = g_harm || harm_env || weather_cycle_on();  // (the seed's weather cycle: its storms hurt)
+        bool harm = g_harm || harm_env;
         if (hit && harm) __atomic_store_n(&g_shock, 1, __ATOMIC_RELEASE);
         if (hit) LOG("[weather] lightning hit Link%s\n", harm ? "" : " (looks only: no shock)");
     }
@@ -620,8 +618,7 @@ static void strike_tick(Cpu *c) {
     if (__atomic_exchange_n(&g_shock, 0, __ATOMIC_ACQ_REL) && ok) link_shock(c);
 }
 
-// ---- a blizzard's gusts pushing Link (for a randomizer option to come: off by default - the Cosmetics tab's weather is
-// looks only). tools/patches.py WIND_PUSH_SITE: in his move, the frame's displacement summed, before the collision
+// ---- a blizzard's gusts pushing Link (off by default - the Cosmetics tab's weather is looks only). tools/patches.py WIND_PUSH_SITE: in his move, the frame's displacement summed, before the collision
 // move - a share of the wind's velocity added there (walls and ledges stop it like his walking; the stick works
 // against it). Only on the overworld in states 0/1/2/10/26 (link_free), not in a pit's pull or a knockback; weaker
 // on slow ground (tall grass, shallow water) so a headwind never walks him backwards there
@@ -629,9 +626,9 @@ static bool g_push = false;
 void weather_wind_push(bool on) { g_push = on; }
 
 void rt_wind_push(Cpu *c) {
-    static int env = -1;  // LARECOMP_WEATHER_PUSH=1 (test): on, as the randomizer's option will
+    static int env = -1;  // LARECOMP_WEATHER_PUSH=1 (test): on
     if (env < 0) env = getenv("LARECOMP_WEATHER_PUSH") != NULL;
-    if (!(g_push || env || weather_cycle_on()) || weather_current() != WEATHER_BLIZZARD || !g_outdoors) return;
+    if (!(g_push || env) || weather_current() != WEATHER_BLIZZARD || !g_outdoors) return;
     uint64_t link = c->x[19];
     uint8_t id = LD8(link + 0x4ed);
     if (id >= 32 || !((1u << id) & (1u << 0 | 1u << 1 | 1u << 2 | 1u << 10 | 1u << 26))) return;
@@ -720,8 +717,8 @@ bool weather_frame(WeatherFrame *f, uint64_t frame, const float probe[WEATHER_PR
         if (setting() == WEATHER_RANDOM) LOG("[weather] random: %d\n", g_random);
     }
     g_outdoors = field;
-    float level = 1;  // (the weather cycle: a change fading the old weather out and the new one in)
-    int kind = weather_cycle_on() ? weather_cycle_kind(&level) : weather_current();
+    float level = 1;  // (how strongly the weather shows: 0..1)
+    int kind = weather_current();
     if (field && dt > 0 && dt < 0.25) {  // the snow on the ground: builds while it snows, melts otherwise
         if (g_build < 0) g_build = env_f("LARECOMP_SNOW_BUILD", 90), g_cover = env_f("LARECOMP_SNOW_COVER", 0);  // (test)
         g_cover = snowy(kind) ? fminf(1, g_cover + (float)dt / (kind == WEATHER_BLIZZARD ? g_build * 0.45f : g_build))  // (a blizzard: faster)

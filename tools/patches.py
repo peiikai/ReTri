@@ -122,71 +122,6 @@ def _warp_request(gen, a):
 for _a in WARP_REQUEST_SITES:
     PATCHES[_a] = _warp_request
 
-# Blaino's knock-out: Link flies up and a countdown (main+0xd97df0, +0xb8) starts MightPunchCrashOut - fade, then a
-# restart warp to his ring's start. On the Field there's no ring: no event (runtime/hle/miniboss.c), Link falls back.
-CRASHOUT_SITE = A.CRASHOUT_SITE
-
-
-
-# Gohma on the Field (seeds): its moves walk / charge along a track - a heading of +-90 degrees (+0x15ec / +0x15f0,
-# the shared movement controller at +0x15c0 turns to it and the mover moves it, walls and all) toward a track end,
-# snapping onto the end when there (main+0x399550). The Field has no track: the heading points at Link and there is
-# no end - each move runs until its own timer (runtime/hle/miniboss.c).
-GOHMA_HEADING_SITES = (A.GOHMA_HEADING_SITES_0, A.GOHMA_HEADING_SITES_1)  # str w8, [x19, #0x15ec] (then the same to +0x15f0)
-GOHMA_ARRIVED_SITE = A.GOHMA_ARRIVED_SITE  # ldr q0, [x19, #0x1600] (the track end, against Gohma's spot)
-
-
-# Master Stalfos' body collision (CharaBodyCollision, main+0x1841c0 from his constructor) blocks Link - in his arena,
-# fine; on the Field Link couldn't damage-boost past him as past the other mini-bosses. Its flag (x6 -> sp+0x328) off
-# there (seeds, level Field).
-MSTALFOS_BODY_SITE = A.MSTALFOS_BODY_SITE  # mov w8, #1
-
-
-
-# Master Stalfos' jump (state 4 exec) sets its vertical speed to 6 * sin(phase) - height: an arc from his arena's floor
-# (height 0). On the Field the ground is higher - he dropped through it. There the arc starts from his takeoff height
-# (his movement component [+0x1160] + 0x28c, stored as the jump starts); in the arena that is 0 anyway.
-MSTALFOS_JUMP_SITE = A.MSTALFOS_JUMP_SITE  # fsub s0, s0, s1
-
-
-
-# Moblin Chief deletes himself in his init (main+0x1f8af0) unless a story bit is set (player status +0xac bit 7 - his
-# hideout's time); on the Field (seeds) that check is skipped. The defeated check before it stays.
-MCHIEF_STORY_SITE = A.MCHIEF_STORY_SITE  # tbnz w8, #7, 0x70001f8b58
-
-
-# Generated dungeons (runtime/hle/chamber.c): every level jump goes through the request processor main+0x81ba80
-# (x0 = request); its prologue reports the request so jumps into Tail Cave can be redirected.
-LEVEL_REQUEST_SITE = A.LEVEL_REQUEST_SITE
-
-
-def _level_request(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0xd10203ff, hex(w)  # sub sp, sp, #0x80
-    return ('{ extern void rt_level_request(Cpu *); rt_level_request(c); c->sp -= 0x80; }'
-            f'  /* {a:#x}: sub sp, sp, #0x80 (level-jump request) */')
-
-
-PATCHES[LEVEL_REQUEST_SITE] = _level_request
-
-
-# Chamber staircase exit prompt ("Return to Arranging/List" vs "Back to Adventuring"): main+0x7f1540 opens it with
-# `bl main+0xf05280` at 0x7f15e0; the callback only stores the chosen option at [main+0x1cb9fb8]+0x18f8 (0 = leave).
-# In a generated dungeon the dialog is skipped and 0 stored, so the staircase leaves directly (runtime/hle/chamber.c).
-ADV_EXIT_DIALOG_SITE = A.ADV_EXIT_DIALOG_SITE
-
-
-def _adv_exit_dialog(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0x9402_5d28 or (w >> 26) == 0x25, hex(w)  # bl
-    return addr_text('{ extern int rt_adv_exit_choice(void); extern void f_@ADV_EXIT_DIALOG_TARGET@(Cpu *); '
-            'if (!rt_adv_exit_choice()) { c->x[30] = 0x@ADV_EXIT_DIALOG_RETURN@ull; f_@ADV_EXIT_DIALOG_TARGET@(c); } }'
-            f'  /* {a:#x}: bl 0xf05280 (chamber exit prompt) */')
-
-
-PATCHES[ADV_EXIT_DIALOG_SITE] = _adv_exit_dialog
-
-
 # Difficulty (runtime/ui/difficulty.mm): Link's damage is computed as `damage << hero` (Hero Mode doubles it;
 # hero = PlayerStatus+0x120 == 1) at these `lsl Wd, Wn, Wm` sites, then subtracted from health (+0x84).
 # Each is redirected to rt_damage(damage, shift) so the difficulty multiplier / one-hit KO applies.
@@ -216,70 +151,9 @@ for _a in DAMAGE_LSL_SITES:
 PATCHES[DAMAGE_FIXED_SITE] = _damage_fixed
 
 
-# Items page description ("UI:ItemExplanation_{n}"): main+0xeb6604.. builds the item name then looks the explanation
-# message up (bl 0x903250 -> [sp+0xf0]); a null result takes the no-text path (buffer already cleared). In randomizer
-# seeds the explanation is hidden (it overlaps the key / trade-item rows of the inventory overlay; player knows).
-ITEM_EXPLANATION_SITE = A.ITEM_EXPLANATION_SITE
-
-
-def _item_explanation(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0xf9407bf6, hex(w)  # ldr x22, [sp, #0xf0]
-    return ('{ extern int rt_hide_item_explanation(void); '
-            'c->x[22] = rt_hide_item_explanation() ? 0 : LD64(c->sp + 0xf0); }'
-            f'  /* {a:#x}: ldr x22, [sp, #0xf0] (item explanation message) */')
-
-
-PATCHES[ITEM_EXPLANATION_SITE] = _item_explanation
-
-# ... and the item NAME ("UI:ItemName_{0}"): main+0xeb6658 `bl 0xf8c8b0` sets the name pane from that message; in
-# randomizer seeds it is skipped too (user 2026-10-08: the name showed under the key rows of the inventory overlay).
-ITEM_NAME_SITE = A.ITEM_NAME_SITE
-
-
-def _item_name(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0x94035896, hex(w)  # bl 0x7000f8c8b0
-    return addr_text('c->x[30] = 0x@ITEM_NAME_RETURN@ull; { extern int rt_hide_item_explanation(void); '
-            'if (!rt_hide_item_explanation()) f_@ITEM_NAME_TARGET@(c); }'
-            f'  /* {a:#x}: bl 0xf8c8b0 (set the item name pane) */')
-
-
-PATCHES[ITEM_NAME_SITE] = _item_name
-
-
-# Keysanity (runtime/hle/keysanity.c): AddItem (main+0x7e18b0, x0 item / x1 count / x2 index) only adds dungeon
-# items to the current dungeon; with an explicit dungeon index the hook updates that dungeon's save record instead.
-ADD_ITEM_SITE = A.ADD_ITEM_SITE  # inner add (34 callers: events, chests, drops); AddItem 0x7e18b0 wraps it
-
-
-def _add_item(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0xd10143ff, hex(w)  # sub sp, sp, #0x50
-    return ('{ extern int rt_add_item(Cpu *); if (rt_add_item(c)) return; c->sp -= 0x50; }'
-            f'  /* {a:#x}: sub sp, sp, #0x50 (AddItem: keysanity) */')
-
-
-PATCHES[ADD_ITEM_SITE] = _add_item
-
-
-# Trendsanity (runtime/hle/shopsanity.c): AddPrizeByKey (main+0x7e1c70) looked the prize row up (x0) and is about to
-# call AddPrize(row, count, index) (main+0x1489c0, rows 0-20 only): a randomized prize row sets its check's flags.
-PRIZE_ADD_SITE = A.PRIZE_ADD_SITE
-
-
-def _prize_add(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0x2a1403e2, hex(w)  # mov w2, w20
-    return ('{ c->x[2] = (uint32_t)c->x[20]; extern void rt_add_prize(Cpu *); rt_add_prize(c); }'
-            f'  /* {a:#x}: mov w2, w20 (AddPrize index; trendsanity) */')
-
-
-PATCHES[PRIZE_ADD_SITE] = _prize_add
-
-
-# Inventory overlay (runtime/ui/inventory_overlay.mm): main+0xeb7cd0 runs once per frame only while the pause
-# menu's Items page is shown (found by profiling Items vs Map/System pages). Its prologue reports that.
+# The Items page (runtime/ui/pause_pages.mm: D-pad items, the run timer, the touch controls): main+0xeb7cd0 runs once
+# per frame only while the pause menu's Items page is shown (found by profiling Items vs Map/System pages). Its
+# prologue reports that.
 ITEMS_PAGE_SITE = A.ITEMS_PAGE_SITE
 
 
@@ -344,8 +218,8 @@ def _file_select_nav(gen, a):
 PATCHES[FILE_SELECT_NAV_SITE] = _file_select_nav
 
 
-# Check tracker (runtime/ui/tracker_overlay.mm): main+0xe93800 runs once per frame only while the pause menu's
-# Map page is shown (fnprof diff of Map vs Items/System/closed). Its prologue reports that.
+# The Map page (runtime/ui/pause_pages.mm: the touch controls): main+0xe93800 runs once per frame only while the pause
+# menu's Map page is shown (fnprof diff of Map vs Items/System/closed). Its prologue reports that.
 MAP_PAGE_SITE = A.MAP_PAGE_SITE
 
 
@@ -374,23 +248,8 @@ def _hud_hearts(gen, a):
 PATCHES[HUD_HEARTS_SITE] = _hud_hearts
 
 
-# ... and its epilogue (the page's layout was updated this frame): the check tracker hides the game's own cursor and
-# button bar there (tracker_overlay.mm map_page_takeover), after the update that may have shown them again.
-MAP_PAGE_END_SITE = A.MAP_PAGE_END_SITE
-
-
-def _map_page_end(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0x910203ff, hex(w)  # add sp, sp, #0x80
-    return ('{ extern void rt_map_page_end(Cpu *); rt_map_page_end(c); c->sp += 0x80; }'
-            f'  /* {a:#x}: add sp, sp, #0x80 (map page updated) */')
-
-
-PATCHES[MAP_PAGE_END_SITE] = _map_page_end
-
-
-# Chaos map letters (runtime/ui/chaos_overlay.mm): main+0xe78740 runs once per frame while the DUNGEON map page is
-# shown (fnprof: map open vs closed in Face Shrine); x0 = the dungeon map page.
+# The dungeon map page (runtime/ui/pause_pages.mm: the touch controls): main+0xe78740 runs once per frame while the
+# DUNGEON map page is shown (fnprof: map open vs closed in Face Shrine); x0 = the dungeon map page.
 DGN_MAP_SITE = A.DGN_MAP_SITE
 
 
@@ -404,23 +263,8 @@ def _dgn_map(gen, a):
 PATCHES[DGN_MAP_SITE] = _dgn_map
 
 
-# ... and its epilogue: the check tracker hides the dungeon map page's own cursor and button bar there
-# (tracker_overlay.mm), after the update that may have shown them again.
-DGN_MAP_END_SITE = A.DGN_MAP_END_SITE
-
-
-def _dgn_map_end(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0x910243ff, hex(w)  # add sp, sp, #0x90
-    return ('{ extern void rt_dgnmap_end(Cpu *); rt_dgnmap_end(c); c->sp += 0x90; }'
-            f'  /* {a:#x}: add sp, sp, #0x90 (dungeon map page updated) */')
-
-
-PATCHES[DGN_MAP_END_SITE] = _dgn_map_end
-
-
 # Debug (LARECOMP_LOG_RESNAME=1): main+0x10def30 builds a resource handle from a name (x2 -> {char *name, ...})
-# and looks it up; the generated-dungeon map crash dereferences a handle whose resource wasn't found.
+# and looks it up (a crash that dereferences a handle whose resource wasn't found).
 RES_NAME_SITE = A.RES_NAME_SITE
 
 
@@ -432,15 +276,6 @@ def _res_name(gen, a):
 
 
 PATCHES[RES_NAME_SITE] = _res_name
-
-
-# Field mini-bosses (enemy randomizer, runtime/hle/miniboss.c): a mini-boss waits in its idle state until its dungeon
-# room's start event runs, which never happens in the Field. f_70000ec310 (an actor component's per-frame update)
-# asks its actor a type question through vtable +0x68 every frame: the runtime sees each actor there, picks out the
-# mini-boss classes by vtable and moves them into their fight state itself.
-MB_SEEN_SITE = A.MB_SEEN_SITE
-
-
 
 
 # Frame pacing (runtime/hle/framepace.c): the game's frame timer (f_700000c910) advances by its frame period times
@@ -495,52 +330,6 @@ PATCHES[GAME_DYNRES_SITE] = _game_dynres
 PATCHES[GAME_DYNRES_INIT_SITE] = _game_dynres_init
 
 
-# Digsanity (runtime/hle/digs.c): the shovel's dig commit (f_7000ddc530) spawns the hole actor (ObjHolesDug 0x1cd)
-# through f_7000d228d0(&out, transform x21, zone, &room, ...); right after it the hole (out at [sp+0x10]) and its
-# snapped tile-centre position (x21) tell the runtime which tile was dug - the first dig of a tile gives its item.
-DIG_HOLE_SITE = A.DIG_HOLE_SITE
-
-
-
-# The game keeps its dug holes in a list (main+0x1cbae80, count at +0x10) and fills in the oldest ones once there are
-# more than 80 (f_7000d22d10: while count > 0x50). Digsanity keeps holes open: the limit comes from the runtime.
-HOLE_CAP_SITES = (A.HOLE_CAP_SITES_0, A.HOLE_CAP_SITES_1)  # cmp x8, #0x51 / cmp x8, #0x50
-
-
-# Escape Bottle (runtime/hle/escape.c): the player's per-item "use it now?" predicates (one per item slot, main+0xd50e60
-# .. 0xd52f00; each: X / Y newly pressed with that slot equipped on it) only run while Link may use items (no cutscene,
-# dialog, menu or transition). main+0xd50e60 is the third bottle's (slot 0xf): owned (PlayerStatus+0xa9 bit 7) and
-# empty (+0xc0 bit 2 clear) -> `cset w0, eq` = yes, and the bottle swing starts. In randomizer seeds that bottle is the
-# Escape Bottle: the runtime warps instead and the answer is no.
-BOTTLE3_USE_SITE = A.BOTTLE3_USE_SITE
-
-
-def _bottle3_use(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0x1a9f17e0, hex(w)  # cset w0, eq
-    return ('{ extern int rt_bottle3_use(void); c->x[0] = COND_NE(c) ? 0 : 1; if (c->x[0] && rt_bottle3_use()) c->x[0] = 0; }'
-            f'  /* {a:#x}: cset w0, eq (third bottle used: Escape Bottle) */')
-
-
-PATCHES[BOTTLE3_USE_SITE] = _bottle3_use
-
-
-# Hint Book (runtime/hle/hintbook.c): the same predicate of the FIRST bottle (slot 0xd, main+0xd510c0: owned =
-# PlayerStatus+0xa9 bit 5, empty = +0xc0 bit 0). In randomizer seeds that bottle is the Hint Book: used, the runtime
-# shows the next hint in the game's message box and the answer is no (no swing).
-BOTTLE1_USE_SITE = A.BOTTLE1_USE_SITE
-
-
-def _bottle1_use(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0x1a9f17e0, hex(w)  # cset w0, eq
-    return ('{ extern int rt_bottle1_use(void); c->x[0] = COND_NE(c) ? 0 : 1; if (c->x[0] && rt_bottle1_use()) c->x[0] = 0; }'
-            f'  /* {a:#x}: cset w0, eq (first bottle used: Hint Book) */')
-
-
-PATCHES[BOTTLE1_USE_SITE] = _bottle1_use
-
-
 # D-pad items (runtime/hle/dpad_items.c): the d-pad as a third set of item buttons, in the game's own "use it now?"
 # checks. The 12 Items page items each have one (main+0xd50e60 .. 0xd52fb0; Roc's Feather the last): the buttons newly
 # pressed (`bic w8, w8, w9`), then `tbnz w8, #3` (Y) -> `ldrb wN, [x8, #0xa2]` (the item on Y) `cmp wN, #<its slot>`,
@@ -588,26 +377,23 @@ for _a in EQUIP_Y_READ_SITES:
     PATCHES[_a] = _equip_y_read
 
 
-# Boss souls (runtime/hle/souls.c): the actor factory f_70008f5ea0 (x2 = spawn info, type u16 at +8) takes the type's
-# create function from the actor table (main+0x1bcc898, 0x58 bytes per type, +0 create fn, +0x50 name); a null fn is
-# its "no such actor" path (the caller gets an empty handle). A dungeon boss whose soul isn't found yet gets that path.
+# No Guardian Acorns / Pieces of Power (runtime/hle/qol.c rt_actor_create_fn): the actor factory f_70008f5ea0 (x2 =
+# spawn info, type u16 at +8, x23) takes the type's create function from the actor table (main+0x1bcc898, 0x58 bytes per
+# type, +0 create fn, +0x50 name; x8 = its entry); a null fn is its "no such actor" path (the caller gets an empty
+# handle). With the setting on, a Piece of Power / Guardian Acorn made any other way than the drop roll gets that path.
+# (The site's name is from LA's randomizer, which held back bosses here.)
 BOSS_SPAWN_SITE = A.BOSS_SPAWN_SITE
 
 
-# Enemy randomizer, mode Random (runtime/hle/enemy_random.c): the same spot first lets the runtime re-roll a randomized
-# enemy in the spawn info (type +8, the eight parameters +0x10, as in its room file's record), then takes the type
-# again (x23) and its table entry (x8 = x27 + type * 0x58, x27 = the table: main+0x1bcc898).
 def _boss_spawn(gen, a):
     w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
     assert w == 0xf9400118, hex(w)  # ldr x24, [x8]
     if a - 4 >= gen.base:  # (the address table test gives this one word only)
         w = struct.unpack_from('<I', gen.nso.image, a - 4 - gen.base)[0]
         assert w == 0x9b086ee8, hex(w)  # madd x8, x23, x8, x27
-    return ('{ extern uint64_t rt_actor_create_fn(uint64_t fn, uint32_t type, uint64_t info); '
-            'extern void rt_enemy_spawn(uint64_t info); rt_enemy_spawn(c->x[2]); '
-            'c->x[23] = LD16(c->x[2] + 8); c->x[8] = c->x[27] + c->x[23] * 0x58ull; '
-            'c->x[24] = rt_actor_create_fn(LD64(c->x[8]), (uint32_t)c->x[23], c->x[2]); }'
-            f'  /* {a:#x}: ldr x24, [x8] (actor create fn: boss souls, enemy mode Random) */')
+    return ('{ extern uint64_t rt_actor_create_fn(uint64_t fn, uint32_t type); '
+            'c->x[24] = rt_actor_create_fn(LD64(c->x[8]), (uint32_t)c->x[23]); }'
+            f'  /* {a:#x}: ldr x24, [x8] (actor create fn: no-buff-drops) */')
 
 
 PATCHES[BOSS_SPAWN_SITE] = _boss_spawn
@@ -685,7 +471,7 @@ for _a in WALK_SPEED_SITES:
     PATCHES[_a] = _walk_speed
 
 
-# Wind push (runtime/nvn/weather.c rt_wind_push: a blizzard's wind, for a randomizer option; off by default): Link's
+# Wind push (runtime/nvn/weather.c rt_wind_push: a blizzard's gusts; off by default): Link's
 # move (main+0xd57260, every state's) has just summed the frame's displacement - knockback, walking, a pit's pull, a
 # platform's carry - at [x29-0x80] (world units, this frame; x19 = Link, s1 = the frame's dt) and hands it to the
 # collision move next, so a push added there is stopped by walls and ledges like his walking.
@@ -730,9 +516,9 @@ def _shield_anim(gen, a):
 PATCHES[A.WALK_ANIM_SITE_1] = _shield_anim
 
 
-# No Guardian Acorns / Pieces of Power (randomizer no-buff-drops, runtime/hle/qol.c): the drop roll main+0x89b960 reads
-# its ItemDrop row's mAllowBuffReplace (+0x38); set, the kill counters may turn the drop into a Piece of Power / Guardian
-# Acorn. Read as false for such seeds.
+# No Guardian Acorns / Pieces of Power (Gameplay tab, runtime/hle/qol.c): the drop roll main+0x89b960 reads its
+# ItemDrop row's mAllowBuffReplace (+0x38); set, the kill counters may turn the drop into a Piece of Power / Guardian
+# Acorn. Read as false with the setting on.
 BUFF_REPLACE_SITE = A.BUFF_REPLACE_SITE
 
 
@@ -798,78 +584,6 @@ def _missing_float(gen, a):
 
 
 PATCHES[MISSING_FLOAT_SITE] = _missing_float
-
-
-# Treat Tunics as Upgrades (runtime/hle/qol.c rt_tunic_upgrades): the add-item code (main+0x8d08e0) sets a tunic's
-# bit in the tunics byte (PlayerStatus +0x9c = save +0x555C: 0x40 red, 0x80 blue), then clears the other one; with
-# the seed option the clear is skipped, so both tunics (and both effects) are kept.
-TUNIC_CLEAR_SITES = {
-    A.TUNIC_CLEAR_SITES_0: (0x12197929, 0xffffffbf, 'and w9, w9, #0xffffffbf (blue tunic: red cleared)'),
-    A.TUNIC_CLEAR_SITES_1: (0x12001929, 0x7f, 'and w9, w9, #0x7f (red tunic: blue cleared)'),
-}
-
-
-def _tunic_clear(gen, a):
-    word, mask, what = TUNIC_CLEAR_SITES[a]
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == word, hex(w)
-    return ('{ extern int rt_tunic_upgrades(void); '
-            f'if (!rt_tunic_upgrades()) c->x[9] = (uint32_t)((uint32_t)c->x[9] & {mask:#x}u); }}'
-            f'  /* {a:#x}: {what} - kept with Treat Tunics as Upgrades */')
-
-
-for _a in TUNIC_CLEAR_SITES:
-    PATCHES[_a] = _tunic_clear
-
-
-# Underwater checks (tools/rando/underwater.py; LAS 0.5 dev build's main+0x8c45b8 patch): the item actor's "should I
-# appear?" (main+0x8c4510) asks the inventory whether Link owns its item (bl HasItem(item +0x2e8, 1, index +0xbc)). The
-# sunken heart-piece actors hold randomized items now and hide by their own flag (Npc.gsheet layout condition), so for
-# heart-piece actors in seeds made with it the answer is "not owned" (runtime/hle/qol.c rt_underwater_skip_owned).
-UNDERWATER_OWNED_SITE = A.UNDERWATER_OWNED_SITE
-
-
-def _underwater_owned(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0x9400351e, hex(w)  # bl 0x8d1a30 (HasItem)
-    return addr_text('{ extern int rt_underwater_skip_owned(uint64_t); if (rt_underwater_skip_owned(c->x[20])) c->x[0] = 0; '
-            'else { extern void f_@HAS_ITEM@(Cpu *); c->x[30] = 0x@UNDERWATER_OWNED_RETURN@ull; f_@HAS_ITEM@(c); } }'
-            f'  /* {a:#x}: bl HasItem (sunken heart pieces: their own flag decides) */')
-
-
-PATCHES[UNDERWATER_OWNED_SITE] = _underwater_owned
-
-# ...and their item models show underwater. Water is opaque here (its depth hides what's below): what's seen below the
-# surface is a second, low-resolution view the water samples, holding only models whose materials have the shader option
-# under_water - the heart piece's do, other items' don't. Model setup (main+0xff53d8 loop over a material's options)
-# reads it at 0xff54b4; in underwater-item seeds every material counts as under_water (as LAS-Randomizer's 0.5 dev
-# build does: its exlaunch mod writes mov w27, #1 here).
-UNDERWATER_VIEW_SITE = A.UNDERWATER_VIEW_SITE
-
-
-def _underwater_view(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0x1a9f07fb, hex(w)  # cset w27, ne (under_water != 0)
-    return ('{ extern int rt_underwater_items(void); c->x[27] = (rt_underwater_items() || COND_NE(c)) ? 1u : 0u; }'
-            f'  /* {a:#x}: cset w27, ne (under_water: forced on for sunken items) */')
-
-
-PATCHES[UNDERWATER_VIEW_SITE] = _underwater_view
-
-# ...and picking one up gives only its own item (its event): the heart-piece actor's pickup (main+0x855a0, x19 = the
-# actor) would also add a heart piece (bl 0x89b960; LAS-Randomizer's 0.5 dev build NOPs it).
-UNDERWATER_PICKUP_SITE = A.UNDERWATER_PICKUP_SITE
-
-
-def _underwater_pickup(gen, a):
-    w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-    assert w == 0x9420589f, hex(w)  # bl 0x89b960
-    return addr_text('{ extern int rt_underwater_skip_owned(uint64_t); if (!rt_underwater_skip_owned(c->x[19])) '
-            '{ extern void f_@HEART_PIECE_ADD@(Cpu *); c->x[30] = 0x@UNDERWATER_PICKUP_RETURN@ull; f_@HEART_PIECE_ADD@(c); } }'
-            f'  /* {a:#x}: bl 0x89b960 (adds the heart piece: skipped for sunken items) */')
-
-
-PATCHES[UNDERWATER_PICKUP_SITE] = _underwater_pickup
 
 
 # Event actions with no handler: main+0x108e300 runs an event action through the actor's handler map; an entry whose
@@ -1016,26 +730,6 @@ FRAME_JOB_FINISH_SITE = A.FRAME_JOB_FINISH_SITE
 OWNER_CALL_NOTIFY_SITE = A.OWNER_CALL_NOTIFY_SITE
 
 
-# Shadow Link's Appear event (main+0xd157f0: requested once Link is within 3 units, ShadowLink.bfevfl) stops Link and
-# turns the camera to him; on the Field (seeds) the request is skipped and runtime/hle/miniboss.c plays his appearance
-# (Sign glow, then he pops up) without an event. The site is right after the function's already-requested check; the
-# skip goes to its return.
-SHADOW_LINK_APPEAR_SITE = A.SHADOW_LINK_APPEAR_SITE
-
-# Shadow Link's own music: once he is up and Link is in range, his code calls the chamber manager's start
-# (main+0xce8ce0: BGM_PANEL_SHADOW_LINK, the level's music held until his defeat calls main+0xce8f00). Dampe's chamber is
-# the only place he has in the game; in seeds, everywhere else (the Field, dungeons, caves, houses) the call is skipped
-# and the area's own music plays on (runtime/hle/miniboss.c rt_shadow_link_bgm).
-SHADOW_LINK_BGM_SITE = A.SHADOW_LINK_BGM_SITE
-
-# An actor's AI starting one of its events (main+0x94a510, x20 = the AI, flow name at [x29-0x40]): right before it
-# builds the event request (bl main+0x80c290). Any event request holds Link still while it runs; a randomizer item
-# picked up from the ground (a SinkingSword item actor) whose entry only sets its flag and adds a rupee / heart /
-# refill is given by the runtime instead (runtime/hle/quick_pickup.c) and the request skipped: the skip goes to the
-# function's no-event return.
-ACTOR_EVENT_SITE = A.ACTOR_EVENT_SITE
-
-
 # Issue #314 (Hot Head, Turtle Rock: crash reading 0x11 in main+0x142afb0 when the Magic Rod's fire hit him): a PhysX
 # shape change on an actor in the scene (main+0x1408db0, RigidCore::onShapeChange - the geometry / pose / filter /
 # flags / offsets a shape setter just changed, flags at [x2]) and its sibling main+0x1408d60 look up the actor's
@@ -1081,20 +775,6 @@ HOOKS = {
     BUFF_MUSIC_FLAGS_SITES[1]: (0xb95b8d14, (), 'ldr w20, [x8, #0x1b8c]: zone music, power-up sound flag'),
     BUFF_MUSIC_FLAGS_SITES[2]: (0xb95b8d15, (), 'ldr w21, [x8, #0x1b8c]: event music, power-up sound flag'),
     BUFF_MUSIC_FLAGS_SITES[3]: (0xb95b8d15, (), 'ldr w21, [x8, #0x1b8c]: power-up presentation, sound flag'),
-    MB_SEEN_SITE: (0xf94002a8, (), 'ldr x8, [x21]: an actor seen - field mini-bosses (miniboss.c)'),
-    CRASHOUT_SITE: (0xb900b81f, (A.CRASHOUT_SKIP,), 'str wzr, [x0, #0xb8]: Blaino knock-out, no crash-out on the Field'),
-    GOHMA_HEADING_SITES[0]: (0xb915ee68, (), 'str w8, [x19, #0x15ec]: Gohma heading at Link on the Field'),
-    GOHMA_HEADING_SITES[1]: (0xb915ee68, (), 'str w8, [x19, #0x15ec]: Gohma heading at Link on the Field (again)'),
-    GOHMA_ARRIVED_SITE: (0x3dc58260, (A.GOHMA_ARRIVED_SKIP,), 'ldr q0, [x19, #0x1600]: Gohma, no track end on the Field'),
-    MSTALFOS_BODY_SITE: (0x320003e8, (), 'mov w8, #1: Master Stalfos body collision flag, off on the Field'),
-    MSTALFOS_JUMP_SITE: (0x1e213800, (), 'fsub s0, s0, s1: Master Stalfos jump arc from his takeoff height'),
-    SHADOW_LINK_APPEAR_SITE: (0xf9411809, (A.SHADOW_LINK_APPEAR_SKIP,), 'ldr x9, [x0, #0x230]: Shadow Link, no Appear event on the Field'),
-    SHADOW_LINK_BGM_SITE: (0x97ff5eac, (), 'bl main+0xce8ce0: Shadow Link starts his chamber music, not outside it'),
-    ACTOR_EVENT_SITE: (0x97fb074a, (A.ACTOR_EVENT_SKIP,), 'bl main+0x80c290: an actor\'s event request (quick pickups: none)'),
-    MCHIEF_STORY_SITE: (0x37380148, (A.MCHIEF_STORY_SKIP,), 'tbnz w8, #7: Moblin Chief, no story check on the Field'),
-    DIG_HOLE_SITE: (0xf94007f6, (), 'ldr x22, [sp, #8]: a hole was dug (digs.c)'),
-    HOLE_CAP_SITES[0]: (0xf101451f, (), 'cmp x8, #0x51: dug-hole limit (digs.c)'),
-    HOLE_CAP_SITES[1]: (0xf101411f, (), 'cmp x8, #0x50: dug-hole limit (digs.c)'),
     EMPTY_HANDLER_SITE: (0x9400005e, (A.EMPTY_HANDLER_CATCH,), 'bl std::function call: an empty event handler, as its catch'),
     CHOICE_COUNT_SITE: (0xb91cc668, (), 'str w8, [x19, #0x1cc4]: a question\'s answer count (2..4 in the game\'s own text)'),
     FRAME_JOB_KICKOFF_SITES[0]: (0x910782d3, (), 'add x19, x22, #0x1e0: frame job kick-off, previous finish first'),

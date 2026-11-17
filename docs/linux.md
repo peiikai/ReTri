@@ -1,4 +1,4 @@
-# EoW Recomp on Linux (x86-64, aarch64)
+# ReTri on Linux (x86-64, aarch64)
 
 Status: builds and runs the game on Vulkan (with your own game files) on x86-64, checked before
 each release by `make smoketest`. aarch64 is **experimental**: tested on a few ARM boards; reports welcome (see the end). `make appimage` / `make appimages`
@@ -35,14 +35,14 @@ If the AppImage won't start with a FUSE error, install your distribution's `fuse
 
 ## Building from source
 Ubuntu / Debian packages (other distributions: the same libraries under their names). SDL3 must be 3.4 or newer
-(EoW Recomp loads and saves PNGs through it); where the distribution ships an older one (Debian 13 has 3.2), build SDL3
+(ReTri loads and saves PNGs through it); where the distribution ships an older one (Debian 13 has 3.2), build SDL3
 3.4 from source first - `tools/linux/build_deps.sh` builds the pinned version the AppImage uses (into
 `build/linux/<arch>/deps`).
 
     sudo apt install clang lld make pkg-config python3-venv libsdl3-dev libavformat-dev libavcodec-dev \
         libavutil-dev libswscale-dev libvulkan-dev libshaderc-dev libvulkan-memory-allocator-dev glslc vulkan-tools
 
-For Chinese or Korean menus, also install a font for them (`fonts-noto-cjk`). EoW Recomp bundles fonts for Russian
+For Chinese or Korean menus, also install a font for them (`fonts-noto-cjk`). ReTri bundles fonts for Russian
 and Japanese only; without one, Chinese and Korean menu text shows as boxes.
 
 shaderc is linked the way its pkg-config file says (`libshaderc_shared` on Arch, Fedora, AOSC...); to choose
@@ -64,16 +64,11 @@ passes the matching `--simd`. A cross build (`ARCH=aarch64` on an x86-64 machine
 keeps its own `generated-aarch64/` and `build/aarch64/`. Distributions that name shaderc's library
 `libshaderc_shared.so` need `SHADERC=-lshaderc_shared`.
 
-The randomizer from a source checkout uses LAS-Randomizer's own venv (Python 3.12):
-
-    python3.12 -m venv third_party/LAS-Randomizer/venv
-    third_party/LAS-Randomizer/venv/bin/pip install -r third_party/LAS-Randomizer/requirements.txt
-
 ## AppImages
 Needs podman, and for the other arch's AppImage QEMU user emulation with binfmt (`sudo apt install podman qemu-user
 qemu-user-binfmt`).
 
-    make appimage                # this machine's arch -> build/dist/EoW Recomp-<version>-linux-<arch>.AppImage
+    make appimage                # this machine's arch -> build/dist/ReTri-<version>-linux-<arch>.AppImage
     make appimage ARCH=aarch64   # on x86-64: cross-compiled
     make appimages               # both
 
@@ -82,21 +77,19 @@ SDL3, an LGPL-only FFmpeg (only the movie codecs, as on Windows / macOS), and sh
 (`tools/linux/build_deps.sh`), then the game against them (`tools/linux/package.sh`). This machine's arch is built
 natively in one container of that arch (the release does both archs that way, on an arm64 runner for aarch64).
 aarch64 on an x86-64 machine is cross-compiled in the amd64 container against the arm64 image's root filesystem
-(`build/linux/aarch64/sysroot`), with only the seed generator helper (`tools/linux/rando_helper.sh`, PyInstaller
-builds for the machine it runs on) frozen in the arm64 container under QEMU, where pip also builds oead and
-keystone-engine from source the first time (no arm64 wheels on PyPI; cached in `build/linux/aarch64/wheels`). The
+(`build/linux/aarch64/sysroot`), with only the game code generator helper (`tools/linux/gen_helper.sh`, PyInstaller
+builds for the machine it runs on) frozen in the arm64 container under QEMU. The
 generated game code comes from the host (`generated/`, `generated-aarch64/`; `make appimage` runs `make gen` for it
 when missing).
 
 Release check of the x86-64 AppImage (`make smoketest`, tools/linux/smoketest.sh, ~7 minutes on this kind of machine):
-three launches of the AppImage itself - the start screen; a session from a test save warping to four overworld spots
-and every dungeon's entrance; and a seed generated from the in-game Randomizer tab, switched to live, the save loaded
-on it, then deleted. Each step is checked in the log and by a screenshot. `build/smoke/report.txt` ends with READY FOR
+the start screen, then a session from a test save warping to four overworld spots and every dungeon's entrance. Each
+step is checked in the log and by a screenshot. `build/smoke/report.txt` ends with READY FOR
 RELEASE or NOT READY; `build/smoke/sheet.png` shows every screenshot. It needs `extracted/` in the checkout and a test
 save outside git (`~/.local/share/eowrecomp-smoketest/save`, or `LARECOMP_SMOKE_SAVE`): copy `save/` from any build
 after starting a new game once.
 
-The AppImage holds `eowrecomp`, `rando-gen/`, the start screen font and the bundled libraries (SDL3,
+The AppImage holds `eowrecomp`, `lasgen/`, the start screen font and the bundled libraries (SDL3,
 FFmpeg, shaderc). Not bundled: glibc, libstdc++, the Vulkan loader and the GPU drivers (always the system's). No game
 files or fonts.
 

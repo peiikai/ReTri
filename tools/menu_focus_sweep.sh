@@ -13,7 +13,7 @@
 # Result: the checks and an OK / FAIL count; the log is build/run_shot_focus_sweep.log. A heavily loaded Mac (a few fps)
 # can show a held key's repeat as a step too many.
 cd "$(dirname "$0")/.."
-N=10  # tabs in game: Controls, Video, Audio, Gameplay, Cosmetics, Randomizer, Cheats, Warp, Save Editor, Quit
+N=9  # tabs in game: Controls, Video, Audio, Gameplay, Cosmetics, Cheats, Warp, Save Editor, Quit
 read -r END SPEC < <(python3 - "$N" "${STEPS:-75}" <<'EOF'
 import sys
 n, steps = int(sys.argv[1]), int(sys.argv[2])
