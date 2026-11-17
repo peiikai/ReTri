@@ -98,7 +98,7 @@ python gen.py main "$X/main" 0x7000000000 ../generated-dyn/main --simd asm --dyn
 make PLATFORM=ios -j8 && PROFILE=<.mobileprovision> IOS_MIN=16.4 PYV=3.13 tools/bundle_ios.sh build/ios/eowrecomp build/ios/eowgame.dylib
 ```
 
-The profile is an Xcode team profile for the app's bundle ID (`com.peiikai.tricompiled.ios`) with Increased Memory
+The profile is an Xcode team profile for the app's bundle ID (`com.peiikai.retri.ios`) with Increased Memory
 Limit. `xcrun devicectl device install app` installs it and keeps the app's Documents. Copy `exefs` and `romfs` to
 `Documents/extracted` with `devicectl device copy to` (never with `--remove-existing-content`: it empties the whole
 Documents folder).

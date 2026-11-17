@@ -15,7 +15,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DEVICE=$1; UDID=$2
-BUNDLE_ID=${BUNDLE_ID:-com.peiikai.tricompiled.ios}
+BUNDLE_ID=${BUNDLE_ID:-com.peiikai.retri.ios}
 PY=third_party/LAS-Randomizer/venv/bin/python
 ROMFS=${ROMFS:-extracted/romfs}
 W=build/ios-pytest; rm -rf "$W"; mkdir -p "$W/mac" "$W/ios"

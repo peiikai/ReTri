@@ -8,7 +8,7 @@
 #
 #   TEAM_ID=<id>          the Apple Developer team (the entitlement in runtime/platform/ios.entitlements: any team)
 #   PROFILE=<.mobileprovision>  a development profile for BUNDLE_ID with those capabilities and this device
-#   BUNDLE_ID=...         default com.peiikai.tricompiled.ios
+#   BUNDLE_ID=...         default com.peiikai.retri.ios
 #   SIGN="Apple Development: ..."  the identity (default: the profile's certificate that is in the keychain)
 #   DEVICE=<devicectl id>  install and launch on that device
 #   SKELETON=1            no game library and no signing: the app without Frameworks/LASGame.framework, which the
@@ -25,7 +25,7 @@ EXE=${1:-build/ios/eowrecomp}
 LIB=${2:-$(dirname "$EXE")/eowgame.dylib}
 SKELETON=${SKELETON:-}
 APP=${APP:-build/ios/ReTri.app}
-BUNDLE_ID=${BUNDLE_ID:-com.peiikai.tricompiled.ios}
+BUNDLE_ID=${BUNDLE_ID:-com.peiikai.retri.ios}
 IOS_MIN=${IOS_MIN:?the Makefile sets IOS_MIN - run as make ipa / ios-skeleton}
 if [ -n "${IOS_SIM:-}" ]; then
     [ -n "$SKELETON" ] || { echo "IOS_SIM=1 needs SKELETON=1 (no game code in the simulator)"; exit 1; }
