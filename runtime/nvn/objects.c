@@ -847,6 +847,11 @@ NVN(nvnWindowSetPresentInterval) {  // (the game's 60 / 30 fps mode: 1 / 2; LARE
         LOG(")\n");
     }
     WIN->interval = (int)A(1);
+    // LARECOMP_KEEP_60=1 (test): frames paced at 60 whatever the game asks - its 30 fps mode then runs fast (two world
+    // steps a frame), but the GPU's time per frame at 60 shows whether a scene that took it to 30 fits 60 at full clock
+    static int keep60 = -1;
+    if (keep60 < 0) keep60 = getenv("LARECOMP_KEEP_60") != NULL;
+    if (keep60 && WIN->interval > 1) WIN->interval = 1;
     g_nvn_present_interval = WIN->interval;
 }
 NVN(nvnWindowSetCrop) { int *cr = WIN->crop; cr[0] = (int)A(1); cr[1] = (int)A(2); cr[2] = (int)A(3); cr[3] = (int)A(4); }

@@ -582,6 +582,25 @@ def main():
                 return ('{ extern void rt_tilt_obj(uint64_t); c->x[19] = c->x[23] + 0x600; rt_tilt_obj(c->x[19]); }'
                         f'  /* {a:#x}: add x19, x23, #0x600 (tilt-shift set-up: blur removal) */')
             PATCHES[0x70027802e8] = _eow_tilt
+            # (frame pacing, runtime/nvn/pace.c rt_other_fps_window) the frame controller at 30 fps, at the end of a
+            # 12-frame window, reads how many of its frames took over 1/60 s; 0 takes it back to 60. On phone and tablet
+            # GPUs its frames read slow at 30 by the lowered clock alone: the runtime may answer 0 to try 60
+            def _eow_fps_window(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0xb944ff49, hex(w)  # ldr w9, [x26, #0x4fc]
+                return ('{ extern uint32_t rt_other_fps_window(uint32_t); '
+                        'c->x[9] = rt_other_fps_window(LD32(c->x[26] + 0x4fc)); }'
+                        f'  /* {a:#x}: ldr w9, [x26, #0x4fc] (30 fps window: its slow frames) */')
+            PATCHES[0x7000347370] = _eow_fps_window
+            # ... and at 60, its count of frames in a row over 1/60 s (at 1 or 2 it goes to 30): 0 for a moment
+            # after a try, while the clock comes up
+            def _eow_slow60(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0xb945034a, hex(w)  # ldr w10, [x26, #0x500]
+                return ('{ extern uint32_t rt_other_slow60(uint32_t); '
+                        'c->x[10] = rt_other_slow60(LD32(c->x[26] + 0x500)); }'
+                        f'  /* {a:#x}: ldr w10, [x26, #0x500] (60 fps: frames over 1/60 s in a row) */')
+            PATCHES[0x7000347668] = _eow_slow60
             # (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
             # `movz wD, #0x8e39; movk wD, #0x3fe3, lsl #16`: the movk gets the runtime's aspect instead
             eow_aspect = [0x700033d32c, 0x700033e6f8, 0x7000348b70, 0x7000351e20, 0x7000c2bd3c, 0x7000c2c8b4,

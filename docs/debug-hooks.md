@@ -261,6 +261,9 @@ The per-GPU default switches are explained, with the GPUs they were tested on, i
 | Variable | Values | What it does |
 |---|---|---|
 | `LARECOMP_PACE` | 0 | Turn the frame pacer off (it holds the game's 30 fps mode when frames don't fit 60). |
+| `LARECOMP_OTHER_TRY` | 0 / 1 | EoW: at 30 fps, try its 60 fps mode again (1 s after a dip, 10 s when frames already missed 60, doubling after a failed try). Default on for iOS and Android. |
+| `LARECOMP_KEEP_60` | 1 | Pace frames at 60 whatever the game asks (test: its 30 fps mode then runs fast). Shows whether a scene fits 60. |
+| `LARECOMP_SLOW_COUNTER` | `from,to` | The game's GPU timing counters read 25 ms from `from` to `to` seconds (test: a heavy moment). |
 | `LARECOMP_SIM_SLOW_FRAME_MS` | ms | Sleep this long every frame after frame 2600, to simulate a slow machine. |
 | `LARECOMP_SLOW_FRAME_UNTIL` | frame | With `LARECOMP_SIM_SLOW_FRAME_MS`: stop at that frame (recovery tests). |
 | `LARECOMP_SPIKE_MS` | ms | Stall the presenting thread this long every N frames. |
