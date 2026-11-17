@@ -416,9 +416,9 @@ extern "C" void controls_tab_draw(float scale) {
         static const char *const names[] = {LN("Right (Switch)"), LN("Bottom (Xbox / PlayStation)")};
         int i = g_settings.face_by_label;
         if (opt_choice("Confirm button", &i, names, 2, 0,
-                       "Which button is the game's A and confirms in ReTri's menus, on any controller. Right: as on a "
-                       "Switch. Bottom: as on Xbox and PlayStation, with B on the right. X and Y don't move. The "
-                       "button icons show the button to press either way."))
+                       "Which button is A in the game. ReTri's menus use the same button to confirm, so Back is the "
+                       "same in both. Right: as on Switch. Bottom: as on Xbox and PlayStation. To set ReTri's menu "
+                       "buttons yourself, use Configure inputs > ReTri Menu."))
             g_settings.face_by_label = i != 0;
     }
 

@@ -235,7 +235,7 @@
 {"Confirm button", "Bevestigknop"},
 {"Right (Switch)", "Rechts (Switch)"},
 {"Bottom (Xbox / PlayStation)", "Onder (Xbox / PlayStation)"},
-{"Which button is the game's A and confirms in ReTri's menus, on any controller. Right: as on a Switch. Bottom: as on Xbox and PlayStation, with B on the right. X and Y don't move. The button icons show the button to press either way.", "Welke knop A is in het spel en bevestigt in de menu's van ReTri, op elke controller. Rechts: zoals op een Switch. Onder: zoals op Xbox en PlayStation, met B rechts. X en Y blijven op hun plek. De knopiconen tonen altijd de knop die je moet indrukken."},
+{"Which button is A in the game. ReTri's menus use the same button to confirm, so Back is the same in both. Right: as on Switch. Bottom: as on Xbox and PlayStation. To set ReTri's menu buttons yourself, use Configure inputs > ReTri Menu.", "Welke knop A is in het spel. De menu's van ReTri bevestigen met dezelfde knop, dus Terug is overal gelijk. Rechts: zoals op Switch. Onder: zoals op Xbox en PlayStation. Kies de knoppen van de ReTri-menu's zelf via Invoer instellen > ReTri-menu."},
 {"Switch keeps the Switch's button positions, so the right button confirms. Xbox / PlayStation swaps the bottom and right buttons, so the bottom button confirms, as on those controllers. Applies to the game and ReTri's menus. Nintendo controllers aren't affected.", "Switch houdt de knopposities van de Switch, dus de rechterknop bevestigt. Xbox / PlayStation wisselt de onderste en rechterknop om, dus de onderste knop bevestigt, zoals op die controllers. Geldt voor de game en de menu's van ReTri. Nintendo-controllers veranderen niet."},
 {"Display", "Beeld"},
 {"Appearance", "Uiterlijk"},

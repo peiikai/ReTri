@@ -2656,7 +2656,7 @@ extern "C" void launcher_run(const char *root) {
             ImGui_ImplSDL3_NewFrame();
             // (test) LARECOMP_LAUNCHER_KEYS=<frame>:<key>,...: that key pressed at that frame, let go 2 frames later.
             // Keys: left right up down enter esc (keyboard), pl pr pu pd pa pb (controller d-pad, confirm, back), or
-            // b.<button> (larecomp.ini name: b.south, b.ltrigger...): a real controller button event, through LAS Menu
+            // b.<button> (larecomp.ini name: b.south, b.ltrigger...): a real controller button event, through ReTri Menu
             if (static const char *keys = getenv("LARECOMP_LAUNCHER_KEYS"); keys) {
                 io.BackendFlags |= ImGuiBackendFlags_HasGamepad;  // (no controller needed for its presses)
                 static long kf;

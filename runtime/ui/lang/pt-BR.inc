@@ -235,7 +235,7 @@
 {"Confirm button", "Botão de confirmar"},
 {"Right (Switch)", "Direita (Switch)"},
 {"Bottom (Xbox / PlayStation)", "Embaixo (Xbox / PlayStation)"},
-{"Which button is the game's A and confirms in ReTri's menus, on any controller. Right: as on a Switch. Bottom: as on Xbox and PlayStation, with B on the right. X and Y don't move. The button icons show the button to press either way.", "Qual botão é o A do jogo e confirma nos menus do ReTri, em qualquer controle. Direita: como no Switch. Embaixo: como no Xbox e no PlayStation, com B à direita. X e Y não mudam. Os ícones sempre mostram o botão a apertar."},
+{"Which button is A in the game. ReTri's menus use the same button to confirm, so Back is the same in both. Right: as on Switch. Bottom: as on Xbox and PlayStation. To set ReTri's menu buttons yourself, use Configure inputs > ReTri Menu.", "Qual botão é o A no jogo. Os menus do ReTri confirmam com o mesmo botão, então Voltar é igual nos dois. Direita: como no Switch. Embaixo: como no Xbox e no PlayStation. Para escolher os botões dos menus do ReTri, use Configurar comandos > Menu ReTri."},
 {"Switch keeps the Switch's button positions, so the right button confirms. Xbox / PlayStation swaps the bottom and right buttons, so the bottom button confirms, as on those controllers. Applies to the game and ReTri's menus. Nintendo controllers aren't affected.", "Switch mantém a posição dos botões do Switch, então o botão da direita confirma. Xbox / PlayStation troca os botões de baixo e da direita, então o botão de baixo confirma, como nesses controles. Vale para o jogo e para os menus do ReTri. Controles da Nintendo não são afetados."},
 {"Display", "Tela"},
 {"Appearance", "Aparência"},

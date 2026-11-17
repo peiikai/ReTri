@@ -235,7 +235,7 @@
 {"Confirm button", "확인 버튼"},
 {"Right (Switch)", "오른쪽 (Switch)"},
 {"Bottom (Xbox / PlayStation)", "아래 (Xbox / PlayStation)"},
-{"Which button is the game's A and confirms in ReTri's menus, on any controller. Right: as on a Switch. Bottom: as on Xbox and PlayStation, with B on the right. X and Y don't move. The button icons show the button to press either way.", "게임의 A이자 ReTri 메뉴에서 확인하는 버튼입니다. 모든 컨트롤러에 적용됩니다. 오른쪽: Switch와 같음. 아래: Xbox, PlayStation과 같으며 B는 오른쪽. X와 Y는 그대로입니다. 버튼 아이콘은 항상 눌러야 할 버튼을 보여 줍니다."},
+{"Which button is A in the game. ReTri's menus use the same button to confirm, so Back is the same in both. Right: as on Switch. Bottom: as on Xbox and PlayStation. To set ReTri's menu buttons yourself, use Configure inputs > ReTri Menu.", "게임에서 A가 되는 버튼입니다. ReTri 메뉴도 같은 버튼으로 확인하므로 뒤로 버튼도 같습니다. 오른쪽: Switch와 같음. 아래: Xbox, PlayStation과 같음. ReTri 메뉴 버튼을 직접 정하려면 입력 설정 > ReTri 메뉴로 가세요."},
 {"Switch keeps the Switch's button positions, so the right button confirms. Xbox / PlayStation swaps the bottom and right buttons, so the bottom button confirms, as on those controllers. Applies to the game and ReTri's menus. Nintendo controllers aren't affected.", "Switch는 Switch의 버튼 위치를 유지해 오른쪽 버튼으로 결정합니다. Xbox / PlayStation은 아래쪽과 오른쪽 버튼을 바꿔, 해당 컨트롤러처럼 아래쪽 버튼으로 결정합니다. 게임과 ReTri 메뉴에 적용됩니다. Nintendo 컨트롤러에는 영향이 없습니다."},
 {"Display", "화면"},
 {"Appearance", "모양"},

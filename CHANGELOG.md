@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- Controls > Configure inputs > ReTri Menu: choose the controller buttons ReTri's own menus use (Confirm, Back,
+  tabs, arrows and more), as in LAS Recomp. Until you change one, the menus follow the Confirm button setting.
 - Unlocked aspect ratio: the camera fills wide windows.
 - Logging of shader records the shipped list lacks, once per run.
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.

@@ -235,7 +235,7 @@
 {"Confirm button", "確認鍵"},
 {"Right (Switch)", "右 (Switch)"},
 {"Bottom (Xbox / PlayStation)", "下 (Xbox / PlayStation)"},
-{"Which button is the game's A and confirms in ReTri's menus, on any controller. Right: as on a Switch. Bottom: as on Xbox and PlayStation, with B on the right. X and Y don't move. The button icons show the button to press either way.", "哪個按鈕作為遊戲的 A 鍵並在 ReTri 選單中確認，適用於所有控制器。右：與 Switch 相同。下：與 Xbox 和 PlayStation 相同，B 在右邊。X 和 Y 不變。按鈕圖示始終顯示要按的按鈕。"},
+{"Which button is A in the game. ReTri's menus use the same button to confirm, so Back is the same in both. Right: as on Switch. Bottom: as on Xbox and PlayStation. To set ReTri's menu buttons yourself, use Configure inputs > ReTri Menu.", "遊戲中作為 A 的按鈕。ReTri 選單也用同一個按鈕確認，所以返回鍵在兩處相同。右：與 Switch 相同。下：與 Xbox 和 PlayStation 相同。要自行設定 ReTri 選單的按鈕，請前往 設定按鍵 > ReTri 選單。"},
 {"Switch keeps the Switch's button positions, so the right button confirms. Xbox / PlayStation swaps the bottom and right buttons, so the bottom button confirms, as on those controllers. Applies to the game and ReTri's menus. Nintendo controllers aren't affected.", "「Switch」維持Switch的按鈕位置，用右方按鈕確定。「Xbox / PlayStation」交換下方和右方按鈕，像這些控制器一樣用下方按鈕確定。適用於遊戲和ReTri的選單。不影響Nintendo控制器。"},
 {"Display", "顯示"},
 {"Appearance", "外觀"},
