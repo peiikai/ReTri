@@ -31,6 +31,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Phones and tablets, EoW: a drag on the game's screen moves the camera, as the right stick.
 
 ### Changed
+- Menus (from LAS Recomp): the left stick steps one row per push, and a held direction scrolls slower. In Configure
+  inputs, the right column is empty while Device is selected, and the Open menu shortcuts are under ReTri Menu.
 - With Dynamic resolution on, the FPS target sets EoW's frame rate (60, 30, or 30 outdoors and 60 indoors) and the
   resolution does the rest, as in LAS Recomp; the game's own 60 / 30 switching is off.
 - "Button layout" is now "Confirm button" (Right or Bottom). It applies the same way to every controller, in the
