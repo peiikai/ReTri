@@ -1006,6 +1006,12 @@ static id<MTLTexture> metalfx_upscale(id<MTLCommandBuffer> cb, id<MTLTexture> in
         LOG("[metalfx] spatial scaler %s\n", supported ? "available" : "not supported on this GPU");
     }
     if (!supported) return nil;
+    // (a crop of zero or a window between sizes gives no real output size: plain sampling - MetalFX aborts on a zero size)
+    if (!isfinite(ow_d) || !isfinite(oh_d) || ow_d < 1 || oh_d < 1 || ow_d > 16384 || oh_d > 16384 || !in.width || !in.height) {
+        static int warned;
+        if (warned++ < 5) LOG("[metalfx] skipped: output %.1fx%.1f from %lux%lu\n", ow_d, oh_d, (unsigned long)in.width, (unsigned long)in.height);
+        return nil;
+    }
     NSUInteger ow = (NSUInteger)lround(ow_d), oh = (NSUInteger)lround(oh_d);
     if (ow <= in.width * fx + 1 && oh <= in.height * fy + 1) return nil;  // not an upscale: plain sampling is right
     if (ow > 16384) ow = 16384;

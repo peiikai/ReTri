@@ -1203,7 +1203,11 @@ void output_scale(double dw, double dh, bool reshape_allowed, double now, double
     if (forced > 0) h = forced;
     else if (mode >= 1 && mode <= 8) h = (mode == 1 && g_gpu_integrated ? 720 / 1080.0 : mode) * game_3d;
     else {
-        h = (reshape ? dh / 1080.0 : fit) * game_3d;  // Match display
+        // Match display. LARECOMP_MATCH_SCALE=<n> (test): n times the window's pixels, so a small test window gets a
+        // large screen's GPU load (2 in 2560x720: a 5120x1440 screen's 3D, Dynamic resolution and all)
+        static double match_test = -1;
+        if (match_test < 0) match_test = getenv("LARECOMP_MATCH_SCALE") ? atof(getenv("LARECOMP_MATCH_SCALE")) : 0;
+        h = (reshape ? dh / 1080.0 : fit) * game_3d * (match_test > 0 ? match_test : 1.0);
         if (mode == RES_DYNAMIC) {
             static double pinned = -1;
             if (pinned < 0) pinned = getenv("LARECOMP_DYN_TEST") ? atof(getenv("LARECOMP_DYN_TEST")) : 0;
