@@ -167,6 +167,9 @@ extern uint32_t maxwell_push_base, maxwell_push_cap;
 extern bool maxwell_gmem_mirror;
 // Experimental (another game on the engine): RED and SUST.B are skipped instead of failing the shader.
 extern bool maxwell_skip_unsupported_stores;
+// Where the lit fragment shaders read the shadow map's texel size, in c4 (translate.c shadow_taps): 0x240, and 0x280 in
+// another game on the engine (EoW: its four compare taps are offset by c4[0x280], c4[0x284]).
+extern uint32_t maxwell_shadow_texel_off;
 // Lazy mode, vertex / fragment: the chunks under the draw's storage buffers (where the heap reads are) come as push
 // constants, GDirect { uvec4 gd[GMEM_DIRECT_MAX]; } (x = first word, y = words, 0: unused, z, w = device address), and
 // as storage buffers GDir<k> at GMEM_DIRECT_BINDING + k of the chunk set: an access in one is a compare and a plain
