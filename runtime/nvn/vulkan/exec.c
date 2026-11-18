@@ -1472,6 +1472,12 @@ void vk_exec_init(void) {
     maxwell_glsl_fast_minmax = fm && atoi(fm) != 0;
 #endif
     LOG("[vk] fast min / max %s (%s)\n", maxwell_glsl_fast_minmax ? "on" : "off", fm ? "LARECOMP_VK_FAST_MINMAX" : "default here");
+    // Compute image stores (SUST.B; shader.h maxwell_glsl_image_stores): EoW blends its environment map with them. The
+    // images are declared without a format, so the device must be able to write those. LARECOMP_SUST=0: skipped.
+    const char *su = getenv("LARECOMP_SUST");
+    maxwell_glsl_image_stores = g_vk.storage_write_no_format && !(su && !atoi(su));
+    LOG("[vk] compute image stores %s (%s)\n", maxwell_glsl_image_stores ? "on" : "off",
+        su ? "LARECOMP_SUST" : g_vk.storage_write_no_format ? "default" : "no shaderStorageImageWriteWithoutFormat");
     // The command buffers of every slot, from the pool, before the recorder thread exists: from then on the pool and
     // the buffers are the recorder's (begun, recorded, ended and submitted in packet order)
     for (int i = 0; i < SUBS; i++) {
@@ -3864,6 +3870,21 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
         if (size < si->cbuf_size[1]) size = si->cbuf_size[1];
         return ubo_span(guest_copy(ss->code_addr + ss->const_offset, size), size);  // (constant: shared per submission)
     }
+    if (k == 2 && stage == 5) {
+        // c2: the bound texture and image handles, as NVN lays them out (textures from 0x20, images from 0x120, 8 bytes
+        // each: handle_at), as renderer.m. A shader that loads a handle itself reads them here: EoW's environment-map
+        // pass (72a4723000) takes each face's image handle from c2[0x120 + 8 * slot] for its stores (SUST.B). Zeros
+        // matched no bound image and the map stayed black: metal (a chest's gold trim) went dull brown in shadow.
+        uint64_t size = si->cbuf_size[2] ? si->cbuf_size[2] : 256;
+        if (size > sizeof zeros) size = sizeof zeros;
+        uint64_t tbl[0x160 / 8] = {0};
+        for (int s = 0; s < 40; s++) tbl[(0x20 + 8 * s) / 8] = handle_at(5, s);
+        static uint8_t buf[0x10000];
+        uint64_t n = size > sizeof tbl ? size : sizeof tbl;
+        memset(buf, 0, n);
+        memcpy(buf, tbl, sizeof tbl);
+        return ubo_span(vk_transient_copy(buf, n, 256), n);
+    }
     int idx = k - 3;  // cbuf_base
     Range r = (idx >= 0 && idx < 18) ? st.ubuf[stage][idx] : (Range){0, 0};
     uint64_t size = si->cbuf_size[k] ? si->cbuf_size[k] : 256;
@@ -6003,6 +6024,42 @@ typedef struct SetCache { uint64_t seq; uint32_t view_gen, ds_gen; int n; VkDesc
 
 // dyn / ndyn: the set's dynamic offsets are appended at dyn[*ndyn] (binding order, as vkCmdBindDescriptorSets takes
 // them); NULL for programs without dynamic buffers (compute).
+// (compute SUST.B, as renderer.m) the bound images as 2D-array storage views of their registration's level and layers
+// (EoW binds each cube face as an image), and their handles for the shader's match; a slot with nothing writable gets
+// a dummy and a handle no store matches
+static void cs_images(VkImageView views[IMG_SLOTS], uint32_t hs[IMG_SLOTS]) {
+    static const VkComponentMapping idm = {0};
+    for (int k = 0; k < IMG_SLOTS; k++) {
+        uint64_t h = st.img[5][k];
+        uint32_t tic = h & 0xFFFFF;
+        VkImageView view = VK_NULL_HANDLE;
+        if (h && st.tpool && tic < (uint32_t)st.tpool->count) {
+            NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
+            // (as renderer.m) bound as an image: writable from now on - tex_backend makes it again with storage usage.
+            // EoW's environment-map faces are registered before nvnTexturePoolRegisterImage marks them (image_use 0 here)
+            if (e->tex && !e->tex->image_use && maxwell_glsl_image_stores) e->tex->image_use = true;
+            TexBackend *b = e->tex ? vk_tex(e->tex, true) : NULL;
+            if (b && (b->usage & VK_IMAGE_USAGE_STORAGE_BIT) && b->base_type != VK_IMAGE_VIEW_TYPE_3D &&
+                b->base_type != VK_IMAGE_VIEW_TYPE_1D && b->base_type != VK_IMAGE_VIEW_TYPE_1D_ARRAY) {
+                uint32_t lv = e->has_view && (e->view.setmask & 1) ? e->view.base_level : 0;
+                uint32_t ly0 = e->has_view && (e->view.setmask & 2) ? e->view.min_layer : 0;
+                uint32_t nly = e->has_view && (e->view.setmask & 2) && e->view.num_layers ? e->view.num_layers : b->layers - ly0;
+                if (ly0 >= b->layers) ly0 = 0, nly = b->layers;
+                if (ly0 + nly > b->layers) nly = b->layers - ly0;
+                if (lv < b->levels) view = vk_image_view(b, VK_IMAGE_VIEW_TYPE_2D_ARRAY, b->format, lv, 1, ly0, nly, idm, VK_IMAGE_ASPECT_COLOR_BIT);
+            }
+            if (!view) {
+                static int nlog;
+                if (nlog++ < 8) LOG("[images] slot %d handle %#llx: no writable image (%s, usage %#x, fmt %d, image_use %d)\n", k,
+                                    (unsigned long long)h, !e->tex ? "none" : "not writable / type", b ? b->usage : 0u,
+                                    b ? (int)b->format : 0, e->tex ? e->tex->image_use : -1);
+            }
+        }
+        hs[k] = view ? (uint32_t)h : 0xFFFFFFFFu;
+        views[k] = view ? view : vk_dummy_storage_view();
+    }
+}
+
 static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t set, int stage, ShaderInfo *si, const float *rscale_row0,
                                  const float tint[RECOLOUR_TINT_FLOATS], uint32_t gx, uint32_t gy, uint32_t gz, const VkDescriptorImageInfo *pre_ii,
                                  uint32_t *dyn, uint32_t *ndyn) {
@@ -6018,6 +6075,9 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
     rs[0][0] = rs[0][1] = 1; rs[0][2] = rs[0][3] = 0;
     if (rscale_row0) memcpy(rs[0], rscale_row0, 16);
     rs[65][0] = g_mirror_w; rs[65][1] = g_ao_taps; rs[65][2] = g_settings.ao_quality == AO_OFF; rs[65][3] = 0;  // ([65].z: AO Off)
+    VkImageView img_view[IMG_SLOTS];
+    uint32_t img_h[IMG_SLOTS];
+    if (si->uses_images) cs_images(img_view, img_h);
     for (int i = 0; i < p->nbinds; i++) {
         VkBindingInfo *b = &p->binds[i];
         if (b->set != set) continue;
@@ -6045,6 +6105,10 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
             bi[n] = b->binding != GFAST_BUFFER_INDEX ? gmem_info()
                     : gmir_on() ? (gmir_init(), (VkDescriptorBufferInfo){gmir_buf, 0, GMIR_SIZE}) : gfast_info();
             w[n].pBufferInfo = &bi[n];
+        } else if (b->type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE && si->uses_images && b->binding >= IMG_GLSL_BINDING &&
+                   b->binding < IMG_GLSL_BINDING + IMG_SLOTS) {
+            ii[n] = (VkDescriptorImageInfo){VK_NULL_HANDLE, img_view[b->binding - IMG_GLSL_BINDING], VK_IMAGE_LAYOUT_GENERAL};
+            w[n].pImageInfo = &ii[n];
         } else {
             continue;  // rscale / tint: written below, once the textures (and their scales) are known
         }
@@ -6052,10 +6116,13 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
     }
     for (int i = 0; i < p->nbinds; i++) {
         VkBindingInfo *b = &p->binds[i];
-        if (b->set != set || !is_ubo(b->type) || (b->binding != 18 && b->binding != 19 && b->binding != GMAP_BUFFER_INDEX)) continue;
+        if (b->set != set || !is_ubo(b->type) || (b->binding != 18 && b->binding != 19 && b->binding != GMAP_BUFFER_INDEX &&
+                                                   !(b->binding == IMG_GLSL_HANDLE_BINDING && si->uses_images))) continue;
         w[n] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = b->binding,
                                       .descriptorCount = 1, .descriptorType = b->type};
-        if (b->binding == GMAP_BUFFER_INDEX) {  // (compute) this dispatch's fast-copy table: gfast_prepare
+        if (b->binding == IMG_GLSL_HANDLE_BINDING) {  // (compute SUST.B) the bound images' handles: cs_images
+            bi[n] = ubo_span(vk_transient_copy(img_h, sizeof img_h, 256), sizeof img_h);
+        } else if (b->binding == GMAP_BUFFER_INDEX) {  // (compute) this dispatch's fast-copy table: gfast_prepare
             uint32_t mt[(GMAP_MAX + 1) * 4];      // (copies: every stage; a dispatch's was made before, gmir_table)
             if (gmir_on() && stage != 5) gmir_table(stage, false, NULL, mt);
             bi[n] = ubo_span(vk_transient_copy(gmir_on() && stage != 5 ? mt : gmap_tab, sizeof gmap_tab, 256), sizeof gmap_tab);
@@ -6709,6 +6776,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     if (gc_shift && cp->si->uses_gmem) gmem_chunk_bind(cb, VK_PIPELINE_BIND_POINT_COMPUTE, cp->p.layout, GMEM_CHUNK_SET(STAGE_COMPUTE), 1u << STAGE_COMPUTE);
     if (fold) rec_CmdDispatch(cb, (gx * gy * gz + CS_FOLD_LOCAL - 1) / CS_FOLD_LOCAL, 1, 1);
     else rec_CmdDispatch(cb, gx, gy, gz);
+    if (cp->si->uses_images) vk_full_barrier(cb);  // (its image stores, before the draws that sample them)
     if (cp->si->uses_gmem_map && cp->si->uses_gmem_store) {
         if (gmir_on()) gmir_after_dispatch(cb);  // (its slots: readbacks; what follows reads the slots)
         else gfast_finish(cb);
