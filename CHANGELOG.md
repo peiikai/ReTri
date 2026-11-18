@@ -55,6 +55,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- Mac: trees, bushes and grass cast shadows again.
 - Vulkan (Windows, Linux, Android): the hearts show as red hearts, not dark hearts in a red box.
 - Vulkan: draws that read what a compute pass just wrote get it, as on Mac (EoW's interiors were darker).
 - Vulkan: the rifts read the scene's stencil and line their map up, as on Mac.
