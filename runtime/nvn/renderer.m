@@ -3822,6 +3822,19 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
                     continue;
                 }
                 off = ring_alloc_padded((void *)(uintptr_t)gwc_redirect(r.addr, size), size, need);
+            } else if (k == 2) {
+                // c2: the bound texture and image handles, as NVN lays them out (textures from 0x20, images from 0x120,
+                // 8 bytes each: handle_at). A shader that loads a handle itself reads them here: EoW's environment-map
+                // pass (72a4723000) takes each face's image handle from c2[0x120 + 8 * slot] for its stores (SUST.B).
+                // Zeros matched no bound image, every store was dropped and the map stayed black: metal (chests,
+                // trim) lost its reflections and went dull brown in shadow.
+                uint64_t tbl[0x160 / 8] = {0};
+                for (int s = 0; s < 40; s++) tbl[(0x20 + 8 * s) / 8] = handle_at(5, s);
+                uint64_t n = size > sizeof tbl ? size : sizeof tbl;
+                static uint8_t buf[0x10000];
+                memset(buf, 0, n);
+                memcpy(buf, tbl, sizeof tbl);
+                off = ring_alloc(buf, n);
             } else {
                 static const uint8_t zeros[0x10000];
                 off = ring_alloc(zeros, (si->cbuf_dynamic & (1u << k)) && game_other() ? 0x10000 : size);
@@ -3912,7 +3925,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
             id<MTLTexture> view = nil;
             if (h && st.tpool && tic < (uint32_t)st.tpool->count) {
                 NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
-                if (e->tex && !e->tex->image_use && getenv("LARECOMP_SUST") && atoi(getenv("LARECOMP_SUST")))
+                if (e->tex && !e->tex->image_use && !(getenv("LARECOMP_SUST") && !atoi(getenv("LARECOMP_SUST"))))
                     e->tex->image_use = true;  // (bound as an image: allocated writable from now on)
                 id<MTLTexture> base = e->tex ? renderer_texture(e->tex, nil, true) : nil;
                 if (base && (base.usage & MTLTextureUsageShaderWrite)) {

@@ -57,6 +57,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 - Mac: trees, bushes and grass cast shadows again.
 - Shadow edges no longer show steps at Shadows 2x and 4x.
+- Mac: chests and other metal keep their shine in shadow.
 - Vulkan (Windows, Linux, Android): the hearts show as red hearts, not dark hearts in a red box.
 - Vulkan: draws that read what a compute pass just wrote get it, as on Mac (EoW's interiors were darker).
 - Vulkan: the rifts read the scene's stencil and line their map up, as on Mac.
