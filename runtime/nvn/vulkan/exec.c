@@ -6035,6 +6035,9 @@ static void cs_images(VkImageView views[IMG_SLOTS], uint32_t hs[IMG_SLOTS]) {
         VkImageView view = VK_NULL_HANDLE;
         if (h && st.tpool && tic < (uint32_t)st.tpool->count) {
             NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
+            // (as renderer.m) bound as an image: writable from now on - tex_backend makes it again with storage usage.
+            // EoW's environment-map faces are registered before nvnTexturePoolRegisterImage marks them (image_use 0 here)
+            if (e->tex && !e->tex->image_use && maxwell_glsl_image_stores) e->tex->image_use = true;
             TexBackend *b = e->tex ? vk_tex(e->tex, true) : NULL;
             if (b && (b->usage & VK_IMAGE_USAGE_STORAGE_BIT) && b->base_type != VK_IMAGE_VIEW_TYPE_3D &&
                 b->base_type != VK_IMAGE_VIEW_TYPE_1D && b->base_type != VK_IMAGE_VIEW_TYPE_1D_ARRAY) {
