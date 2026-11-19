@@ -1,14 +1,12 @@
-# ReTri on Linux (x86-64, aarch64)
+# ReTri on Linux (x86-64)
 
-Status: builds and runs the game on Vulkan (with your own game files) on x86-64, checked before
-each release by `make smoketest`. aarch64 is **experimental**: tested on a few ARM boards; reports welcome (see the end). `make appimage` / `make appimages`
-package the AppImages. The latest aarch64 one is on the rolling
-[Experimental builds](https://github.com/peiikai/LASRecomp/releases/tag/experimental) pre-release
-(`.github/workflows/experimental.yml`); releases from 1.0.0 on carry only the x86-64 one.
+Status: **not released yet.** The Linux build is being brought up (Vulkan, the same renderer as Windows); this page
+says what has been checked so far. aarch64 builds from source but is not a release target.
+`make appimage` packages the AppImage.
 
 ## Running the AppImage
-    chmod +x LAS.Recomp-<version>-linux-x86_64.AppImage
-    ./LAS.Recomp-<version>-linux-x86_64.AppImage
+    chmod +x ReTri-<version>-linux-x64.AppImage
+    ./ReTri-<version>-linux-x64.AppImage
 
 Needs: a distribution with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, Arch, ...), a Vulkan 1.3 driver
 (Mesa RADV / ANV / NVK / Turnip / Asahi Honeykrisp, or NVIDIA's), and on x86-64 a CPU with AVX2 (2013 or newer).
@@ -68,7 +66,7 @@ keeps its own `generated-aarch64/` and `build/aarch64/`. Distributions that name
 Needs podman, and for the other arch's AppImage QEMU user emulation with binfmt (`sudo apt install podman qemu-user
 qemu-user-binfmt`).
 
-    make appimage                # this machine's arch -> build/dist/ReTri-<version>-linux-<arch>.AppImage
+    make appimage                # this machine's arch -> build/dist/ReTri-<version>-linux-<x64|arm64>.AppImage
     make appimage ARCH=aarch64   # on x86-64: cross-compiled
     make appimages               # both
 
@@ -105,9 +103,7 @@ files or fonts.
 - Pages: 4K and 16K kernels (Asahi) work; 64K-page kernels (some ARM servers) are not supported.
 
 ## Testing on ARM (aarch64): what to report
-The aarch64 AppImage is on the [Experimental builds](https://github.com/peiikai/LASRecomp/releases/tag/experimental)
-page. It has been tested on a few ARM boards (RK3588 with a Mali GPU), so reports from other hardware
-(Asahi Linux, Snapdragon laptops, Raspberry Pi 5 and other boards) are welcome. Please include:
+ReTri has no aarch64 release yet. If you build it from source on an ARM machine, reports are welcome. Please include:
 
 1. **Distribution and kernel**: `cat /etc/os-release | head -3; uname -r; getconf PAGESIZE`
 2. **GPU and Vulkan driver**: `vulkaninfo --summary` (package `vulkan-tools`); at least the devices section with
@@ -119,7 +115,7 @@ page. It has been tested on a few ARM boards (RK3588 with a Mali GPU), so report
    an earlier run, that run's `eowrecomp-backup-*.log`, by date modified).
 5. **A crash backtrace with gdb** when the log's isn't enough:
 
-       ./LAS.Recomp-<version>-linux-aarch64.AppImage --appimage-extract    # -> squashfs-root/
+       ./ReTri-<version>-linux-arm64.AppImage --appimage-extract    # -> squashfs-root/
        cd ~/.local/share/eowrecomp
        gdb -batch -ex 'handle SIGSEGV nostop noprint pass' -ex run -ex 'thread apply all bt 20' \
            --args ~/squashfs-root/usr/bin/eowrecomp > gdb.txt 2>&1

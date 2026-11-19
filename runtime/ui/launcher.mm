@@ -139,9 +139,9 @@ static void save_png(id<MTLTexture> tex, const char *path) {
 #elif defined(__ANDROID__)
 #define LARECOMP_PLATFORM "android"
 #elif defined(__aarch64__)
-#define LARECOMP_PLATFORM "linux-aarch64"
+#define LARECOMP_PLATFORM "linux-arm64"
 #else
-#define LARECOMP_PLATFORM "linux-x86_64"
+#define LARECOMP_PLATFORM "linux-x64"
 #endif
 extern "C" const char *larecomp_version(void) { return LARECOMP_VERSION; }  // (the shader caches' tag)
 
