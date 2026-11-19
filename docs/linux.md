@@ -80,12 +80,12 @@ builds for the machine it runs on) frozen in the arm64 container under QEMU. The
 generated game code comes from the host (`generated/`, `generated-aarch64/`; `make appimage` runs `make gen` for it
 when missing).
 
-Release check of the x86-64 AppImage (`make smoketest`, tools/linux/smoketest.sh, ~7 minutes on this kind of machine):
-the start screen, then a session from a test save warping to four overworld spots and every dungeon's entrance. Each
-step is checked in the log and by a screenshot. `build/smoke/report.txt` ends with READY FOR
-RELEASE or NOT READY; `build/smoke/sheet.png` shows every screenshot. It needs `extracted/` in the checkout and a test
-save outside git (`~/.local/share/eowrecomp-smoketest/save`, or `LARECOMP_SMOKE_SAVE`): copy `save/` from any build
-after starting a new game once.
+Release check of the x86-64 AppImage (`make smoketest`, tools/linux/smoketest.sh; `tools/linux/smoketest.sh <AppImage>`
+for another one): the start screen's Set up from `extracted/` in the checkout (game files copied into
+`build/smoke/root`, the game code built with the bundled tools), the start screen, then a new game that plays its
+opening into the first room. Each step is checked in the log and by a screenshot. `build/smoke/report.txt` ends with
+READY FOR RELEASE or NOT READY; `build/smoke/sheet.png` shows every screenshot. Delete `build/smoke` afterwards: it
+holds a copy of the game files.
 
 The AppImage holds `eowrecomp`, `lasgen/`, the start screen font and the bundled libraries (SDL3,
 FFmpeg, shaderc). Not bundled: glibc, libstdc++, the Vulkan loader and the GPU drivers (always the system's). No game

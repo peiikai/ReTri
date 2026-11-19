@@ -499,7 +499,7 @@ appimage:
 appimages:
 	tools/linux/appimage.sh x86_64
 	tools/linux/appimage.sh aarch64
-# release check of the x86-64 AppImage: start screen, into the game, warps to the overworld and every dungeon
+# release check of the x86-64 AppImage: setup, start screen, a new game into the first room
 smoketest:
 	tools/linux/smoketest.sh
 
