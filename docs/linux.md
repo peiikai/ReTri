@@ -85,7 +85,8 @@ for another one): the start screen's Set up from `extracted/` in the checkout (g
 `build/smoke/root`, the game code built with the bundled tools), the start screen, then a new game that plays its
 opening into the first room. Each step is checked in the log and by a screenshot. `build/smoke/report.txt` ends with
 READY FOR RELEASE or NOT READY; `build/smoke/sheet.png` shows every screenshot. Delete `build/smoke` afterwards: it
-holds a copy of the game files.
+holds a copy of the game files. It needs Python's Pillow; on a slow machine raise the setup's limit with
+`SMOKE_SETUP_SECONDS` (default 3600) and the game's with `SMOKE_GAME_SECONDS` (default 600).
 
 The AppImage holds `eowrecomp`, `lasgen/`, the start screen font and the bundled libraries (SDL3,
 FFmpeg, shaderc). Not bundled: glibc, libstdc++, the Vulkan loader and the GPU drivers (always the system's). No game

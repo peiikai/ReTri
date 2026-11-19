@@ -18,6 +18,7 @@ APP=$(realpath "${1:-build/dist/ReTri-$VERSION-linux-x64.AppImage}")
 O=$REPO/build/smoke
 [ -x "$APP" ] || { echo "smoketest: no AppImage at $APP (make appimage)"; exit 2; }
 [ -d extracted/romfs ] || { echo "smoketest: no extracted/ game files in this checkout"; exit 2; }
+python3 -I -c 'import PIL' 2>/dev/null || { echo "smoketest: python3 needs Pillow (screenshot checks)"; exit 2; }
 
 rm -rf "$O" && mkdir -p "$O/root/build" "$O/shots"
 mkdir -p "$O/save"
@@ -34,30 +35,37 @@ import sys
 from PIL import Image, ImageStat
 print(1 if sum(ImageStat.Stat(Image.open(sys.argv[1]).convert('L')).mean) < 12 else 0)" "$1"; }
 
-# The AppImage runtime starts the game as a child process: each run gets a process group of its own (setsid), so
-# stopping it stops the game too - nothing it uses (the seed) is deleted while it still runs.
+# The AppImage runtime starts the game as a child process: each run gets a session of its own (setsid), so
+# stopping it stops the game too. The setup's compilers run in process groups of their own (plat_proc_spawn), so
+# the whole session is stopped, not just the first group: a compiler left running kept writing for minutes.
 start_app() {  # VAR=value...: the AppImage in the data folder, with those settings
     (cd "$O/root" && exec env "$@" setsid "$APP" </dev/null >/dev/null 2>&1) &
     APP_PG=$!
 }
-app_alive() { ps -e -o pgid=,stat= | awk -v g="$APP_PG" '$1 == g && $2 !~ /^Z/ {f = 1} END {exit !f}'; }
+app_alive() { ps -e -o sid=,stat= | awk -v g="$APP_PG" '$1 == g && $2 !~ /^Z/ {f = 1} END {exit !f}'; }
 stop_app() {
-    kill -TERM -- -"$APP_PG" 2>/dev/null
+    pkill -TERM -s "$APP_PG" 2>/dev/null
     for i in $(seq 1 20); do app_alive || break; sleep 0.5; done
-    app_alive && kill -KILL -- -"$APP_PG" 2>/dev/null
+    app_alive && pkill -KILL -s "$APP_PG" 2>/dev/null
     while app_alive; do sleep 0.5; done
     wait "$APP_PG" 2>/dev/null
 }
-wait_app() {  # seconds: status 0 = the game ended by itself in time, else it is stopped
-    for i in $(seq 1 "$1"); do app_alive || { wait "$APP_PG" 2>/dev/null; return 0; }; sleep 1; done
+wait_app() {  # seconds [log]: status 0 = the game ended by itself in time, else it is stopped
+    # (a fatal error leaves its dialog open until clicked: the log line ends the wait instead)
+    for i in $(seq 1 "$1"); do
+        app_alive || { wait "$APP_PG" 2>/dev/null; return 0; }
+        [ -n "${2:-}" ] && grep -qE '\*\*\* |FATAL' "$2" 2>/dev/null && break
+        sleep 1
+    done
     stop_app
     return 1
 }
 
 # ---- 0. setup (headless: LARECOMP_LAUNCHER_EXTRACT runs the start screen's Set up, logs the result and exits)
 t0=$(date +%s)
+# (building the game code takes ~30 min on a slow or busy machine: SMOKE_SETUP_SECONDS raises the limit)
 start_app LARECOMP_LAUNCHER_EXTRACT="$REPO/extracted"
-wait_app 1800
+wait_app "${SMOKE_SETUP_SECONDS:-3600}" "$O/root/eowrecomp.log"
 mv "$O/root/eowrecomp.log" "$O/setup.log" 2>/dev/null
 lib=$(ls "$O/root/extracted"/eowgame.* 2>/dev/null | head -1)
 if grep -q '\[launcher\] setup: .* -> READY' "$O/setup.log" && [ -n "$lib" ]; then
@@ -87,7 +95,7 @@ LAST=${SHOTS[${#SHOTS[@]}-1]}
 AT=$(IFS=,; echo "${SHOTS[*]::${#SHOTS[@]}-1}")
 start_app LARECOMP_NO_LAUNCHER=1 LARECOMP_SHOT_AT="$AT" LARECOMP_WINDOW_SHOT=$LAST \
     LARECOMP_SHOT_PATH="$O/root/build/frames/frame_$(printf %05d $LAST).png" LARECOMP_EXIT_AFTER_SHOT=1
-wait_app "${SMOKE_GAME_SECONDS:-600}"
+wait_app "${SMOKE_GAME_SECONDS:-600}" "$O/root/eowrecomp.log"
 rc=$?
 mv "$O/root/eowrecomp.log" "$O/game.log" 2>/dev/null
 L=$O/game.log
