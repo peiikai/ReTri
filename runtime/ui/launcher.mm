@@ -2387,11 +2387,27 @@ static void *prepare_cli_report(void *) {
 // SIGINT / SIGTERM (the launcher's Cancel): the build and the shader step stop at their next check; finished build
 // pieces are kept, so the next --prepare resumes. Exit 3.
 static volatile sig_atomic_t g_prep_cli_stop;
-static void prepare_cli_signal(int) { g_prep_cli_stop = 1, g_cancel_build = true, g_prep_skip = 1; }
+static volatile uint64_t g_prep_cli_stop_ms;  // (when: the log's "cancelled" line, against the steps' own times)
+static void prepare_cli_signal(int) {
+    if (!g_prep_cli_stop) g_prep_cli_stop_ms = SDL_GetTicks();
+    g_prep_cli_stop = 1, g_cancel_build = true, g_prep_skip = 1;
+}
+// The setup runs on this thread; the main thread reads the window's events meanwhile (below)
+static bool g_prep_cli_shaders_only;
+static std::atomic<bool> g_prep_cli_work_done{false};
+static void *prepare_cli_work(void *) {
+    if (g_prep_cli_shaders_only) prepare_shaders();
+    else extract_thread(NULL);
+    g_prep_cli_work_done = true;
+    return NULL;
+}
 extern "C" int launcher_prepare_cli(const char *root, const char *src) {
     g_root = root;
     signal(SIGINT, prepare_cli_signal);
     signal(SIGTERM, prepare_cli_signal);
+#ifdef _WIN32
+    signal(SIGBREAK, prepare_cli_signal);  // (Ctrl+Break)
+#endif
     setenv("LARECOMP_HIDDEN", "1", 1);  // (the window only holds the GPU device: never shown)
     bool have = src && *src;
     int same = have ? same_game_files(g_root, src) : check_copied_files(g_root).empty();
@@ -2409,17 +2425,27 @@ extern "C" int launcher_prepare_cli(const char *root, const char *src) {
     pthread_create(&rep, NULL, prepare_cli_report, NULL);
     if (same == 1 && check_game_files(g_root).empty()) {  // (set up already: the shaders only)
         fprintf(stderr, "[launcher] --prepare: game files set up already\n");
-        prepare_shaders();
+        g_prep_cli_shaders_only = true;
     } else {
         g_src = same == 1 ? "" : src;  // (the same version copied: only the game code to build)
         g_busy = true;
-        extract_thread(NULL);
     }
+    // A close request is a cancel too: Windows' taskkill (without /F) sends the hidden window WM_CLOSE, which only
+    // arrives while the main thread reads the window's events
+    pthread_t work;
+    pthread_create(&work, NULL, prepare_cli_work, NULL);
+    for (; !g_prep_cli_work_done; SDL_Delay(20)) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e))
+            if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) prepare_cli_signal(0);
+    }
+    pthread_join(work, NULL);
     g_prep_cli_done = true;
     pthread_join(rep, NULL);
     if (g_prep_cli_stop) {
         rt_cli_print("error Cancelled.\n");
-        fprintf(stderr, "[launcher] --prepare: cancelled\n");
+        fprintf(stderr, "[launcher] --prepare: cancelled (asked %llu ms before the end)\n",
+                (unsigned long long)(SDL_GetTicks() - g_prep_cli_stop_ms));
         return 3;
     }
     std::string why = check_game_files(g_root);

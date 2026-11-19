@@ -337,7 +337,7 @@ static const char *const HELP =
 // Printed output (--help, --version, --list-settings, --prepare's progress lines): the stdout the program was started
 // with, kept by rt_cli_init before the session log takes stdout and stderr over (plat_init: a log file when they aren't
 // a terminal). Windows: the release exe is a GUI program - its inherited stdout (a file or pipe), else the parent's
-// console (plat_cli_begin), else a message box.
+// console (attached), else a message box (one-shot output only: not each progress line).
 #ifdef _WIN32
 static HANDLE g_cli_out;
 #else
@@ -353,7 +353,13 @@ static void rt_cli_init(void) {
         DuplicateHandle(GetCurrentProcess(), h, GetCurrentProcess(), &g_cli_out, 0, FALSE, DUPLICATE_SAME_ACCESS))
         return;
     g_cli_out = NULL;
-    plat_cli_begin();  // (no stdout: the console it was started from)
+    // No stdout (a GUI program started from a console): that console. Not plat_cli_begin, which follows stderr: with
+    // only stderr redirected (2> file), the progress lines went into that file.
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        HANDLE c = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                               OPEN_EXISTING, 0, NULL);
+        if (c != INVALID_HANDLE_VALUE) g_cli_out = c;
+    }
 #else
     g_cli_fd = dup(STDOUT_FILENO);
 #endif
@@ -367,7 +373,8 @@ void rt_cli_print(const char *s) {
         for (const char *p = s; n && WriteFile(g_cli_out, p, (DWORD)n, &w, NULL) && w; p += w, n -= w) {}
         return;
     }
-    if (!plat_cli_write(s, n)) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "ReTri", s, NULL);
+    if (strncmp(s, "progress ", 9))  // (no console either: started from Explorer)
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "ReTri", s, NULL);
 #else
     for (const char *p = s; n && g_cli_fd >= 0;) {
         ssize_t w = write(g_cli_fd, p, n);
