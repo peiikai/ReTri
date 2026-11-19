@@ -2365,16 +2365,19 @@ extern "C" void launcher_autoplay(void) { g_autoplay = g_cli_play = true; }
 // 0: ready to play; 1: it failed (the line before says why, the log has the details); 3: cancelled.
 extern "C" void rt_cli_print(const char *s);  // runtime/main.c (stdout; Windows: the console or pipe)
 static std::atomic<bool> g_prep_cli_done{false};
+static volatile sig_atomic_t g_prep_cli_stop;  // (prepare_cli_signal)
 static void *prepare_cli_report(void *) {
     std::string last_job;
     int last_pct = -1;
     while (!g_prep_cli_done) {
-        float f = g_prep_frac >= 0 ? 0.8f + 0.2f * g_prep_frac : 0.8f * extract_progress();
+        if (g_prep_cli_stop) { SDL_Delay(50); continue; }  // (cancelled: no more progress, the steps wind down)
+        float pf = g_prep_frac;  // (once: the shader step sets it back to -1 as it ends)
+        float f = pf >= 0 ? 0.8f + 0.2f * pf : 0.8f * extract_progress();
         pthread_mutex_lock(&g_lock);
-        std::string job = g_prep_frac >= 0 ? std::string(LN("Preparing shaders")) : g_job;
+        std::string job = pf >= 0 ? std::string(LN("Preparing shaders")) : g_job;
         pthread_mutex_unlock(&g_lock);
-        int pct = (int)(f * 200);  // (a line per half percent at most)
-        if (!job.empty() && (pct != last_pct || job != last_job)) {
+        int pct = (int)(f * 200);  // (a line per half percent at most, and never back: "0.000" after the shaders)
+        if (!job.empty() && (pct > last_pct || (pct == last_pct && job != last_job))) {
             char line[512];
             snprintf(line, sizeof line, "progress %.3f %s\n", f, job.c_str());
             rt_cli_print(line);
@@ -2386,7 +2389,6 @@ static void *prepare_cli_report(void *) {
 }
 // SIGINT / SIGTERM (the launcher's Cancel): the build and the shader step stop at their next check; finished build
 // pieces are kept, so the next --prepare resumes. Exit 3.
-static volatile sig_atomic_t g_prep_cli_stop;
 static volatile uint64_t g_prep_cli_stop_ms;  // (when: the log's "cancelled" line, against the steps' own times)
 static void prepare_cli_signal(int) {
     if (!g_prep_cli_stop) g_prep_cli_stop_ms = SDL_GetTicks();
@@ -2432,6 +2434,9 @@ extern "C" int launcher_prepare_cli(const char *root, const char *src) {
     }
     // A close request is a cancel too: Windows' taskkill (without /F) sends the hidden window WM_CLOSE, which only
     // arrives while the main thread reads the window's events
+#ifdef _WIN32
+    plat_on_close_request([] { prepare_cli_signal(0); });  // (taskkill's WM_CLOSE may go to the driver's window)
+#endif
     pthread_t work;
     pthread_create(&work, NULL, prepare_cli_work, NULL);
     for (; !g_prep_cli_work_done; SDL_Delay(20)) {

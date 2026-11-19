@@ -153,6 +153,10 @@ void plat_exec(char *const argv[]);  // replace the process (NULL = same command
 void plat_terminate(void);  // end the process now, skipping DLL teardown (exit status 0)
 void plat_terminate_code(int code);  // the same with that exit status (--prepare, --list-settings: runtime/main.c)
 #endif
+#ifdef _WIN32
+// fn on a close request (WM_CLOSE) to any of the process's windows, from the thread that owns it (--prepare: taskkill)
+void plat_on_close_request(void (*fn)(void));
+#endif
 
 // Child processes (game code generator, game-file extraction). stdout + stderr go to log_path (NULL = /dev/null).
 typedef intptr_t PlatProc;  // 0 = failed to start

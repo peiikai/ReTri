@@ -992,6 +992,31 @@ const char *plat_cloud_synced(const char *dir) {
     return NULL;
 }
 
+// plat_on_close_request: taskkill without /F posts WM_CLOSE to the process's top-level windows, but not necessarily
+// SDL's: with a hidden window (--prepare) it reached the GPU driver's own window (NVIDIA's temp_d3d_window), which
+// ignores it. A message hook on every thread that owns one of our windows sees the WM_CLOSE whichever window it's for.
+static void (*g_close_fn)(void);
+static LRESULT CALLBACK close_hook(int code, WPARAM wp, LPARAM lp) {
+    MSG *m = (MSG *)lp;
+    if (code == HC_ACTION && wp == PM_REMOVE && m->message == WM_CLOSE && g_close_fn) {
+        g_close_fn();
+        m->message = WM_NULL;  // (the driver's window stays: the steps still use the device as they wind down)
+    }
+    return CallNextHookEx(NULL, code, wp, lp);
+}
+static BOOL CALLBACK close_hook_thread(HWND w, LPARAM lp) {
+    DWORD pid = 0, tid = GetWindowThreadProcessId(w, &pid), *seen = (DWORD *)lp;  // (seen[0]: how many)
+    if (pid != GetCurrentProcessId()) return TRUE;
+    for (DWORD i = 1; i <= seen[0]; i++) if (seen[i] == tid) return TRUE;
+    if (seen[0] < 31 && SetWindowsHookExW(WH_GETMESSAGE, close_hook, NULL, tid)) seen[++seen[0]] = tid;
+    return TRUE;
+}
+void plat_on_close_request(void (*fn)(void)) {
+    g_close_fn = fn;
+    DWORD seen[32] = {0};
+    EnumWindows(close_hook_thread, (LPARAM)seen);
+}
+
 // End the process at once, skipping DLL teardown (from an atexit handler, after flushing). Exit status 0.
 void plat_terminate(void) { publish_log(); TerminateProcess(GetCurrentProcess(), 0); }
 void plat_terminate_code(int code) { publish_log(); TerminateProcess(GetCurrentProcess(), (UINT)code); }

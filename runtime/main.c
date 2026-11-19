@@ -353,9 +353,13 @@ static void rt_cli_init(void) {
         DuplicateHandle(GetCurrentProcess(), h, GetCurrentProcess(), &g_cli_out, 0, FALSE, DUPLICATE_SAME_ACCESS))
         return;
     g_cli_out = NULL;
-    // No stdout (a GUI program started from a console): that console. Not plat_cli_begin, which follows stderr: with
-    // only stderr redirected (2> file), the progress lines went into that file.
-    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+    // No stdout (a GUI program started from a console): that console. Not plat_cli_begin's handle, which follows
+    // stderr: with only stderr redirected (2> file), the progress lines went into that file. Without stderr either,
+    // plat_cli_begin all the same: it attaches, and the session log goes to its file (attaching gives the process
+    // console handles the C library's stderr never uses, so the log went nowhere).
+    HANDLE e = GetStdHandle(STD_ERROR_HANDLE);
+    if (!e || e == INVALID_HANDLE_VALUE || GetFileType(e) == FILE_TYPE_UNKNOWN) plat_cli_begin();
+    if (AttachConsole(ATTACH_PARENT_PROCESS) || GetLastError() == ERROR_ACCESS_DENIED) {  // (denied: attached already)
         HANDLE c = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                                OPEN_EXISTING, 0, NULL);
         if (c != INVALID_HANDLE_VALUE) g_cli_out = c;
