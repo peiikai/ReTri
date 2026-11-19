@@ -3909,7 +3909,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
         // texels are 3x finer and the rift's edges are clean lines instead of steps (the first view only until a final
         // one is known, and when the rift's map is not drawn for 4 frames). LARECOMP_RIFT_FIRST_ROWS=1: the first rows.
         // Both read cb4 from a CPU copy, never the GPU's copy of a dispatch's results: draw_ waits for those first.
-        static float map_rows[8], final_rows[8];
+        // The map's depth row (row 2; the mask's row 35) goes with them, as renderer.m (talking next to a rift).
+        static float map_rows[12], final_rows[12];
         static uint64_t map_frame = ~0ull, final_frame, mask_addr;
         static int first = -1;
         if (first < 0) first = getenv("LARECOMP_RIFT_FIRST_ROWS") != NULL;
@@ -3922,25 +3923,27 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 bool identity = g[0] == 1 && g[1] == 0 && g[2] == 0 && g[3] == 0 && g[4] == 0 && g[5] == 1 && g[6] == 0 && g[7] == 0;
                 if (!identity) {
                     for (int i = 0; i < 8; i++) final_rows[i] = (g[i] - ((i & 3) == 3 ? 0.5f : 0.0f)) * 2.0f;
+                    memcpy(final_rows + 8, g + 8, 16);
                     final_frame = fr;
                 }
                 mask_addr = 0;
             }
             bool use_final = !first && final_frame && fr - final_frame <= 4;
-            if (map_frame != fr) memcpy(map_rows, use_final ? final_rows : (const float *)(uintptr_t)r.addr, 32);
+            if (map_frame != fr) memcpy(map_rows, use_final ? final_rows : (const float *)(uintptr_t)r.addr, r.size >= 48 ? 48 : 32);
             map_frame = fr;
             { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: rift map cb4 %llx+%llu (%s rows, pending dispatches %d, copies %d)\n", GW_AT(), (unsigned long long)r.addr, (unsigned long long)size, use_final ? "final" : "first", ngwp, ngwc); }
             memcpy(buf, (const void *)(uintptr_t)r.addr, size);  // (a CPU copy, not a GPU copy)
-            memcpy(buf, map_rows, 32);
+            memcpy(buf, map_rows, size >= 48 ? 48 : 32);
             return ubo_span(vk_transient_copy(buf, size, 256), size);
         }
-        if (rift_rows_on() && stage == 1 && k == 4 && g_cur_fs_hash == RIFT_MASK_FS && size >= 35 * 16 &&
+        if (rift_rows_on() && stage == 1 && k == 4 && g_cur_fs_hash == RIFT_MASK_FS && size >= 36 * 16 &&
             map_frame == renderer_exec_frame()) {
             mask_addr = r.addr;
             memcpy(buf, (const void *)(uintptr_t)r.addr, size);
             float *row = (float *)buf + 33 * 4;
-            { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: rift mask cb4 %llx+%llu rows 33-34 from the map (pending dispatches %d, copies %d)\n", GW_AT(), (unsigned long long)r.addr, (unsigned long long)size, ngwp, ngwc); }
+            { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: rift mask cb4 %llx+%llu rows 33-35 from the map (pending dispatches %d, copies %d)\n", GW_AT(), (unsigned long long)r.addr, (unsigned long long)size, ngwp, ngwc); }
             for (int i = 0; i < 8; i++) row[i] = map_rows[i] * 0.5f + ((i & 3) == 3 ? 0.5f : 0.0f);
+            memcpy(row + 8, map_rows + 8, 16);
             return ubo_span(vk_transient_copy(buf, size, 256), size);
         }
     }
