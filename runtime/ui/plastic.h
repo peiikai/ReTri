@@ -19,6 +19,7 @@ struct PlasticTheme {
     float glare;    // over a dark scene the pieces come down by up to this much
     float corner;   // rows, buttons and tabs: their rounding at most this (design pixels; 0: as the caller asks)
     bool brackets;  // the cursor: corner brackets round the piece (gold on top, green below) instead of a lit rim
+    bool button_row;  // actions: drawn as rows, a chevron in the arrow colour marking them (not raised, lit buttons)
 };
 // LA's; another game on the engine (game_other) gets its own pause menu's colours
 const PlasticTheme &plastic_theme(void);

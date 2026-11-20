@@ -26,7 +26,7 @@ static ImVec4 hex(unsigned rgb, float a = 1) {
 static ImU32 hex32(unsigned rgb, unsigned a = 255) { return IM_COL32(rgb >> 16 & 255, rgb >> 8 & 255, rgb & 255, a); }
 
 // Echoes of Wisdom's pause menu: dark plum-brown, a bronze frame, flat grey-brown cells with thin lighter edges, tan
-// badges with dark glyphs, the selected tab's name gold-orange, the cursor corner brackets (gold above, green below)
+// badges with dark glyphs, bronze accents, the cursor corner brackets (gold above, green below)
 static const PlasticTheme &theme_eow(void) {
     static PlasticTheme t;
     static bool init;
@@ -41,25 +41,28 @@ static const PlasticTheme &theme_eow(void) {
         t.row_sel = hex(0x463A33);
         t.row_mark = hex(0x3C322D);
         t.row_hot = hex(0x463A33);   // (ImGui's own buttons under the cursor: as the selection)
-        t.button = hex(0xD8B27C);
+        // actions as rows: they light up only under the cursor or the mouse, like the rest (the tan buttons looked lit
+        // at rest, and were LA's gold; user 2026-11-20)
+        t.button = hex(0x2E2826);
         t.danger = hex(0x7A2E28);
         t.tab = hex(0x2E2826);
         t.tab_sel = hex(0x3C302C);
         t.tab_hot = hex(0x463A33);  // (a tab under the mouse or the cursor: lighter than the rest; unset it was see-through)
         t.ring = hex(0x4A403A);
         t.ring_sel = hex(0x6A5A50);
-        t.bar = hex(0xE8A85A);  // (the title's gold-orange: the selection's grey-brown was lost in the dark track)
+        // No gold: it was LA's (user 2026-11-20). Accents are bronze; arrows and the selected tab's name cream.
+        t.bar = hex(0xB88A68);  // (bronze: the selection's grey-brown was lost in the dark track)
         t.text = hex32(0xF0E8DC);
         t.text_dim = hex32(0x9E9286);
         t.text_sel = hex32(0xF0E8DC);
-        t.text_button = hex32(0x3A2618);
-        t.text_tab_sel = hex32(0xE8A85A);
-        t.section = hex32(0xE8A85A);
+        t.text_button = hex32(0xF0E8DC);
+        t.text_tab_sel = hex32(0xF0E8DC);
+        t.section = hex32(0xC49A7A);
         t.value = hex32(0xF0E8DC);
-        t.value_changed = hex32(0xF0D890);
+        t.value_changed = hex32(0xE2BFA6);
         t.warn = hex32(0xF2A48C);
-        t.title = hex32(0xE8A85A);
-        t.arrow = hex32(0xD8B27C);
+        t.title = hex32(0xC49A7A);
+        t.arrow = hex32(0xCDBFB2);
         t.ring_w = 1.5f;
         t.pill_gloss = 0.0f;  // (not glossy)
         t.edge = 0.0f;
@@ -68,6 +71,7 @@ static const PlasticTheme &theme_eow(void) {
         t.glare = 0.0f;
         t.corner = 6.0f;
         t.brackets = true;
+        t.button_row = true;
     }
     return t;
 }
