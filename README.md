@@ -166,7 +166,7 @@ GetMoreRam. More on the iOS app is there too.
 4. Click **Set up game files**. ReTri copies the files it needs and builds the game code from them. You only do
    this once. It takes a few minutes on a fast computer and longer on slower ones and on phones.
 5. ReTri then prepares the shaders, which takes a minute or more. You can skip it and play right away, but new
-   areas may stutter the first time.
+   areas may stutter the first time, so we don't recommend it.
 6. Choose **Play**.
 
 In game, open ReTri's menu with F1, or Home or Minus + Plus on a controller.
