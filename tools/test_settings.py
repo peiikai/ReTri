@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory() as directory:
     cases = [(setting, {}, code) for setting, code in
              [('zh-CN', 'zh-Hans'), ('zh-TW', 'zh-Hant'), ('zh-Hans', 'zh-Hans'),
               ('zh-Hant', 'zh-Hant'), ('en-US', 'en-US'), ('ja', 'ja'), ('unknown', 'en-US'),
-              ('pt-BR', 'en-US')]]
+              ('pt-BR', 'pt-BR')]]
     if sys.platform.startswith('linux'):
         for locale in ['zh_CN.UTF-8', 'zh_SG.UTF-8', 'zh-Hans', 'zh-Hans-HK', 'zh_Hans_CN', 'zh']:
             cases.append(('auto', {'LC_ALL': locale}, 'zh-Hans'))
@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory() as directory:
                   ('auto', {'LANG': 'zh_MO.UTF-8'}, 'zh-Hant'),
                   ('auto', {'LC_ALL': 'zh_CN.UTF-8', 'LC_MESSAGES': 'zh_HK.UTF-8'}, 'zh-Hans'),
                   ('auto', {'LC_ALL': 'ja_JP.UTF-8'}, 'ja'), ('auto', {'LC_ALL': 'C'}, 'en-US'),
-                  ('auto', {'LC_ALL': 'pt_BR.UTF-8'}, 'en-US')]
+                  ('auto', {'LC_ALL': 'pt_BR.UTF-8'}, 'pt-BR')]
     count = 0
     for newline in ['\n', '\r\n']:
         for setting, locale, code in cases:
@@ -41,7 +41,7 @@ with tempfile.TemporaryDirectory() as directory:
                 env.update(locale)
                 subprocess.run([str(exe), code, seed], env=env, check=True, capture_output=True)
                 saved = ini.read_text()
-                expected = 'auto' if setting in ['auto', 'unknown'] else setting if setting == 'pt-BR' else code  # (the menus' only)
+                expected = 'auto' if setting in ['auto', 'unknown'] else code
                 assert f'language = {expected}\n' in saved
                 assert f'rando_seed = {seed}\n' in saved
                 count += 1

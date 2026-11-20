@@ -76,11 +76,11 @@ Settings g_settings = {
 #endif
 };
 
-// The game's own text languages: its RomFS carries these per region (regionUS/USen|USes|USfr, regionEU/EUen|EUes|...,
-// regionJP/JPja, regionKR/KRkr, regionTW/TWch, regionCN/CNch), and the game picks one from the system language it
-// reads back (runtime/services/am.c), exactly as it does on the console. Codes as the Switch reports them, except for
-// the Chinese ones: the game only recognizes zh-Hans / zh-Hant and falls back to Japanese when told zh-CN / zh-TW.
-// Then the menus' own (N_GAME_LANGUAGES on): the game has no text in them, its text stays English.
+// The game's own text languages: its RomFS carries these per region (regionUS/USen|USes|USfr|USpt,
+// regionEU/EUen|EUes|..., regionJP/JPja, regionKR/KRko, regionTW/TWzh, regionCN/CNzh), and the game picks one from the
+// system language it reads back (runtime/services/am.c), exactly as it does on the console. Codes as the Switch
+// reports them, except for the Chinese ones: the game only recognizes zh-Hans / zh-Hant and falls back to Japanese
+// when told zh-CN / zh-TW. pt-BR is USpt.
 const char *const g_language_codes[N_LANGUAGES] = {"auto", "ja", "en-US", "es", "fr", "de", "it", "nl", "ru", "ko",
                                                    "zh-Hans", "zh-Hant", "pt-BR"};
 const char *const g_language_names[N_LANGUAGES] = {"Auto", "Japanese", "English", "Spanish", "French", "German",
@@ -160,12 +160,7 @@ const char *settings_menu_language(void) {
     return i > LANG_AUTO && i < N_LANGUAGES ? g_language_codes[i] : host_language();
 }
 
-const char *settings_language(void) {
-    const char *c = settings_menu_language();
-    for (int i = N_GAME_LANGUAGES; i < N_LANGUAGES; i++)
-        if (!strcmp(c, g_language_codes[i])) return "en-US";  // (the menus' only)
-    return c;
-}
+const char *settings_language(void) { return settings_menu_language(); }
 
 const char *settings_language_name(void) {
     const char *c = settings_menu_language();
