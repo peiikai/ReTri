@@ -251,6 +251,9 @@ Thanks also to everyone who reports issues and tests builds. Your logs and scree
 - [BIZ UDPGothic](https://github.com/googlefonts/morisawa-biz-ud-gothic) by Morisawa - the game's text on Linux when you haven't imported the Switch fonts: a free font from the same universal-design gothic family as the Switch's UD Shin Go (SIL Open Font License 1.1, `third_party/fonts/BIZUDPGothic/OFL.txt`)
 - [DejaVu Sans](https://dejavu-fonts.github.io) - the in-game menu and button letters when no system font fits, and the game text's last resort (Bitstream Vera / DejaVu license, `third_party/fonts/DejaVu/LICENSE`)
 - [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) - Windows and Linux renderer (MIT)
+- [Monocypher](https://monocypher.org) by Loup Vaillant and contributors - checks the signature of updates on Windows and
+  Linux (CC0, `third_party/monocypher/LICENCE.md`)
+- [Sparkle](https://sparkle-project.org) - the macOS app's updater (MIT, `Contents/Resources/Sparkle-LICENSE.txt` in the app)
 - [SMAA](https://github.com/iryoku/smaa) by Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and Diego
   Gutierrez - the anti-aliasing option (MIT, `third_party/smaa/LICENSE.txt`)
 - [AMD FidelityFX Super Resolution 1](https://github.com/GPUOpen-Effects/FidelityFX-FSR) - the Windows and Linux upscaler
@@ -291,7 +294,7 @@ ReTri's own code (the recompiler tools, the runtime) is open source under the
 Vulkan Memory Allocator (MIT), SMAA (MIT), AMD FSR 1 (MIT), the Baloo 2 and BIZ UDPGothic fonts (SIL OFL 1.1), the Hylia Serif font (free, not for profit), the DejaVu Sans font (Bitstream Vera / DejaVu license), SDL 3 (zlib), FFmpeg (LGPL 2.1+, linked dynamically, and statically in the iOS app), the
 Zig compiler (MIT; its LLVM / Clang / LLD: Apache 2.0 with LLVM exceptions; its C library headers keep their own
 licenses), the iOS kit's Mach-O linker (LLD as built by the Rust project: Apache 2.0 with LLVM exceptions), miniz
-(MIT: the iOS kit and the .ipa it makes). The iOS app links SDL 3 and FFmpeg (LGPL 2.1+) statically; the app's `LICENSES/` folder carries each one's licence text, its sources are this repository
+(MIT: the iOS kit and the .ipa it makes), Monocypher (CC0: update signatures), Sparkle (MIT: the macOS updater). The iOS app links SDL 3 and FFmpeg (LGPL 2.1+) statically; the app's `LICENSES/` folder carries each one's licence text, its sources are this repository
 plus the versions in the table (the LGPL libraries can be relinked: `make deps-ios` builds them from source, `make ipa`
 the app), and the game code library it embeds is built from the player's own game files and never shared. The license covers ReTri's code only - it grants
 nothing for Nintendo's game, which you must supply yourself.

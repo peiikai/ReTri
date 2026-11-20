@@ -3,7 +3,8 @@
 # Contents/Frameworks: every non-system dylib it loads (SDL3, FFmpeg; from build/deps, else Homebrew), load
 # paths rewritten to @rpath; Contents/Resources: the icon and what the start screen builds the game code with on the
 # player's machine (runtime/gamebuild.c, whose generator is in the executable): the compiler (build/zig,
-# tools/fetch_zig.sh) and the headers the code is compiled against (gamelib-src/). Ad-hoc signed. No game files, game code or fonts: the
+# tools/fetch_zig.sh) and the headers the code is compiled against (gamelib-src/); Contents/Frameworks/Sparkle.framework:
+# the updater (tools/fetch_sparkle.sh, runtime/ui/sparkle.mm), with the feed of this build's channel. Ad-hoc signed. No game files, game code or fonts: the
 # app keeps those in ~/Library/Application Support/<bundle id> (runtime/paths.h).
 # MACOS_MIN=<x.y>: LSMinimumSystemVersion, and every Mach-O inside must be built for it or older (else it fails and
 # lists them); without it the newest minimum found inside is used.
@@ -33,6 +34,27 @@ C="$APP/Contents"
 mkdir -p "$C/MacOS" "$C/Frameworks" "$C/Resources"
 cp "$EXE" "$C/MacOS/eowrecomp"
 strip -S "$C/MacOS/eowrecomp"  # (debug-map entries only: the symbols crash reports name functions by stay)
+# Sparkle: the framework as released (its own ad-hoc signatures kept: ditto), the feed of this build's channel, and
+# the update key's public half (runtime/update.cpp UPDATE_PUBLIC_KEY, hex there, base64 here). Until the key exists
+# (all zeros) the app gets no feed and Sparkle stays off.
+tools/fetch_sparkle.sh
+ditto build/sparkle/Sparkle.framework "$C/Frameworks/Sparkle.framework"
+cp build/sparkle/LICENSE "$C/Resources/Sparkle-LICENSE.txt"
+UPDATE_KEY=$(sed -n 's/^#define UPDATE_PUBLIC_KEY "\([0-9a-f]\{64\}\)"/\1/p' runtime/update.cpp)
+[ -n "$UPDATE_KEY" ] || { echo "no UPDATE_PUBLIC_KEY in runtime/update.cpp"; exit 1; }
+SPARKLE_KEYS=
+if [ "$UPDATE_KEY" != "$(printf '%064d' 0)" ]; then
+    case $TAG in
+        nightly-*) FEED=https://github.com/peiikai/ReTri/releases/download/nightly/appcast-macOS.xml ;;
+        *) FEED=https://github.com/peiikai/ReTri/releases/latest/download/appcast-macOS.xml ;;
+    esac
+    ED_KEY=$(printf '%s' "$UPDATE_KEY" | xxd -r -p | base64)
+    # (SUEnableAutomaticChecks false: Sparkle's own schedule off and no permission prompt; the app checks once at launch)
+    SPARKLE_KEYS="<key>SUFeedURL</key><string>$FEED</string>
+    <key>SUPublicEDKey</key><string>$ED_KEY</string>
+    <key>SUEnableAutomaticChecks</key><false/>
+    <key>SUVerifyUpdateBeforeExtraction</key><true/>"
+fi
 cp -R "$ZIG" "$C/Resources/zig"
 mkdir "$C/Resources/gamelib-src"
 cp runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/gamelib_entry.c "$C/Resources/gamelib-src/"
@@ -122,6 +144,7 @@ cat > "$C/Info.plist" <<EOF
     <key>LSArchitecturePriority</key><array><string>arm64</string></array>
     <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
     <key>NSHighResolutionCapable</key><true/>
+    $SPARKLE_KEYS
 </dict>
 </plist>
 EOF
@@ -129,9 +152,12 @@ printf 'APPL????' > "$C/PkgInfo"
 
 # ---- ad-hoc signature (Apple Silicon refuses to run unsigned code; the rewrites above invalidated the originals):
 # every Mach-O inside first, then the bundle
-while read -r f; do [ "$f" = "$C/MacOS/eowrecomp" ] || codesign -f -s - "$f" 2>/dev/null; done < <(machos)
+# (Sparkle.framework keeps its own signatures, made inside-out: re-signing its pieces here would leave its seal stale)
+while read -r f; do
+    case $f in "$C/MacOS/eowrecomp"|"$C/Frameworks/Sparkle.framework/"*) ;; *) codesign -f -s - "$f" 2>/dev/null ;; esac
+done < <(machos)
 codesign -f -s - "$APP"
-codesign --verify --strict "$APP"
+codesign --verify --deep --strict "$APP"
 if find "$APP" -name 'eowgame*' | grep . >/dev/null; then echo "game code inside $APP"; exit 1; fi
 # no path of this machine inside (configure lines, debug paths). Not on CI: its paths name no one
 if [ "${CI:-}" != true ]; then
