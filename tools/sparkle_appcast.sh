@@ -1,7 +1,7 @@
 #!/bin/bash
 # The macOS update feed for Sparkle (runtime/ui/sparkle.mm): build/dist/appcast-macOS.xml with one item, this build's
 # .dmg, signed with UPDATE_SIGNING_KEY (EdDSA, the same key as the Windows and Linux manifests:
-# tools/update_sign.cpp). It goes on the release next to the .dmg (CONTRIBUTING "Making a release"); the apps read it from
+# tools/update_sign.cpp). It goes on the release next to the .dmg; the apps read it from
 # releases/latest/download/ (releases) or releases/download/nightly/ (nightlies), tools/bundle_macos.sh. Without the
 # key it only warns: no feed, and the app's Download still works.
 # Usage: tools/sparkle_appcast.sh <tag the release is published under: v0.7.0 or nightly> <dmg>
