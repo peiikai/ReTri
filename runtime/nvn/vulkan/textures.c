@@ -208,7 +208,8 @@ uint64_t renderer_present_count(void);
 // The game's ambient occlusion has a scale of its own (issue #356, #602): see metal.m tex_ao.
 static bool tex_ao(const NvnTexture *t) {
     if (output_scale_ao(1) <= 0) return false;
-    return t->format == 0x1 || (t->format == 0x35 && t->width <= 480);  // R8 unorm / D24S8, 16:9 (checked by the caller)
+    // (R8 unorm / D24S8, 16:9: checked by the caller; EoW's AO depth is 704x396)
+    return t->format == 0x1 || (t->format == 0x35 && t->width <= (game_other() ? 704 : 480));
 }
 
 // The game's shadow map (one 2048x2048 depth-stencil, not 16:9, so the frame's scale never reaches it): its own scale,

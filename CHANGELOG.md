@@ -78,6 +78,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Mac: the frame rate no longer slides from 60 to under 30 after the window loses focus (seen at 5120x1440). The
   GPU slowed its clock because each frame's present deadline was set from when it was sent, which a late frame
   still met. Deadlines now follow the 60 fps schedule, so a late frame asks for a faster clock.
+- Ambient occlusion Off removes the soft shadows in corners and around objects (it changed nothing), and High
+  draws them sharper.
 - Retroid Pocket: the face buttons match their labels (A and B, X and Y were swapped).
 - With Aspect ratio Unlocked, the lock-on reticle sits on its target in wide windows (it was pulled toward the
   centre), and so do action prompts and other markers placed over things in the world.
