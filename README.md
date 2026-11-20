@@ -230,11 +230,8 @@ without touching the installed game, your game files or your saves.
 **Contributors** - ReTri shares its code base with [LAS Recomp](https://github.com/peiikai/LASRecomp). Thank you to
 everyone who has contributed to it; they're listed in its README.
 
-**Mobile ports** - special thanks to the people who brought the game to phones and tablets:
-- Android: **[@Nycolazs](https://github.com/Nycolazs)** ([LASRecomp-Android-Plus](https://github.com/Nycolazs/LASRecomp-Android-Plus))
-  and **[@mamcjr](https://github.com/mamcjr)** ([LASRecompAndroid](https://github.com/mamcjr/LASRecompAndroid)), the
-  Android ports our Android app is built from
-- iOS: **[@ky1vstar](https://github.com/ky1vstar)** - the game on iPhone and iPad
+**Mobile ports** - the Android, iPhone and iPad apps come from LAS Recomp's. Thank you to the people who brought it to
+phones and tablets; they're credited in its README.
 
 Thanks also to everyone who reports issues and tests builds. Your logs and screenshots find most of the bugs.
 
