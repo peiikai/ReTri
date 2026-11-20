@@ -9,8 +9,7 @@
 > As with anything on the internet, you run the code at your own discretion.
 
 **ReTri** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch, 2024) into a
-native Windows, macOS, Linux, Android and iOS application. It is built on the runtime of
-[LAS Recomp](https://github.com/peiikai/LASRecomp), the same kind of port for *Link's Awakening*.
+native Windows, macOS, Linux, Android and iOS application.
 
 > [!NOTE]
 > Currently supported platforms:
@@ -313,8 +312,8 @@ Thanks also to everyone who reports issues and tests builds. Your logs and scree
 
 ## Legal
 
-ReTri is a fan project. It is not affiliated with, endorsed by or sponsored by Nintendo. *The Legend of Zelda*,
-*Echoes of Wisdom* and *Link's Awakening* are trademarks of Nintendo. No game files, game code, assets or fonts are included - not in
+ReTri is a fan project. It is not affiliated with, endorsed by or sponsored by Nintendo. *The Legend of Zelda*
+and *Echoes of Wisdom* are trademarks of Nintendo. No game files, game code, assets or fonts are included - not in
 this repository and not in release builds. You must provide your own legally obtained copy of the game files to play.
 
 ## License
