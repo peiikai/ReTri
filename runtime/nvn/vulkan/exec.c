@@ -2147,6 +2147,31 @@ static void compile_program(void *arg) {
     slow_build(t0, "modules vs/fs", p->code[0], p->code[1]);
 }
 
+// EoW's rift mask (fragment hash 44b584f0d922d49d) reads the rift map (slot 3) five times: at the point and +-1/512
+// uv to each side, two of the 1024x1024 map's texels. With the map larger than the Switch's (textures.c tex_rift_map,
+// in wide windows) the taps stay 1/512 apart and skip texels: a row of sharp teeth along the rifts' edges. Each offset
+// is divided by the map's scale (rscale[4].x, the slot's texture scale): two texels again, at any size, and the game's
+// own offsets at 1x. As renderer.m rift_mask_taps, on the GLSL (immediates spelled as_f(0x...u)).
+static uint64_t hmix(uint64_t h, const void *p, size_t n);
+static void rift_mask_taps(ShaderInfo *fi, const uint8_t *fcode, size_t fmax) {
+    if (!game_other() || !fcode || fmax < 0x230 || !fi->msl || !strstr(fi->msl, "uniform RScale")) return;
+    if (hmix(1469598103934665603ull, fcode + 0x30, 0x200) != 0x44b584f0d922d49dull) return;
+    static const char *from[2] = {"as_f(0x3b000000u)", "as_f(0xbb000000u)"};
+    static const char *to[2] = {"(0.001953125 / rscale[4][0])", "(-0.001953125 / rscale[4][0])"};
+    size_t n = 0, len = strlen(fi->msl);
+    for (int k = 0; k < 2; k++) for (const char *q = fi->msl; (q = strstr(q, from[k])); q += strlen(from[k])) n++;
+    if (n != 4) { LOG("[rift] mask taps: %zu offsets, not 4: left as they are\n", n); return; }
+    char *out = malloc(len + n * 16 + 1), *o = out;
+    for (const char *q = fi->msl; *q;) {
+        int k = !strncmp(q, from[0], strlen(from[0])) ? 0 : !strncmp(q, from[1], strlen(from[1])) ? 1 : -1;
+        if (k >= 0) { o += sprintf(o, "%s", to[k]); q += strlen(from[k]); }
+        else *o++ = *q++;
+    }
+    *o = 0;
+    free(fi->msl);
+    fi->msl = out;
+}
+
 // Translates both stages (false: failed, logged). Holds the translator for the whole program.
 static bool translate_program_now(Prog *p) {
     maxwell_gmem_base = HEAP_BASE;
@@ -2164,6 +2189,7 @@ static bool translate_program_now(Prog *p) {
         maxwell_const_data = (const uint8_t *)(uintptr_t)(p->code[1] + p->cmax[1]), maxwell_const_size = p->cmax[1] != 0x10000 ? p->csize[1] : 0;
         maxwell_push_base = p->vi->npush * 4u;  // (the fragment shader's words after them)
         p->fi = maxwell_translate((const uint8_t *)(uintptr_t)p->code[1], p->cmax[1], STAGE_FRAGMENT, &p->fkey);
+        if (p->fi->msl) rift_mask_taps(p->fi, (const uint8_t *)(uintptr_t)p->code[1], p->cmax[1]);
     }
     maxwell_const_data = NULL, maxwell_const_size = 0;
     pthread_mutex_unlock(&translate_lock);
@@ -3911,9 +3937,11 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
         // Both read cb4 from a CPU copy, never the GPU's copy of a dispatch's results: draw_ waits for those first.
         // The map's depth row (row 2; the mask's row 35) goes with them, as renderer.m (talking next to a rift).
         static float map_rows[12], final_rows[12];
-        static uint64_t map_frame = ~0ull, final_frame, mask_addr;
+        static uint64_t map_frame = ~0ull, final_frame, mask_addr, mask_frame;
         static int first = -1;
         if (first < 0) first = getenv("LARECOMP_RIFT_FIRST_ROWS") != NULL;
+        static int wide_off = -1;  // (A/B: as before: no hold, the first view after 4 frames, the map at 1x)
+        if (wide_off < 0) wide_off = getenv("LARECOMP_RIFT_WIDE_OFF") != NULL;
         static uint8_t buf[0x10000];
         extern uint64_t renderer_exec_frame(void);
         if (rift_rows_on() && stage == 0 && k == 4 && g_cur_fs_hash == RIFT_MAP_FS && r.size >= 32) {
@@ -3922,13 +3950,40 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
                 const float *g = (const float *)(uintptr_t)mask_addr + 33 * 4;
                 bool identity = g[0] == 1 && g[1] == 0 && g[2] == 0 && g[3] == 0 && g[4] == 0 && g[5] == 1 && g[6] == 0 && g[7] == 0;
                 if (!identity) {
-                    for (int i = 0; i < 8; i++) final_rows[i] = (g[i] - ((i & 3) == 3 ? 0.5f : 0.0f)) * 2.0f;
-                    memcpy(final_rows + 8, g + 8, 16);
-                    final_frame = fr;
+                    float nr[8];
+                    for (int i = 0; i < 8; i++) nr[i] = (g[i] - ((i & 3) == 3 ? 0.5f : 0.0f)) * 2.0f;
+                    // In a window wider than 16:9 the game's fit flips between two zooms of one view (about 1.14x
+                    // apart, the closer one inside the wider) every few frames while nothing moves, and the rifts'
+                    // edges jumped with it (flashing at 32:9; at 16:9 it holds still). As renderer.m: such a zoom in
+                    // is taken only once the game has asked for it 120 times in a row; the wider view covers all the
+                    // closer one does.
+                    static int zoom_in_frames;
+                    int big = 0;
+                    for (int i = 1; i < 8; i++) if (fabsf(final_rows[i]) > fabsf(final_rows[big])) big = i;
+                    float z = final_frame && final_rows[big] != 0 ? nr[big] / final_rows[big] : 0;
+                    bool same_view = z > 1.001f && z < 1.6f;
+                    for (int i = 0; i < 8 && same_view; i++)  // (the same direction: rows proportional, offsets apart)
+                        if ((i & 3) != 3 && fabsf(nr[i] - z * final_rows[i]) > 1e-3f * fabsf(nr[big])) same_view = false;
+                    for (int ax = 0; ax < 2 && same_view; ax++) {  // (and all of the closer view inside the wider one)
+                        float lo = (-1 - nr[ax * 4 + 3]) / z + final_rows[ax * 4 + 3], hi = (1 - nr[ax * 4 + 3]) / z + final_rows[ax * 4 + 3];
+                        if (lo < -1.001f || hi > 1.001f) same_view = false;
+                    }
+                    if (same_view && !first && !wide_off && ++zoom_in_frames < 120) {
+                        final_frame = fr;  // (the held view stays current)
+                    } else {
+                        zoom_in_frames = 0;
+                        memcpy(final_rows, nr, sizeof nr);
+                        memcpy(final_rows + 8, g + 8, 16);
+                        final_frame = fr;
+                    }
                 }
                 mask_addr = 0;
+                mask_frame = fr;
             }
-            bool use_final = !first && final_frame && fr - final_frame <= 4;
+            // (the final view also while the game leaves the mask's rows unwritten for a few frames with the rift still
+            // drawn - every ~50 frames for ~5 standing next to one: the first view, 3x coarser, showed for those
+            // frames, a flash of big steps along the edges)
+            bool use_final = !first && final_frame && (fr - final_frame <= 4 || (!wide_off && mask_frame == fr && fr - final_frame <= 60));
             if (map_frame != fr) memcpy(map_rows, use_final ? final_rows : (const float *)(uintptr_t)r.addr, r.size >= 48 ? 48 : 32);
             map_frame = fr;
             { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: rift map cb4 %llx+%llu (%s rows, pending dispatches %d, copies %d)\n", GW_AT(), (unsigned long long)r.addr, (unsigned long long)size, use_final ? "final" : "first", ngwp, ngwc); }
