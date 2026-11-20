@@ -69,13 +69,6 @@ with the signing key in `UPDATE_SIGNING_KEY` (base64; never in the repo, a log o
 Upload `build/dist/update-<platform>.txt` and `appcast-macOS.xml` with the files. Their names never change: every
 build out there fetches them by name. Without the key the scripts only warn, and players use Download.
 
-## Tests
-
-The updater: `tools/test_update.cpp` (manifest, signature, the swap and its rollback; build line at its top),
-`tools/test_update_e2e.sh` (download, check, swap and restart against a local web server),
-`tools/test_update_tags.cpp` (tags, labels, the update dialog's changelog) and `python3 tools/test_update_paths.py`
-(what each shipped build offers), without game data.
-
 ## Commits and pull requests
 
 - Commit messages are plain English: a short first line saying what changed and why.
@@ -153,6 +146,10 @@ None of these need game files unless they say so.
   one (needs game files).
 - `python3 tools/test_game_addresses.py`: the address tables of every game version and the patch output (with
   `--game KEY=FOLDER`, also against your game files).
+- The updater: `tools/test_update.cpp` (manifest, signature, the swap and its rollback; build line at its top),
+  `tools/test_update_e2e.sh` (download, check, swap and restart against a local web server),
+  `tools/test_update_tags.cpp` (tags, labels, the update dialog's changelog) and `python3 tools/test_update_paths.py`
+  (what each shipped build offers).
 - Windows: `python tools/test_windows_processes.py` (helper processes and crash exit codes).
 - Shaders: `tools/test_translate.sh` and `tools/test_vk_pipelines.sh` ([docs/BUILD-windows.md](docs/BUILD-windows.md)).
 
