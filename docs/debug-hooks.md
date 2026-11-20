@@ -171,7 +171,7 @@ Use it with `--load-save` (to get into a save) and `LARECOMP_SAVE_DIR` (so the r
 
 | Variable | Values | What it does |
 |---|---|---|
-| `LARECOMP_SETTING_AT` | `frame:key=value,...` | Change an in-game menu setting at that frame. Keys: `blur_removal`, `frame_interp` (0 / 1), `text_speed` (0-2), `shadows` (0-5: Off, 0.5x, Default, 2x, 3x, 4x), `screen_filter` (0-3). |
+| `LARECOMP_SETTING_AT` | `frame:key=value,...` | Change an in-game menu setting at that frame. Keys: `blur_removal`, `frame_interp` (0 / 1), `text_speed` (0-2), `shadows` (0-5: Off, 0.5x, Default, 2x, 3x, 4x), `screen_filter` (0-3), `fps` (Resolution's FPS, 30 / 60), `fps_target` (Dynamic resolution's, 30 / 60), `dyn_res` (0 / 1). |
 | `LARECOMP_BLUR_REMOVAL` | 0 / 1 | Override the blur removal setting. |
 | `LARECOMP_PROMPTS` | `xbox`, `playstation`, `nintendo`, other = auto | Force the button icon style. |
 | `LARECOMP_MENU_AT` | frame | Open the overlay menu at that frame. |
