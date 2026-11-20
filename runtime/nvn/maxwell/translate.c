@@ -1008,11 +1008,29 @@ static void light_tiles_fix(Ctx *c, const uint64_t *code, size_t end, uint32_t p
 // divided by it: the Switch's blur in pixels. The 240x135 level after it keeps the game's offsets (smooth by then).
 // Ambient occlusion Off: the renderer sets rscale[65].z for the AO pass and its output is 1 (unoccluded), so the
 // blurs after it and the composite that multiplies the scene by it change nothing.
+// EoW's AO pass is another shader (into a 704x396 R8 target cleared to 1, from the 1408x792 normals and a 704x396 copy
+// of the depth; two blurs and a 352x198 level follow, which the lit shaders read). It needs only Off: its pixel grid
+// comes from its texel size (c5[0x1a0], snapped with ceil to half texels), which lands on the pixel centres at twice the
+// size too, and its sample radius and blurs are in uv.
 // LARECOMP_AO_NO_GRID=1 (A/B): the game's own pixel grid at any AO scale.
 static void ao_grid_fix(Ctx *c, const uint64_t *code, size_t end, uint32_t pc) {
     static int off = -1;
     if (off < 0) off = getenv("LARECOMP_AO_NO_GRID") != NULL;
     if (c->stage != STAGE_FRAGMENT) return;
+    // (EoW's: the texel size, uv, the normal and depth samples, then the pixel index: 1 / texel * uv * 2, ceil)
+    static const uint64_t eow[][2] = {{0x8, 0x4c98079406870005ull}, {0x10, 0xe003ff880ff7ff02ull}, {0x18, 0x4c98079406970007ull},
+                                      {0x28, 0xe003ff884ff7ff03ull}, {0x30, 0xd8420080a0370208ull}, {0x68, 0xd84000aff037020eull},
+                                      {0x70, 0x5080000000470500ull}, {0x78, 0x5080000000470701ull}, {0x88, 0x5c681c0000270000ull},
+                                      {0x90, 0x5c681c0000370104ull}, {0x98, 0x5ca8150000070a00ull}};
+    if (pc == 0x98 && end > 0x98 / 8) {
+        size_t i = 0;
+        while (i < sizeof eow / sizeof eow[0] && code[eow[i][0] / 8] == eow[i][1]) i++;
+        if (i == sizeof eow / sizeof eow[0]) {
+            c->uses_rscale = true;
+            c->ao_taps = c->ao_pass = true;  // (66 rows: [65].z is Off; [65].y is 0, its target isn't LA's 480 wide)
+            return;
+        }
+    }
     static const uint64_t pass[][2] = {{0x8, 0x4c98079404c70005ull}, {0x18, 0x4c98079404d70009ull},
                                        {0x30, 0x5080000000470505ull}, {0x38, 0x5080000000470909ull},
                                        {0x50, 0x5c68100000470500ull}, {0x58, 0x5c68100000870901ull}};

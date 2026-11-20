@@ -258,10 +258,13 @@ void renderer_set_alloc_scale(float ax, float ay) { g_al_x = ax; g_al_y = ay; }
 // same one (bands of dark AO on flat ground that crawl as the camera moves: the "haze"), above 1 the pattern grew past
 // the game's blur and was left as dither. At High the shaders are given the real pixel grid (maxwell/translate.c
 // ao_grid_fix). The depth-stencil goes with them: Metal / Vulkan draw a pass only where all its attachments are.
+// EoW: its R8 targets (704x396, 352x198) and the half-size copy of the depth its AO pass reads (704x396): scaled with
+// the frame, that copy kept High at its detail, the AO twice its size but the same steps along every edge.
 // LARECOMP_AO_SCALED=1 (A/B): scaled with the frame, as before #356.
 static bool tex_ao(const NvnTexture *t) {
     if (output_scale_ao(1) <= 0) return false;
-    return t->format == 0x1 || (t->format == 0x35 && t->width <= 480);  // R8 unorm / D24S8, 16:9 (checked by the caller)
+    // (R8 unorm / D24S8, 16:9: checked by the caller)
+    return t->format == 0x1 || (t->format == 0x35 && t->width <= (game_other() ? 704 : 480));
 }
 
 // The game's shadow map (one 2048x2048 depth-stencil, not 16:9, so the frame's scale never reaches it): its own scale,
