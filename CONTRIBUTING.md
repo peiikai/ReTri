@@ -38,6 +38,7 @@ Rules:
 - Branch names are lower case with dashes, for example `fix/12-text-box-flicker`. Never `claude/...`.
 - Every fix goes into `develop`. The maintainer decides which version ships it and brings it into a `release/X.Y`
   branch when a released version needs it.
+- Features never target `release/X.Y`: they go into `develop` and ship in the next version.
 - `main`, `develop` and `release/*` only change through pull requests. A local pre-push hook refuses direct pushes
   to them (see below).
 - Merge pull requests with a merge commit, so each branch's history stays readable. Delete the branch after it is
