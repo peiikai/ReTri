@@ -11,7 +11,7 @@
 #include "../settings.h"
 
 
-// 360-degree movement: main+0xded9f0 (tools/patches.py SNAP_DIR_SITE) turns the stick vector (s1 = x, s2 = y) into
+// 360-degree movement: main+0xded9f0 (runtime/gen/patches.cpp SNAP_DIR_SITE) turns the stick vector (s1 = x, s2 = y) into
 // one of 8 directions, returned in w0 as an angle (full turn = 2^32, 0 = down, 2^30 = right). With the setting on
 // it returns the stick's own angle (returns 1: the original function is skipped).
 int rt_snap_dir(Cpu *c) {
@@ -38,7 +38,7 @@ int rt_snap_dir(Cpu *c) {
     return 1;
 }
 
-// Walk speed (Gameplay tab, setting walk_speed): tools/patches.py WALK_SPEED_SITES hand over the multiplier Link's walk
+// Walk speed (Gameplay tab, setting walk_speed): runtime/gen/patches.cpp WALK_SPEED_SITES hand over the multiplier Link's walk
 // / shield-walk state applies to its ramped speed (1, or 1.15 with a Piece of Power; s0) with the player actor.
 float rt_walk_speed(uint64_t player, float m, int site) {
     static float env = -1;  // LARECOMP_WALK_SPEED=<mult>: test override; LARECOMP_LOG_WALK: log some calls
@@ -70,7 +70,7 @@ float rt_walk_speed(uint64_t player, float m, int site) {
 // dropper's ItemDrop row; a row with mAllowBuffReplace (+0x38: NormalLow / NormalMid / RupeeMid...) first checks the
 // kill counters in PlayerStatus (+0xa5 >= 14: "DefenceUp" = Guardian Acorn; +0xa4 past a threshold: "PowerUp" =
 // Piece of Power; the counter is then wrapped) and drops that item symbol directly - the ItemDrop rows GuardianAcorn /
-// PowerPiece aren't involved. tools/patches.py BUFF_REPLACE_SITE reads the flag as false here: the counters are never
+// PowerPiece aren't involved. runtime/gen/patches.cpp BUFF_REPLACE_SITE reads the flag as false here: the counters are never
 // consumed (they stay at 255) and the row's own lot table is rolled as usual. Anything else that would make one
 // (ItemPowerPiece 0xb2 / ItemGuardianAcorn 0xb3) is held back at the actor factory (rt_actor_create_fn).
 static bool no_buff(void) {
@@ -93,7 +93,7 @@ int rt_buff_replace(int allow) {
     return allow && !no_buff();
 }
 
-// The actor factory's create function for an actor type (tools/patches.py BOSS_SPAWN_SITE); 0: the factory's own path
+// The actor factory's create function for an actor type (runtime/gen/patches.cpp BOSS_SPAWN_SITE); 0: the factory's own path
 // for a type without a class (the caller gets an empty handle)
 uint64_t rt_actor_create_fn(uint64_t fn, uint32_t type) {
     if ((type != 0xb2 && type != 0xb3) || !no_buff()) return fn;
@@ -106,8 +106,8 @@ uint64_t rt_actor_create_fn(uint64_t fn, uint32_t type) {
 // uniform buffer (+0x50) with a pointer to that text (buffer +0x60). The buffer is bound to postprocess.bfsha's block
 // of that name each frame; under any other name the shader gets no parameters and draws no blur (LAS-Randomizer
 // 'blur-removal', patch by theboy181, renames the string in the module - which only took effect at the next start,
-// the copy being made once). tools/patches.py TILT_INIT_SITE hands us the object; its copy's first letter is
-// switched P <-> X as the setting changes, live. EoW has the same object (renderer +0x600, hooked in tools/gen.py),
+// the copy being made once). runtime/gen/patches.cpp TILT_INIT_SITE hands us the object; its copy's first letter is
+// switched P <-> X as the setting changes, live. EoW has the same object (renderer +0x600, runtime/gen/patches.cpp),
 // but its buffer keeps the name pointer at +0x68.
 static uint64_t g_tilt_obj;
 static int g_tilt_applied = -1;  // blur removal as last applied (-1: not yet)

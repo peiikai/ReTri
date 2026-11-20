@@ -1,5 +1,5 @@
 // Which page of LA's pause menu is up (Items, Map, dungeon map), and touch taps that move its cursors. The pages' own
-// updates report themselves through tools/patches.py ITEMS_PAGE_SITE, PAUSE_MENU_SITE, MAP_PAGE_SITE and DGN_MAP_SITE;
+// updates report themselves through runtime/gen/patches.cpp ITEMS_PAGE_SITE, PAUSE_MENU_SITE, MAP_PAGE_SITE and DGN_MAP_SITE;
 // D-pad items (runtime/hle/dpad_items.c, dpad_overlay.mm), the run timer (race_overlay.mm) and the touch controls
 // (mobile/touch_controls.mm) read them here.
 #include "../game_addresses.h"
@@ -20,7 +20,7 @@ static bool recent(uint64_t f) { return f && renderer_present_count() - f <= 2; 
 static volatile uint64_t g_items_frame;
 static uint64_t g_items_obj;
 
-// tools/patches.py PAUSE_MENU_SITE: the pause menu's update ran (any page, and between pages)
+// runtime/gen/patches.cpp PAUSE_MENU_SITE: the pause menu's update ran (any page, and between pages)
 static std::atomic<uint64_t> g_pause_frame{0};
 
 RT_ON_RESET(pause_pages_reset) { g_items_frame = 0, g_items_obj = 0, g_pause_frame = 0; }
@@ -45,7 +45,7 @@ extern "C" int inventory_items_cursor(void) {
 extern "C" uint64_t inventory_items_obj(void) { return g_items_obj; }
 
 // A tap on an Items page cell or a file select file (runtime/ui/mobile/touch_controls.mm): where the next cursor move
-// goes, whatever the direction pressed, so the cursor goes straight there with the game's own move (tools/patches.py
+// goes, whatever the direction pressed, so the cursor goes straight there with the game's own move (runtime/gen/patches.cpp
 // ITEMS_NAV_SITE, FILE_SELECT_NAV_SITE). An ask lapses after 15 frames, so a later press of the player's own is never
 // taken over. LARECOMP_ITEMS_JUMP / LARECOMP_FILE_JUMP=<n> (tests): the first move there goes to n.
 struct NavJump {

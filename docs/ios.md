@@ -85,13 +85,12 @@ works on 120 Hz displays.
 make deps-ios
 ```
 
-Then generate the game code for the moving guest window (`generated-dyn/`, from your own extracted files; gen.py needs
-the `unicorn` module) and build:
+Then generate the game code for the moving guest window (`generated-dyn/`, from your own extracted files) and build:
 
 ```bash
-cd tools && X="<extracted>/exefs" && \
-python gen.py sdk "$X/sdk" 0x7008000000 ../generated-dyn/sdk --hle ../runtime/hle/hle_symbols.txt --simd asm --dyn-base --game eow && \
-python gen.py main "$X/main" 0x7000000000 ../generated-dyn/main --simd asm --dyn-base --game eow
+make lasgen && X="<extracted>/exefs" && \
+build/lasgen sdk "$X/sdk" 0x7008000000 generated-dyn/sdk --hle runtime/hle/hle_symbols.txt --simd asm --dyn-base --game eow && \
+build/lasgen main "$X/main" 0x7000000000 generated-dyn/main --simd asm --dyn-base --game eow
 ```
 
 ```bash

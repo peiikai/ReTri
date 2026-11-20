@@ -31,6 +31,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Phones and tablets, EoW: a drag on the game's screen moves the camera, as the right stick.
 
 ### Changed
+- The game code generator is part of the app (C++, from LAS Recomp): no release ships Python any more, and setup
+  generates the game code in seconds instead of a minute or more.
 - With Dynamic resolution on, the FPS target sets EoW's frame rate (60, 30, or 30 outdoors and 60 indoors) and the
   resolution does the rest, as in LAS Recomp; the game's own 60 / 30 switching is off.
 - "Button layout" is now "Confirm button" (Right or Bottom). It applies the same way to every controller, in the
