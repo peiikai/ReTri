@@ -76,7 +76,7 @@ These are the minimums during the beta and may change as development continues.
 > On first launch the app sets up what it needs, including the actual recompilation locally. No game files, assets or fonts are included.
 > The screenshot shows the start screen after setup; no Nintendo artwork is included until provided by the user.
 
-![The start screen: play, set up your game files, settings](docs/start_screen.jpg)
+![The start screen: play, settings and quit over the game's title movie](docs/start_screen.jpg)
 
 ## Status
 
@@ -156,8 +156,8 @@ GetMoreRam. More on the iOS app is there too.
 ## Building from source
 
 Every platform needs your own game files (v1.0.2): build first, then use the start screen's game-file setup.
-`make gen` then recompiles the game code from your own game files into `generated/` (the generator, `build/lasgen`, is
-built first), and `make` builds it into its own library next to the app (`build/eowgame.*`); without it the start
+`make gen GEN=generated-eow` then recompiles the game code from your own game files into `generated-eow/`
+(the generator, `build/lasgen`, is built first), and `make` builds it into its own library next to the app (`build/eowgame.*`); without it the start
 screen builds that library itself, as it does for players. Release builds hold none of the game's code: the start
 screen builds it on each player's machine from their own game files, with the generator built into the app and the
 bundled compiler (`tools/fetch_zig.sh`). The generator needs no Python; Python 3 is still used by some dependency and
@@ -167,7 +167,8 @@ packaging scripts and by the tests.
 
 Requirements: Apple Silicon, Xcode command line tools (clang), [Homebrew](https://brew.sh) `sdl3` and `ffmpeg`.
 
-1. Build: `make -j10` -> `build/eowrecomp`. Set up your game files (above), then `make gen` and `make -j10` again.
+1. Build: `make -j10 GEN=generated-eow` -> `build/eowrecomp`. Set up your game files (above), then
+   `make gen GEN=generated-eow` and `make -j10 GEN=generated-eow` again.
 2. Run: `./build/eowrecomp extracted` (start screen) or `./build/eowrecomp extracted --play` (straight into the game).
 3. Package: `make deps` (once: SDL3 and FFmpeg from pinned sources, built for macOS 15) and `tools/fetch_zig.sh`
    (what the start screen builds the game code with), then `make app` -> `build/ReTri.app` (macOS 15+, Apple Silicon)
@@ -183,7 +184,8 @@ that page.
    It installs MSYS2 (UCRT64: clang, make, SDL3, FFmpeg, Vulkan, shaderc), Python 3.12 for the tests and switches the
    clone to LF line endings.
 2. Build, from an MSYS2 UCRT64 shell (or Git Bash with `export PATH="/c/msys64/ucrt64/bin:/c/msys64/usr/bin:$PATH"`):
-   `make -j` -> `build/eowrecomp.exe`. Set up your game files (above), then `make gen` and `make -j` again.
+   `make -j GEN=generated-eow` -> `build/eowrecomp.exe`. Set up your game files (above), then
+   `make gen GEN=generated-eow` and `make -j GEN=generated-eow` again.
 3. Run: `./build/eowrecomp.exe extracted`, from a shell with `C:\msys64\ucrt64\bin` on PATH (for the DLLs).
 4. Package: `make deps-windows` (once: LGPL FFmpeg) and `tools/fetch_zig.sh`, then `make dist` ->
    `build/dist/ReTri-<version>-windows-x64.zip`.
@@ -194,7 +196,8 @@ Requirements: x86-64 with AVX2 (or aarch64, experimental), a GPU with Vulkan 1.3
 shaderc and Vulkan Memory Allocator from your distribution. Packages, cross builds and details in
 [docs/linux.md](docs/linux.md).
 
-1. Build: `make -j` -> `build/eowrecomp`. Set up your game files (above), then `make gen` and `make -j` again.
+1. Build: `make -j GEN=generated-eow` -> `build/eowrecomp`. Set up your game files (above), then
+   `make gen GEN=generated-eow` and `make -j GEN=generated-eow` again.
 2. Run: `./build/eowrecomp extracted`.
 3. Package: `make appimage` (this machine's arch; `ARCH=aarch64` cross-compiles) or `make appimages` (both) ->
    `build/dist/ReTri-<version>-linux-<arch>.AppImage`, built in Ubuntu 22.04 containers (podman). `make smoketest`
