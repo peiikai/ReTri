@@ -229,7 +229,7 @@ static void swap_tests() {
     {   // installed, but another version runs (put back by hand): the old files go, nothing else changes
         UpdPaths p = make_app("byhand", &files);
         CHECK(upd_swap(p, files, "v2", "v1", &why), "swap");
-        CHECK(upd_boot(p, "v1") == UPD_BOOT_NOTHING && !upd_exists(p.work()) && is_new(p), "other version: kept as is");
+        CHECK(upd_boot(p, "v1") == UPD_BOOT_OTHER_VERSION && !upd_exists(p.work()) && is_new(p), "other version: kept as is");
     }
 #ifndef _WIN32
     if (geteuid() != 0) {  // a folder that can't be written: Update is off (Download remains)

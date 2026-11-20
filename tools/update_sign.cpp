@@ -3,6 +3,7 @@
 // UPDATE_SIGNING_KEY environment variable (base64 of the 32-byte seed, the format Sparkle's own tools use), never in
 // the repo.
 // Build: c++ -std=c++17 -O2 -Iruntime tools/update_sign.cpp -o build/update_sign
+//   (Windows: add -lbcrypt with MinGW / zig; MSVC links it by itself)
 //   update_sign keygen <private key file>          a new key: the seed (base64) into the file, the public key printed
 //   update_sign public                              the public key of $UPDATE_SIGNING_KEY (hex, then base64)
 //   update_sign manifest <version> <platform> <file> [<folder>] > update-<platform>.txt
@@ -15,6 +16,9 @@
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
+#include <windows.h>
+#include <bcrypt.h>
+#pragma comment(lib, "bcrypt")
 #endif
 
 #include <algorithm>
@@ -89,9 +93,13 @@ int main(int argc, char **argv) {
     std::string cmd = argc > 1 ? argv[1] : "";
     if (cmd == "keygen" && argc == 3) {
         uint8_t seed[32], sk[64], pk[32];
+#ifdef _WIN32
+        if (BCryptGenRandom(NULL, seed, 32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) die("no system random source");
+#else
         FILE *r = fopen("/dev/urandom", "rb");
         if (!r || fread(seed, 1, 32, r) != 32) die("no /dev/urandom");
         fclose(r);
+#endif
         if (upd_exists(argv[2])) die("the key file exists already: never replace a published key");
         std::string s = b64(seed, 32);
         crypto_ed25519_key_pair(sk, pk, seed);

@@ -24,11 +24,11 @@ static std::string bundle_build(const char *tag, const char *test_of = "") {
 
 // macOS compares bundle versions part by part, numerically (a missing part is 0): <0, 0, >0
 static int bundle_cmp(const std::string &a, const std::string &b) {
-    std::vector<long> x, y;
-    for (const char *p = a.c_str(); *p; p += *p == '.') x.push_back(strtol(p, (char **)&p, 10));
-    for (const char *p = b.c_str(); *p; p += *p == '.') y.push_back(strtol(p, (char **)&p, 10));
+    std::vector<long long> x, y;  // (long is 32-bit on Windows: nightly stamps have 12 digits)
+    for (const char *p = a.c_str(); *p; p += *p == '.') x.push_back(strtoll(p, (char **)&p, 10));
+    for (const char *p = b.c_str(); *p; p += *p == '.') y.push_back(strtoll(p, (char **)&p, 10));
     for (size_t i = 0; i < x.size() || i < y.size(); i++) {
-        long u = i < x.size() ? x[i] : 0, v = i < y.size() ? y[i] : 0;
+        long long u = i < x.size() ? x[i] : 0, v = i < y.size() ? y[i] : 0;
         if (u != v) return u < v ? -1 : 1;
     }
     return 0;

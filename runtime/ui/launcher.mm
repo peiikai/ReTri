@@ -1214,7 +1214,8 @@ static const char *const UPDATE_STEPS[] = {LN("Checking the update"), LN("Downlo
 // this build's channel has Update at all: nightlies, and releases once LARECOMP_UPDATE_RELEASES is on (never test builds)
 static bool update_channel_on(void) {
     if (PLAT_TOUCH) return false;
-    return LARECOMP_NIGHTLY_STAMP || (LARECOMP_UPDATE_RELEASES && strncmp(LARECOMP_VERSION, "test-", 5));
+    if (LARECOMP_NIGHTLY_STAMP != 0) return true;
+    return LARECOMP_UPDATE_RELEASES != 0 && strncmp(LARECOMP_VERSION, "test-", 5) != 0;
 }
 static bool update_button_shown(const std::string &tag) {
     (void)UPDATE_STEPS;

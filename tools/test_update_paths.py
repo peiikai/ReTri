@@ -9,6 +9,8 @@
 import copy, json, os, re, subprocess, sys, tempfile, urllib.request
 
 ROOT = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True, check=True).stdout.strip()
+if os.name == 'nt' and re.match(r'^/[a-zA-Z]/', ROOT):  # (MSYS git first on PATH: /c/dev/... is C:/dev/...)
+    ROOT = ROOT[1].upper() + ':' + ROOT[2:]
 TMP = tempfile.mkdtemp(prefix='update-paths-')
 
 

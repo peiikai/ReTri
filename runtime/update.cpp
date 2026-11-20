@@ -85,7 +85,12 @@ void update_boot(void) {
         fprintf(stderr, "[update] the update didn't finish or the new version never reached the start screen: the "
                         "previous version is back\n");
         restart_app(dir, name);
-    } else if (r == UPD_BOOT_STARTED) fprintf(stderr, "[update] first start of %s after the update\n", larecomp_version());
+    } else if (r == UPD_BOOT_STARTED) {
+        fprintf(stderr, "[update] first start of %s after the update\n", larecomp_version());
+    } else if (r == UPD_BOOT_OTHER_VERSION) {
+        fprintf(stderr, "[update] an installed update isn't the version running (%s): its old files are removed\n",
+                larecomp_version());
+    }
 }
 
 void update_reached_start_screen(void) {

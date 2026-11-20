@@ -381,7 +381,7 @@ static inline bool upd_restore(const UpdPaths &p, const UpdJournal &j) {
 }
 
 // At start, before anything else of the app's is loaded. this_version: LARECOMP_VERSION.
-enum { UPD_BOOT_NOTHING, UPD_BOOT_RESTORED, UPD_BOOT_STARTED };
+enum { UPD_BOOT_NOTHING, UPD_BOOT_RESTORED, UPD_BOOT_STARTED, UPD_BOOT_OTHER_VERSION };
 static inline int upd_boot(const UpdPaths &p, const std::string &this_version) {
     UpdJournal j;
     if (!upd_read_journal(p, &j)) {
@@ -392,7 +392,7 @@ static inline int upd_boot(const UpdPaths &p, const std::string &this_version) {
     if (j.state == "installed" && j.version == this_version) return upd_set_state(p, "started") ? UPD_BOOT_STARTED : UPD_BOOT_NOTHING;
     // installed, but another version runs (put back by hand?): the old files aren't needed by anyone
     upd_remove_tree(p.work());
-    return UPD_BOOT_NOTHING;
+    return UPD_BOOT_OTHER_VERSION;
 }
 // What older versions shipped that no version has now. An update replaces the files the new version has and keeps every
 // other one, so these stayed behind: lasgen/, the Python game code generator (with Python and Unicorn), until the
