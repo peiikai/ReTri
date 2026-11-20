@@ -40,7 +40,7 @@
     comments, docs, commits or pull requests.
 
 - **Branch.** `main` holds the last release and is not where work happens. Base your work on `develop` and open the
-  pull request against it; the maintainer decides which version ships a fix. Name the branch
+  pull request against it (a fix a release needs may target `release/X.Y`; features never do). Name the branch
   `type/short-name`: `fix/<issue>-<name>`, `feature/<name>`, `docs/<name>`, `ci/<name>` or `chore/<name>`. Check the
   base branch first: the change you have in mind may already be there. Releases are tagged `v<major>.<minor>.<patch>`
   (`v0.1.0` is Beta 1).

@@ -31,13 +31,13 @@ ReTri uses [Semantic Versioning](https://semver.org): `MAJOR.MINOR.PATCH`.
 | `develop` | the next version | | `release/X.Y` |
 | `release/X.Y` | one release line: its last bug fixes, then patch releases | `develop` | `main` (tagged), then back into `develop` |
 | `feature/<name>` | new features | `develop` | `develop` |
-| `fix/<issue>-<name>` | bug fixes | `develop` | `develop` |
+| `fix/<issue>-<name>` | bug fixes | `develop`, or `release/X.Y` for a fix that release needs | the branch it came from (`release/X.Y`, then back into `develop`) |
 | `docs/<name>`, `ci/<name>`, `chore/<name>` | docs, CI, upkeep | `develop` | `develop` |
 
 Rules:
 - Branch names are lower case with dashes, for example `fix/12-text-box-flicker`. Never `claude/...`.
-- Every fix goes into `develop`. The maintainer decides which version ships it and brings it into a `release/X.Y`
-  branch when a released version needs it.
+- A fix targets `release/X.Y` when that release needs it, otherwise `develop`. The maintainer decides which version
+  ships it. A release branch is merged back into `develop`, so its fixes reach the next version too.
 - Features never target `release/X.Y`: they go into `develop` and ship in the next version.
 - `main`, `develop` and `release/*` only change through pull requests. A local pre-push hook refuses direct pushes
   to them (see below).
@@ -51,8 +51,7 @@ Rules:
    `## [X.Y.0] - <date>`. Only fixes land on the release branch from here on.
 3. Open a PR from `release/X.Y` into `main`. Once it's merged, tag the merge commit `vX.Y.0`.
 4. Merge `release/X.Y` back into `develop`, then set `VERSION` on `develop` to the next version.
-5. For a patch release, the maintainer brings the fixes it needs from `develop` into `release/X.Y`, then repeats
-   steps 2 to 4 with `X.Y.Z`.
+5. For a patch release, merge its fixes into `release/X.Y`, then repeat steps 2 to 4 with `X.Y.Z`.
 
 Tags are plain `vX.Y.Z`: the update check ignores anything after the version (`v0.1.0-beta.1` is never offered).
 During the beta, `v0.N.M` shows as "Beta N.M".
@@ -76,7 +75,7 @@ build out there fetches them by name. Without the key the scripts only warn, and
 
 - Commit messages are plain English: a short first line saying what changed and why.
 - Each PR does one thing. It names its issue (`Fixes #12`), says how it was tested and updates `CHANGELOG.md`.
-- PRs target `develop`.
+- PRs target `develop`. A fix may target `release/X.Y` instead; features never do.
 - The game is play-tested before any PR touching rendering, timing or audio is merged.
 
 ## Pre-push guard
