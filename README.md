@@ -174,9 +174,9 @@ In game, open ReTri's menu with F1, or Home or Minus + Plus on a controller.
 Saves and settings are kept in ReTri's data folder. Settings > System > Data folder shows where it is and can move it.
 By default it is:
 
-- macOS: `~/Library/Application Support/com.peiikai.eowrecomp`
+- macOS: `~/Library/Application Support/com.peiikai.retri`
 - Windows: next to the program
-- Linux: `~/.local/share/eowrecomp`
+- Linux: `~/.local/share/retri`
 - Android: `Android/data/com.retri.android/files`, which you can open from a computer over USB
 
 ## Settings worth knowing
@@ -187,7 +187,7 @@ These are under Video and General in ReTri's menu.
   or 75%, 50% and 25% for slower machines. Its **FPS** row picks 30 or 60.
 - **Dynamic resolution** raises and lowers the render size as you play to hold its **FPS target** (30, 60, or 30
   outdoors and 60 indoors). The game adapts to your device in real time: busy scenes drop the resolution and quiet
-  ones raise it again. **Minimum resolution** sets how low it can go. This is the best choice on weaker PCs, and
+  ones raise it again. **Minimum resolution** sets how low it can go. This is a good choice on weaker PCs, and
   especially on phones and tablets, which slow down as they heat up.
 - **The game always aims for 60 fps** at a fixed Resolution with FPS at 60. On the Switch the game drops to 30 when
   it falls behind; ReTri doesn't, so a device that can't keep up runs a little slow instead. Use Dynamic resolution,
