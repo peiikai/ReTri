@@ -227,11 +227,8 @@ without touching the installed game, your game files or your saves.
 
 ## Credits
 
-**[LAS Recomp](https://github.com/peiikai/LASRecomp)** - ReTri runs on its runtime: the host, the graphics backends,
-the menus, the ports and the game code builder all come from it.
-
-**LAS Recomp contributors** - their code is in ReTri too. Thank you to everyone who has sent code (GitHub handles, in
-order of first contribution; the numbers are LAS Recomp pull requests):
+**Contributors** - thank you to everyone who has sent code (GitHub handles, in order of first contribution; the
+numbers are LAS Recomp pull requests):
 - **[@dvilelaf](https://github.com/dvilelaf)** - the System language setting (#15), a packaging fix (#10) and the
   level-transition crash fix (#34)
 - **[@Tensorlong](https://github.com/Tensorlong)** - the fix for the white Link on M1 Macs (#18)
