@@ -12,6 +12,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   button setting.
 - Unlocked aspect ratio: the camera fills wide windows.
 - Logging of shader records the shipped list lacks, once per run.
+- Command line for game launchers (`eowrecomp --help`): set up without a window (`--prepare`), start straight in,
+  pick the data folder, change settings for one run. A RecompLauncher profile ships with the Windows zip and the
+  Linux files. Windows zips are named `windows-x64` / `windows-arm64`.
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
 - iPhone and iPad (ReTri for iOS, bundle ID com.peiikai.retri.ios): the app holds the game code built on a Mac from
   your own game files.
@@ -58,9 +61,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Mac: trees, bushes and grass cast shadows again.
 - Shadow edges no longer show steps at Shadows 2x and 4x.
 - Mac: chests and other metal keep their shine in shadow.
+- The rift no longer disappears while talking to someone next to it.
+- Short frame-time spikes in play (30-47 ms every few seconds): the audio renderer made its 5 ms frames in bursts of
+  the audio device's period (21 ms on Mac), so the game updated its audio every 21 ms and its main thread waited
+  that long whenever it freed an audio buffer. The frames now keep their own 5 ms clock, as on the Switch.
+- A crash at start in a wide window with MetalFX on (MetalFX was asked for an image of no width).
+- No more drops to 35-55 fps in busy areas (seen on Mac): the game's own dynamic resolution is off, as in LAS Recomp. It
+  raised the 3D size on a fast GPU (up to 1.9x the window's pixels at Match display) until frames ran late.
 - Vulkan (Windows, Linux, Android): the hearts show as red hearts, not dark hearts in a red box.
 - Vulkan: draws that read what a compute pass just wrote get it, as on Mac (EoW's interiors were darker).
 - Vulkan: the rifts read the scene's stencil and line their map up, as on Mac.
+- Vulkan: chests and other metal keep their shine in shadow (the environment map was black).
 - Rift edges are clean lines instead of steps: the rift map now uses the game's final, closer view, as on the Switch.
 - On iPhone, iPad and Android the game no longer stays at 30 fps after a brief dip: it tries 60 again after a
   second (the GPU slows its clock at 30, and the game read that as too slow for 60).

@@ -1,0 +1,249 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "repo": "peiikai/ReTri",
+  "game": {
+    "kind": "folder",
+    "label": "Your extracted game files: the folder with exefs and romfs in it.",
+    "check": {
+      "file": "exefs/main"
+    }
+  },
+  "prepare": {
+    "program": [
+      "eowrecomp.exe",
+      "ReTri.AppImage",
+      "AppRun"
+    ],
+    "args": [
+      "--prepare",
+      "--new-data-dir",
+      "{install}",
+      "--game-files",
+      "{game}"
+    ],
+    "label": "Game files, game code and shaders",
+    "timeout": 3600,
+    "version": "1"
+  },
+  "start": {
+    "program": [
+      "eowrecomp.exe",
+      "ReTri.AppImage",
+      "AppRun"
+    ],
+    "args": [
+      "--new-data-dir",
+      "{install}"
+    ]
+  },
+  "saves": [
+    "{install}/save",
+    "{home}/.var/app/com.recomplauncher.RecompLauncher/data/eowrecomp/save",
+    "{local}/eowrecomp/save"
+  ],
+  "folders": {
+    "saves": [
+      {
+        "path": "{install}/save",
+        "if": "{install}/eowrecomp.exe"
+      },
+      {
+        "path": "{install}/save",
+        "if": "{install}/extracted"
+      },
+      {
+        "path": "{home}/.var/app/com.recomplauncher.RecompLauncher/data/eowrecomp/save",
+        "if": "{home}/.var/app/com.recomplauncher.RecompLauncher/data/eowrecomp"
+      },
+      {
+        "path": "{local}/eowrecomp/save"
+      }
+    ],
+    "logs": [
+      {
+        "path": "{install}",
+        "if": "{install}/eowrecomp.exe"
+      },
+      {
+        "path": "{install}",
+        "if": "{install}/extracted"
+      },
+      {
+        "path": "{home}/.var/app/com.recomplauncher.RecompLauncher/data/eowrecomp",
+        "if": "{home}/.var/app/com.recomplauncher.RecompLauncher/data/eowrecomp"
+      },
+      {
+        "path": "{local}/eowrecomp"
+      }
+    ]
+  },
+  "config": [
+    {
+      "id": "main",
+      "format": "ini",
+      "file": [
+        {
+          "path": "{install}/larecomp.ini",
+          "if": "{install}/eowrecomp.exe"
+        },
+        {
+          "path": "{install}/larecomp.ini",
+          "if": "{install}/extracted"
+        },
+        {
+          "path": "{home}/.var/app/com.recomplauncher.RecompLauncher/data/eowrecomp/larecomp.ini",
+          "if": "{home}/.var/app/com.recomplauncher.RecompLauncher/data/eowrecomp"
+        },
+        {
+          "path": "{local}/eowrecomp/larecomp.ini"
+        }
+      ]
+    }
+  ],
+  "settings": [
+    {
+      "id": "start",
+      "label": "Start",
+      "in": "args",
+      "help": "The start screen has all settings.",
+      "choices": [
+        {
+          "label": "Start screen",
+          "args": []
+        },
+        {
+          "label": "Straight into the game",
+          "args": [
+            "--play"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fullscreen",
+      "label": "Window",
+      "group": "Video",
+      "choices": [
+        {
+          "label": "Windowed",
+          "set": {
+            "fullscreen": "0"
+          }
+        },
+        {
+          "label": "Fullscreen",
+          "set": {
+            "fullscreen": "1"
+          }
+        }
+      ],
+      "defaults": {
+        "fullscreen": "0"
+      }
+    },
+    {
+      "id": "resolution",
+      "label": "Resolution",
+      "group": "Video",
+      "help": "Automatic picks one for your graphics card.",
+      "choices": [
+        {
+          "label": "Automatic",
+          "set": {
+            "resolution": "auto"
+          }
+        },
+        {
+          "label": "Match display",
+          "set": {
+            "resolution": "match"
+          }
+        },
+        {
+          "label": "1x",
+          "set": {
+            "resolution": "1x"
+          }
+        },
+        {
+          "label": "2x",
+          "set": {
+            "resolution": "2x"
+          }
+        },
+        {
+          "label": "75%",
+          "set": {
+            "resolution": "75%"
+          }
+        },
+        {
+          "label": "50%",
+          "set": {
+            "resolution": "50%"
+          }
+        }
+      ],
+      "defaults": {
+        "resolution": "auto"
+      }
+    },
+    {
+      "id": "antialias",
+      "label": "Anti-aliasing",
+      "group": "Video",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "antialias": "off"
+          }
+        },
+        {
+          "label": "SMAA",
+          "set": {
+            "antialias": "smaa"
+          }
+        }
+      ],
+      "defaults": {
+        "antialias": "off"
+      }
+    },
+    {
+      "id": "shadows",
+      "label": "Shadows",
+      "group": "Video",
+      "choices": [
+        {
+          "label": "Default",
+          "set": {
+            "shadows": "default"
+          }
+        },
+        {
+          "label": "2x",
+          "set": {
+            "shadows": "2x"
+          }
+        },
+        {
+          "label": "4x",
+          "set": {
+            "shadows": "4x"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "shadows": "off"
+          }
+        }
+      ],
+      "defaults": {
+        "shadows": "default"
+      }
+    }
+  ]
+}

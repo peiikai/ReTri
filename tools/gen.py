@@ -582,6 +582,21 @@ def main():
                 return ('{ extern void rt_tilt_obj(uint64_t); c->x[19] = c->x[23] + 0x600; rt_tilt_obj(c->x[19]); }'
                         f'  /* {a:#x}: add x19, x23, #0x600 (tilt-shift set-up: blur removal) */')
             PATCHES[0x70027802e8] = _eow_tilt
+            # (resolution, runtime/nvn/output_scale.c) the game's own dynamic resolution, off - as LA's
+            # GAME_DYNRES_SITE. Its frame controller (main+0x346530) reads the scaler's enabled byte (+0x480 of its
+            # object); on, it turns the GPU timing counters into a load figure and steps its 3D a level (1080 - 36 x
+            # level lines) after 6 samples over 90% / under 70% (main+0x3468c0). It started at 1408x792 and climbed
+            # to 1920x1080 on a fast GPU: our scale (Match display maps 792 lines to the window) then drew the 3D at
+            # up to 1.9x the window's pixels (6982x1964 for 5120x1440), new targets at each step, and frames over
+            # 16.7 ms once our own window step (SMAA, upscale) came on top. Read as 0: it stays at 1408x792.
+            # LARECOMP_GAME_DYNRES=1 (test): the game's own again.
+            def _eow_dynres(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0x39520348, hex(w)  # ldrb w8, [x26, #0x480]
+                return ('{ extern int rt_game_dynres(void); '
+                        'c->x[8] = rt_game_dynres() ? LD8(c->x[26] + 0x480) : 0; }'
+                        f'  /* {a:#x}: ldrb w8, [x26, #0x480] (the game\'s dynamic resolution: off) */')
+            PATCHES[0x7000346580] = _eow_dynres
             # (frame pacing, runtime/nvn/pace.c rt_other_fps_window) the frame controller at 30 fps, at the end of a
             # 12-frame window, reads how many of its frames took over 1/60 s; 0 takes it back to 60. On phone and tablet
             # GPUs its frames read slow at 30 by the lowered clock alone: the runtime may answer 0 to try 60

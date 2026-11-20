@@ -454,6 +454,11 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (depthfmt) usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     else if (format_supports(vf, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)) usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    // (as metal.m's image_use) a texture the game registers as an image is written by compute stores (SUST.B: EoW's
+    // environment map); only those get storage usage, which costs some drivers their colour compression
+    b->want_storage = t->image_use;
+    if (t->image_use && !depthfmt && samples == 1 && format_supports(vf, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT))
+        usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     VkImageCreateFlags flags = 0;
     if (!depthfmt) flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;  // format views (NVN texture views, raw sRGB views)
     if (type == VK_IMAGE_TYPE_2D && layers >= 6 && tw == th && samples == 1) flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
@@ -496,6 +501,7 @@ static void create_image(NvnTexture *t, TexBackend *b) {
         depthfmt = false;
     }
     b->format = vf;
+    b->usage = ci.usage;
     b->width = tw; b->height = th; b->depth = depth; b->layers = layers; b->levels = levels; b->samples = samples;
     tex_count(b, 1);
     b->aspect = depthfmt ? aspect_of(t->format) : VK_IMAGE_ASPECT_COLOR_BIT;
@@ -582,7 +588,8 @@ static void live_remove(TexBackend *b) {
 static TexBackend *tex_backend(NvnTexture *t) {
     TexBackend *b = t->backend;
     if (b) {
-        if (b->scalable && (b->ax != tex_alloc_x(b) || b->ay != tex_alloc_y(b))) {  // output resolution changed: reallocate
+        if ((b->scalable && (b->ax != tex_alloc_x(b) || b->ay != tex_alloc_y(b))) ||  // output resolution changed: reallocate
+            (t->image_use && !b->want_storage)) {  // registered as an image after its first use: made again, writable
             destroy_image(b);
             create_image(t, b);
         }
@@ -924,6 +931,15 @@ VkImageView vk_image_view(TexBackend *b, VkImageViewType type, VkFormat fmt, uin
     prof_views_created++;
     VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = b->image, .viewType = type,
                                 .format = fmt, .components = sw, .subresourceRange = {aspect, lv0, nlv, ly0, nly}};
+    // (a storage image, NvnTexture.image_use) a view in a format that can't be a storage image (an sRGB twin) or with
+    // a swizzle leaves storage out of its usage: a storage view must have both
+    VkImageViewUsageCreateInfo vu = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO, .usage = b->usage & ~VK_IMAGE_USAGE_STORAGE_BIT};
+    bool ident = (sw.r == VK_COMPONENT_SWIZZLE_IDENTITY || sw.r == VK_COMPONENT_SWIZZLE_R) &&
+                 (sw.g == VK_COMPONENT_SWIZZLE_IDENTITY || sw.g == VK_COMPONENT_SWIZZLE_G) &&
+                 (sw.b == VK_COMPONENT_SWIZZLE_IDENTITY || sw.b == VK_COMPONENT_SWIZZLE_B) &&
+                 (sw.a == VK_COMPONENT_SWIZZLE_IDENTITY || sw.a == VK_COMPONENT_SWIZZLE_A);
+    if ((b->usage & VK_IMAGE_USAGE_STORAGE_BIT) && (!ident || !format_supports(fmt, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)))
+        vi.pNext = &vu;
     VkImageView v;
     if (vkCreateImageView(g_vk.dev, &vi, NULL, &v) != VK_SUCCESS) {
         static int nfail;
@@ -1098,6 +1114,24 @@ VkImageView vk_dummy_view(int textype) {
     b->layers = cube ? 6 : 1;
     views[textype] = vk_image_view(b, vt, b->format, 0, 1, 0, cube ? 6 : 1, IDENTITY, VK_IMAGE_ASPECT_COLOR_BIT);
     return views[textype];
+}
+
+VkImageView vk_dummy_storage_view(void) {
+    static TexBackend b;
+    static VkImageView view;
+    if (view) return view;
+    VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                            .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {1, 1, 1}, .mipLevels = 1, .arrayLayers = 1,
+                            .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                            .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT};
+    VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+    VK_CHECK(vmaCreateImage(g_vk.vma, &ci, &ai, &b.image, &b.mem, NULL));
+    vk_image_init_layout(vk_upload_cmd(), b.image, VK_IMAGE_ASPECT_COLOR_BIT);
+    b.format = VK_FORMAT_R8G8B8A8_UNORM;
+    b.usage = ci.usage;
+    b.levels = b.layers = 1;
+    view = vk_image_view(&b, VK_IMAGE_VIEW_TYPE_2D_ARRAY, b.format, 0, 1, 0, 1, IDENTITY, VK_IMAGE_ASPECT_COLOR_BIT);
+    return view;
 }
 
 // Depth compare (sampler*Shadow) needs a view whose format has SAMPLED_IMAGE_DEPTH_COMPARISON: the RGBA8 dummy above

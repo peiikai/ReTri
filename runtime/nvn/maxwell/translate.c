@@ -29,6 +29,7 @@ bool maxwell_gmem_fs_miss;
 bool maxwell_glsl_stack_vars = true;
 bool maxwell_glsl_structured;  // static stacks + structured control flow by default (exec.c: Mali, Adreno)
 bool maxwell_glsl_fast_minmax;  // the GPU's min / max / clamp for fmin / fmax / saturate (exec.c: Android)
+bool maxwell_glsl_image_stores;  // compute SUST.B as storage image stores (exec.c: shaderStorageImageWriteWithoutFormat)
 bool maxwell_glsl_push;  // c1 inlined + push constants by default (exec.c: Mali, Adreno)
 bool maxwell_glsl_tint_branch;  // the recolour code behind a specialization constant (exec.c: Adreno, Mali)
 bool maxwell_glsl_quad_deriv;  // fragment quad xor shuffles through derivatives (exec.c: no subgroups in fragment shaders)
@@ -2161,6 +2162,26 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
             sp(&c->body, " if (h_ == imgh[%d]) { if (xy_.x < img%d.get_width() && xy_.y < img%d.get_height() && "
                          "l_ < img%d.get_array_size()) img%d.write(v_, xy_, l_); } else", i, i, i, i, i);
         sp(&c->body, " {}\n    }\n");
+    } else if (c->glsl && c->stage == STAGE_COMPUTE && maxwell_glsl_image_stores && OPM(0xeb20000000000000ull, 0xfff8000000000000ull)) {
+        // SUST.B (GLSL, as the Metal one above): EoW's environment-map pass (72a4723000) blends its probe cubes into
+        // each face and level with these. Skipped, the map stayed black and metal (a chest's gold trim) went dull brown
+        // in shadow.
+        int rgba = (int)bits(w, 20, 4), dim = (int)bits(w, 33, 3), hc = (int)bits(w, 39, 8);
+        c->info->uses_images = true;
+        sp(&c->body, "    { uint h_ = %s; uvec2 xy_ = uvec2(%s, %s); uint l_ = %s;\n", R(hc), R(a),
+           dim >= 2 ? R(a + 1) : "0u", dim == 2 ? R(a + 1) : dim >= 4 ? R(a + 2) : "0u");
+        if (dim == 2) sp(&c->body, "      xy_.y = 0u;\n");  // (1D array: x, layer)
+        int k = 0;
+        char comp[4][64];
+        for (int ch = 0; ch < 4; ch++) {
+            if (rgba & (1 << ch)) sprintf(comp[ch], "uintBitsToFloat(%s)", R(d == RZ ? RZ : d + k++));
+            else strcpy(comp[ch], ch == 3 ? "1.0f" : "0.0f");
+        }
+        sp(&c->body, "      vec4 v_ = vec4(%s, %s, %s, %s);\n     ", comp[0], comp[1], comp[2], comp[3]);
+        for (int i = 0; i < IMG_SLOTS; i++)  // (bounds-checked: Maxwell drops stores outside the image)
+            sp(&c->body, " if (h_ == imgh[%d][%d]) { ivec3 s_ = imageSize(img%d); if (xy_.x < uint(s_.x) && xy_.y < uint(s_.y) && "
+                         "l_ < uint(s_.z)) imageStore(img%d, ivec3(xy_, l_), v_); } else", i / 4, i % 4, i, i);
+        sp(&c->body, " {}\n    }\n");
     } else if (!c->glsl && OPM(0xed00000000000000ull, 0xff00000000000000ull) && bits(w, 49, 3) < 2) {
         // ATOM (Metal; Ryujinx InstAtom): R[d] = old value; atomic op of R[b] into global memory at R[a](:R[a+1] with
         // .E) + imm20, 32-bit: add / min / max / inc / dec / and / or / xor / exch (safeadd as add)
@@ -2684,6 +2705,11 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         sp(&s, "layout(std140, set = %d, binding = 19) uniform Tint { vec4 ltint[4]; };\n", set);
         if (maxwell_glsl_tint_branch) sp(&s, "layout(constant_id = %d) const bool RECOLOUR = false;\n", RECOLOUR_SPEC_ID);
         info->uses_tint = true;
+    }
+    if (info->uses_images) {  // (SUST.B, compute) the bound images and their handles
+        sp(&s, "layout(std140, set = %d, binding = %d) uniform ImgH { uvec4 imgh[%d]; };\n", set, IMG_GLSL_HANDLE_BINDING, IMG_SLOTS / 4);
+        for (int i = 0; i < IMG_SLOTS; i++)
+            sp(&s, "layout(set = %d, binding = %d) uniform writeonly image2DArray img%d;\n", set, IMG_GLSL_BINDING + i, i);
     }
     for (int i = 0; i < info->ntex; i++) {
         ShaderTexture *t = &info->tex[i];
