@@ -26,6 +26,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   Xbox pads their own letters, in the HUD, menu prompts and text. "Button icons" setting (Controls tab).
 - Windows (x86-64, Vulkan): plays Echoes of Wisdom at 60 fps, with the same picture as on Mac. The zip sets the game
   up from your own extracted files and builds the game code on your PC (about an hour the first time).
+- Linux (x86-64, Vulkan): an AppImage, `ReTri-<version>-linux-x64.AppImage`. Like the Windows zip, it sets the
+  game up from your own extracted files and builds the game code on your PC.
 - The EoW touch controls look like the inventory screen's background (its felt and colour, the item slots'
   edges, see-through and lit when pressed as in LAS), laid out as in LAS. Y shows the echo or item on the HUD's Y slot.
 - Phones and tablets, EoW: the hearts go to the screen's upper left corner, the mini map to the upper right with the
@@ -33,6 +35,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Phones and tablets, EoW: a drag on the game's screen moves the camera, as the right stick.
 
 ### Changed
+- The game code generator is part of the app (C++, from LAS Recomp): no release ships Python any more, and setup
+  generates the game code in seconds instead of a minute or more.
+- Setup no longer spends 10 minutes or more compiling one large function the game runs once at start: it is built
+  without optimisation (every platform).
+- Menus (from LAS Recomp): the left stick steps one row per push, and a held direction scrolls slower. In Configure
+  inputs, the right column is empty while Device is selected, and the Open menu shortcuts are under ReTri Menu.
 - With Dynamic resolution on, the FPS target sets EoW's frame rate (60, 30, or 30 outdoors and 60 indoors) and the
   resolution does the rest, as in LAS Recomp; the game's own 60 / 30 switching is off.
 - "Button layout" is now "Confirm button" (Right or Bottom). It applies the same way to every controller, in the
@@ -61,13 +69,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 - Retroid Pocket: the face buttons match their labels (A and B, X and Y were swapped).
-- Building the game code no longer stalls for half an hour or more on two very large functions the game barely
-  runs: they are built without optimisation (every platform).
+- With Aspect ratio Unlocked, the lock-on reticle sits on its target in wide windows (it was pulled toward the
+  centre), and so do action prompts and other markers placed over things in the world.
+- Mac: trees, bushes and grass cast shadows again.
+- Shadow edges no longer show steps at Shadows 2x and 4x.
+- Mac: chests and other metal keep their shine in shadow.
 - The rift no longer disappears while talking to someone next to it.
 - Short frame-time spikes in play (30-47 ms every few seconds): the audio renderer made its 5 ms frames in bursts of
   the audio device's period (21 ms on Mac), so the game updated its audio every 21 ms and its main thread waited
   that long whenever it freed an audio buffer. The frames now keep their own 5 ms clock, as on the Switch.
 - A crash at start in a wide window with MetalFX on (MetalFX was asked for an image of no width).
+- Wide windows: the first frames at start no longer show an image of no width (the 16:9 box opened from nothing).
 - No more drops to 35-55 fps in busy areas (seen on Mac): the game's own dynamic resolution is off, as in LAS Recomp. It
   raised the 3D size on a fast GPU (up to 1.9x the window's pixels at Match display) until frames ran late.
 - Vulkan (Windows, Linux, Android): the hearts show as red hearts, not dark hearts in a red box.

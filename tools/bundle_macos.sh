@@ -2,8 +2,8 @@
 # make app: build/ReTri.app from <exe> (default build/mac15/eowrecomp). Contents/MacOS: the executable;
 # Contents/Frameworks: every non-system dylib it loads (SDL3, FFmpeg; from build/deps, else Homebrew), load
 # paths rewritten to @rpath; Contents/Resources: the icon and what the start screen builds the game code with on the
-# player's machine (runtime/gamebuild.c): the generator helper (build/helper/lasgen), the compiler (build/zig, tools/fetch_zig.sh)
-# and the headers the code is compiled against (gamelib-src/). Ad-hoc signed. No game files, game code or fonts: the
+# player's machine (runtime/gamebuild.c, whose generator is in the executable): the compiler (build/zig,
+# tools/fetch_zig.sh) and the headers the code is compiled against (gamelib-src/). Ad-hoc signed. No game files, game code or fonts: the
 # app keeps those in ~/Library/Application Support/<bundle id> (runtime/paths.h).
 # MACOS_MIN=<x.y>: LSMinimumSystemVersion, and every Mach-O inside must be built for it or older (else it fails and
 # lists them); without it the newest minimum found inside is used.
@@ -21,10 +21,8 @@ read -r VERSION BUILD_NUMBER <<EOF_V
 $(tools/bundle_version.sh "$TAG" "$TEST_OF")
 EOF_V
 [ -n "$BUILD_NUMBER" ] || { echo "no bundle version for $TAG"; exit 1; }
-GEN_HELPER=build/helper/lasgen
 ZIG=build/zig
 [ -x "$EXE" ] || { echo "no $EXE"; exit 1; }
-[ -x "$GEN_HELPER/lasgen" ] || { echo "no $GEN_HELPER (make gen-helper)"; exit 1; }
 [ -x "$ZIG/zig" ] || { echo "no $ZIG (tools/fetch_zig.sh)"; exit 1; }
 # the app must hold no game code: that's built on the player's machine (grep without -q: with pipefail, nm cut off
 # early would hide a match)
@@ -35,11 +33,9 @@ C="$APP/Contents"
 mkdir -p "$C/MacOS" "$C/Frameworks" "$C/Resources"
 cp "$EXE" "$C/MacOS/eowrecomp"
 strip -S "$C/MacOS/eowrecomp"  # (debug-map entries only: the symbols crash reports name functions by stay)
-cp -R "$GEN_HELPER" "$C/Resources/lasgen"
 cp -R "$ZIG" "$C/Resources/zig"
 mkdir "$C/Resources/gamelib-src"
-cp runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
-   "$C/Resources/gamelib-src/"
+cp runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/gamelib_entry.c "$C/Resources/gamelib-src/"
 cp docs/icon/icon.icns "$C/Resources/icon.icns"
 cp docs/icon/icon_1024.png "$C/Resources/icon.png"  # (window / Dock icon at run time)
 cp third_party/fonts/Baloo2/Baloo2-SemiBold.ttf "$C/Resources/Baloo2-SemiBold.ttf"  # (start screen; OFL, README "License")
@@ -137,8 +133,7 @@ while read -r f; do [ "$f" = "$C/MacOS/eowrecomp" ] || codesign -f -s - "$f" 2>/
 codesign -f -s - "$APP"
 codesign --verify --strict "$APP"
 if find "$APP" -name 'eowgame*' | grep . >/dev/null; then echo "game code inside $APP"; exit 1; fi
-# no path of this machine inside (configure lines, debug paths, frozen Python's file names). Not on CI: its paths
-# name no one, and prebuilt wheels hold the CI runner's own (/Users/runner/...)
+# no path of this machine inside (configure lines, debug paths). Not on CI: its paths name no one
 if [ "${CI:-}" != true ]; then
     case "$(basename "$HOME")" in runner|runneradmin) home=() ;; *) home=(-e "$HOME") ;; esac
     if grep -rlaF -e "$PWD" ${home[@]+"${home[@]}"} "$APP"; then echo "^ these hold a path of this machine"; exit 1; fi

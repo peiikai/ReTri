@@ -45,6 +45,8 @@ NVN(nvnDeviceBuilderGetFlags) { RET(G(uint32_t, A(0), 0)); }
 NVN(nvnDeviceInitialize) {
     extern bool maxwell_skip_unsupported_stores;
     maxwell_skip_unsupported_stores = game_other() != NULL;  // (experimental: see maxwell/shader.h)
+    extern uint32_t maxwell_shadow_texel_off;
+    maxwell_shadow_texel_off = game_other() ? 0x280 : 0x240;  // (maxwell/shader.h)
     static bool once;
     if (!once) {
         once = true;

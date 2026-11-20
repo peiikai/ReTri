@@ -1,5 +1,8 @@
 """Generate C for a whole NSO module.
 
+The reference for the C++ generator the app runs (runtime/gen/): tools/test_gen_cpp.py checks that both write the same
+C. Not shipped; it stays until the C++ port has been released.
+
 Usage: gen.py <name> <nso> <base> <outdir> [--hle hle_symbols.txt] [--simd asm|c] [--dyn-base] [--new-chunk-bounds]
 
 --simd: FP/SIMD/CRC32 as AArch64 inline asm (default on arm64 hosts) or portable C (default elsewhere).
@@ -89,6 +92,7 @@ class Module:
 
     def emu(self):
         if self.mu is None:
+            print(f'{self.name}: starting the jump table emulator', file=sys.stderr, flush=True)
             mu = uc.Uc(uc.UC_ARCH_ARM64, uc.UC_MODE_ARM)
             n = self.nso
             mu.mem_map(self.base, len(n.image))
@@ -547,6 +551,8 @@ def main():
                     help='Android: guest addresses relative to the window the runtime picks (lifter.gaddr)')
     args = ap.parse_args()
     lifter.DYN_BASE = args.dyn_base
+    # (first: a generator that ends early still shows it started)
+    print(f'{args.name}: started', file=sys.stderr, flush=True)
 
     global HOOKS, PATCHES
     t0 = time.time()
@@ -645,6 +651,21 @@ def main():
                         f'  /* {a:#x}: movk w{d}, #0x3fe3, lsl #16 (16:9) */')
             for a in eow_aspect:
                 PATCHES[a] = _eow_aspect
+            # (widescreen, runtime/hle/widescreen.c rt_screen_spot) layouts placed at a target's spot on screen (the
+            # lock-on reticle L_LockOn_00 and the others below): the code works the spot out with the widened camera
+            # and turns it into the 16:9 layout's units (x 960, y 540 from the centre), then stores it as the root
+            # pane's translation, `stp sA, sB, [xN, #0x30]` = x, y. The runtime rescales them to the window's shape.
+            eow_spot = [0x700249be34, 0x70024b7ae4, 0x70024b7db4, 0x70024d4408, 0x70025532fc, 0x70025efc48]
+            def _eow_spot(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert (w & 0xFFFF8000) == 0x2D060000, hex(w)  # stp sA, sB, [xN, #0x30]
+                ra, rn, rb = w & 31, (w >> 5) & 31, (w >> 10) & 31
+                return (f'{{ extern void rt_screen_spot(int site, uint64_t pane, float *xy); float xy_[2]; '
+                        f'memcpy(&xy_[0], &c->v[{ra}], 4); memcpy(&xy_[1], &c->v[{rb}], 4); '
+                        f'rt_screen_spot({eow_spot.index(a)}, c->x[{rn}], xy_); memcpy((void *)(uintptr_t)(c->x[{rn}] + 0x30), xy_, 8); }}'
+                        f'  /* {a:#x}: stp s{ra}, s{rb}, [x{rn}, #0x30] (a layout at a spot on screen: widescreen) */')
+            for a in eow_spot:
+                PATCHES[a] = _eow_spot
         if args.name == 'main' and os.environ.get('GEN_TRACE_STORE_OFF'):  # (debug) every `str xT, [xN, #off]` and
             # `stp` whose either slot is at one of these offsets (comma-separated): the runtime hears of it
             # (rt_trace_store: site, base, value) - finding where an object is registered
