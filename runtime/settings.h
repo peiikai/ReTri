@@ -46,6 +46,8 @@ typedef struct {
     int ao_quality;      // AO_*: the resolution of the game's ambient occlusion
     int shadow_quality;  // SHADOW_*: the resolution of the game's shadow map
     int fps_target;      // FPS_TARGET_*: the game's 30 or 60 fps mode, or 30 outdoors (the Field) and 60 indoors
+                         // - Dynamic resolution's FPS target, in effect while it's on
+    int fps;             // FPS_TARGET_30 / _60: the FPS row under Resolution, in effect while Dynamic is off
     int dyn_min;         // Dynamic resolution's lowest render height in lines: 360, 540 or 720
     float volume;        // master volume, 1 = 100%
     int audio_out;       // AUDIO_OUT_*: speaker layout of the game's sound (runtime/services/audio.c)
@@ -139,9 +141,9 @@ extern const char *const g_weathers[N_WEATHERS];  // (the menu's names: Off, Rai
 extern const char *const g_enemy_colour_modes[N_ENEMY_COLOUR_MODES];  // (the menu's names)
 
 extern Settings g_settings;
-// The FPS target in effect: Dynamic resolution's own (user 2026-11-12) - with a resolution of the player's choosing
-// the frame pacer decides (pace.c), as at 60
-static inline int settings_fps_target(void) { return g_settings.dyn_res ? g_settings.fps_target : FPS_TARGET_60; }
+// The FPS target in effect: Dynamic resolution's own while it's on (user 2026-11-12), else Resolution's FPS row (user
+// 2026-11-20: the game's own 30 / 60 switch is off since #41, so a resolution of the player's choosing gets its own)
+static inline int settings_fps_target(void) { return g_settings.dyn_res ? g_settings.fps_target : g_settings.fps; }
 
 const char *touch_control_name(int i);  // the on-screen controls' ini names (touch_ctl_<name>), "" past TOUCH_NCTL
 

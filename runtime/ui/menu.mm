@@ -780,6 +780,17 @@ static void tab_display(void) {
         if (dyn) opt_disable_next(), opt_needs_next("Dynamic resolution", "Off");
         if (opt_preview("Resolution", &ri, res, NRES, rdef, d, false))
             g_settings.res_mode = res_mode[ri], g_settings.res_auto = false;
+        // the frame rate at this resolution (user 2026-11-20): the game's own 30 / 60 switch is off (#41), so it's
+        // the player's - linked under Resolution as FPS target is under Dynamic, and set aside with it while Dynamic
+        // is on. Live: the game reads it every frame (pace.c rt_other_fps_limit).
+        opt_child_begin(!dyn);
+        static const char *fps[] = {LN("30"), LN("60")};
+        int fi = g_settings.fps == FPS_TARGET_30 ? 0 : 1;
+        if (dyn) opt_disable_next(), opt_needs_next("Dynamic resolution", "Off");
+        if (opt_choice("FPS", &fi, fps, 2, 1, "The game's frame rate at this resolution. 60 is smoother, 30 is easier on "
+                                              "slower machines."))
+            g_settings.fps = fi == 0 ? FPS_TARGET_30 : FPS_TARGET_60;
+        opt_child_end();
     }
     {
         char now[160] = "", d[640];  // (in the menus' language already: the row leaves it as it is)

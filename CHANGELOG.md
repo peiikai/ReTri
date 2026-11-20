@@ -18,6 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The RecompLauncher profile names what the PC needs (Windows 10, glibc 2.35, Vulkan 1.3), so the launcher can say
   when a PC is too old.
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
+- FPS setting under Resolution: 30 or 60 (default 60), used while Dynamic resolution is off. It switches live.
 - Android (arm64): the app ReTri (`com.retri.android`), which installs next to LAS Recomp. The game code
   is built on the device from your own game files, as in LAS Recomp's Android port.
 - iPhone and iPad (ReTri for iOS, bundle ID com.peiikai.retri.ios): the app holds the game code built on a Mac from
@@ -39,7 +40,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 - The game always runs at 60 fps: its own switch to 30 fps when frames run long is off (it could get stuck at 30).
-  On slower devices, turn on Dynamic resolution; its FPS target of 30 uses the game's 30 fps mode.
+  On slower devices, set FPS (under Resolution) to 30, or turn on Dynamic resolution and pick its FPS target.
 - The game code generator is part of the app (C++, from LAS Recomp): no release ships Python any more, and setup
   generates the game code in seconds instead of a minute or more.
 - Setup no longer spends 10 minutes or more compiling one large function the game runs once at start: it is built

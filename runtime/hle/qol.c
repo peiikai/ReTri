@@ -125,7 +125,8 @@ static bool apply_tilt(int removed) {  // false: not set up yet (or not the name
 
 // LARECOMP_SETTING_AT="frame:key=value,..." (test): flip an in-game menu toggle at that presented frame, as the menu
 // would (move_360, blur_removal, frame_interp: 0 / 1; dpad_mode: 0 nothing / 1 items / 2 move; Cosmetics colour rows: a palette name or #RRGGBB - tunic, hearts,
-// hair, shield, skin, leaves, grass, sand; enemy_colours: 0 / 1 / 2; screen_filter: 0-3; text_speed: 0-2).
+// hair, shield, skin, leaves, grass, sand; enemy_colours: 0 / 1 / 2; screen_filter: 0-3; text_speed: 0-2;
+// fps (Resolution's), fps_target (Dynamic's): 30 / 60; dyn_res: 0 / 1).
 static void setting_at_tick(void) {
     static const char *spec;
     static int init;
@@ -146,6 +147,9 @@ static void setting_at_tick(void) {
         if (!strcmp(key, "enemy_colours")) { g_settings.enemy_colours = v; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
         if (!strcmp(key, "text_speed") && v >= 0 && v < N_TEXT_SPEEDS) { g_settings.text_speed = v; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
         if (!strcmp(key, "dpad_mode")) { g_settings.dpad_mode = v; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
+        if (!strcmp(key, "fps")) { g_settings.fps = v == 30 ? FPS_TARGET_30 : FPS_TARGET_60; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
+        if (!strcmp(key, "fps_target")) { g_settings.fps_target = v == 30 ? FPS_TARGET_30 : FPS_TARGET_60; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
+        if (!strcmp(key, "dyn_res")) { g_settings.dyn_res = v != 0; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
         if (!strcmp(key, "shadows")) { g_settings.shadow_quality = v; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
         bool *b = !strcmp(key, "move_360") ? &g_settings.move_360 : !strcmp(key, "blur_removal") ? &g_settings.blur_removal :
                   !strcmp(key, "frame_interp") ? &g_settings.frame_interp :
