@@ -60,10 +60,10 @@ The start screen offers newer releases (runtime/ui/launcher.mm), and Windows, Li
 (runtime/update.h; macOS through Sparkle). Each platform's release file needs its signed update file next to it, made
 with the signing key in `UPDATE_SIGNING_KEY` (base64; never in the repo, a log or a note):
 
-- Windows: `tools/update_manifest.sh vX.Y.Z windows-x64 build/dist/ReTri-X.Y.Z-windows-x64.zip build/dist/ReTri`
+- Windows: `tools/update_manifest.sh vX.Y.Z windows-x64 build/dist/ReTri-vX.Y.Z-windows-x64.zip build/dist/ReTri`
   (and `windows-arm64`), after `make dist`.
-- Linux: `tools/update_manifest.sh vX.Y.Z linux-x64 build/dist/ReTri-X.Y.Z-linux-x64.AppImage` (and `linux-arm64`).
-- macOS: `tools/sparkle_appcast.sh vX.Y.Z build/dist/ReTri-X.Y.Z-macOS.dmg`; once the release is published,
+- Linux: `tools/update_manifest.sh vX.Y.Z linux-x64 build/dist/ReTri-vX.Y.Z-linux-x64.AppImage` (and `linux-arm64`).
+- macOS: `tools/sparkle_appcast.sh vX.Y.Z build/dist/ReTri-vX.Y.Z-macOS.dmg`; once the release is published,
   `tools/sparkle_notes.sh --publish vX.Y.Z` puts its notes in the feed.
 
 Upload `build/dist/update-<platform>.txt` and `appcast-macOS.xml` with the files. Their names never change: every
