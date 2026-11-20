@@ -4,12 +4,17 @@ For the maintainer. Contributors never cut releases: see `CONTRIBUTING.md` for w
 
 ## Steps
 
-1. Cut `release/X.Y` from `develop` when the version's features are in.
-2. On the release branch, set `VERSION` to `X.Y.0` and move the `Unreleased` lines in `CHANGELOG.md` under
-   `## [X.Y.0] - <date>`. Only fixes land on the release branch from here on.
-3. Open a PR from `release/X.Y` into `main`. Once it's merged, tag the merge commit `vX.Y.0`.
-4. Merge `release/X.Y` back into `develop`, then set `VERSION` on `develop` to the next version.
-5. For a patch release, merge its fixes into `release/X.Y`, then repeat steps 2 to 4 with `X.Y.Z`.
+A new release (X.Y.0):
+1. On `develop`, set `VERSION` to `X.Y.0` and move the `Unreleased` lines in `CHANGELOG.md` under
+   `## [X.Y.0] - <date>`.
+2. Open a PR from `develop` into `main`. Once it's merged, tag the merge commit `vX.Y.0`.
+3. Cut `release/X.Y` from that tag on `main`. It holds the current release, and urgent fixes target it.
+4. Set `VERSION` on `develop` to the next version.
+
+A patch release (X.Y.Z), from the urgent fixes merged into `release/X.Y`:
+1. On `release/X.Y`, set `VERSION` to `X.Y.Z` and move its `CHANGELOG.md` lines under `## [X.Y.Z] - <date>`.
+2. Open a PR from `release/X.Y` into `main`. Once it's merged, tag the merge commit `vX.Y.Z`.
+3. Merge `release/X.Y` back into `develop`, so the fixes reach the next release too.
 
 Tags are plain `vX.Y.Z`: the update check ignores anything after the version (`v0.1.0-beta.1` is never offered).
 During the beta, `v0.N.M` shows as "Beta N.M".

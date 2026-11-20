@@ -28,8 +28,8 @@ ReTri uses [Semantic Versioning](https://semver.org): `MAJOR.MINOR.PATCH`.
 | Branch | What it holds | Branches from | Merges into |
 | --- | --- | --- | --- |
 | `main` | the current release; never target it | | |
-| `release/X.Y` | the current release; urgent fixes target it | `develop` | `main` (tagged), then back into `develop` |
-| `develop` | the next release; features, and fixes that are less urgent or higher risk | | `release/X.Y` |
+| `release/X.Y` | the current release; urgent fixes target it | `main` | `main` (tagged), then back into `develop` |
+| `develop` | the next release; features, and fixes that are less urgent or higher risk | | `main` (tagged), at the next release |
 | `feature/<name>` | new features | `develop` | `develop` |
 | `fix/<issue>-<name>` | bug fixes | `release/X.Y` if urgent, else `develop` | the branch it came from |
 | `docs/<name>`, `ci/<name>`, `chore/<name>` | docs, CI, upkeep | `develop` | `develop` |
