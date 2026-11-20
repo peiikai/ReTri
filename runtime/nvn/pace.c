@@ -126,7 +126,7 @@ int pace_cpu_frames(void) { return ncpu; }
 // (game manager +0x4e2, normally 0) is 1 while slow, the game's own value again after. Re-asserted every frame while held.
 // Returns whether the game is held (not when it allows no 30 fps mode itself: its most, +0x4e3, is 0).
 #define FW_MIN_EXTRA_VSYNCS 0x4e2  // (+0x4e3: the most, 1 - its 30 fps mode; +0x4e0 / +0x4e1: the current choice)
-// FPS target (Video settings, Dynamic resolution's: settings_fps_target): 30 keeps the game in its 30 fps mode, and
+// FPS target (Video settings: Dynamic resolution's while it's on, else Resolution's FPS row - settings_fps_target): 30 keeps the game in its 30 fps mode, and
 // "30 outdoors, 60 indoors" does it in the overworld (the level Field: Mabe Village, the beaches, the forest...) and
 // not in houses, caves and dungeons. 60 is the pacer's own choice as before. Dynamic resolution follows the same
 // target (output_scale.c dyn_update).
@@ -588,10 +588,10 @@ void pace_frame(void) {
 // that clocks down with the load reads slower at 30 (an iPad Pro M4 at 20-23 ms a frame there against 14.8 ms at 60;
 // a Mac at 5120x1440, 18.8 ms of GPU a frame at 30 against 13.7 ms at 60). That switch is off: the frame time it
 // calls slow (runtime/gen/patches.cpp, its three 1/60 s limits) is 1 s, so it always runs at 60. Slower machines have
-// Dynamic resolution with its FPS target; a target of 30 (pace_target_30) puts every frame over the limit (0 s): the
+// the FPS rows (Resolution's, Dynamic resolution's FPS target); 30 (pace_target_30) puts every frame over the limit (0 s): the
 // game's own 30 fps mode, two world steps a frame, for as long as the target holds.
 uint32_t rt_other_fps_limit(void) {
-    return pace_target_30() ? 0u /* 0.0 */ : 0x3f800000u /* 1.0 */;  // (the target is Dynamic resolution's: 60 without it)
+    return pace_target_30() ? 0u /* 0.0 */ : 0x3f800000u /* 1.0 */;  // (Resolution's FPS row or Dynamic's target)
 }
 
 uint64_t pace_end_counter(const uint64_t *start_entry, const uint64_t *entry, uint64_t value) {
