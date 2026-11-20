@@ -63,6 +63,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   the audio device's period (21 ms on Mac), so the game updated its audio every 21 ms and its main thread waited
   that long whenever it freed an audio buffer. The frames now keep their own 5 ms clock, as on the Switch.
 - A crash at start in a wide window with MetalFX on (MetalFX was asked for an image of no width).
+- Wide windows: the first frames at start no longer show an image of no width (the 16:9 box opened from nothing).
 - No more drops to 35-55 fps in busy areas (seen on Mac): the game's own dynamic resolution is off, as in LAS Recomp. It
   raised the 3D size on a fast GPU (up to 1.9x the window's pixels at Match display) until frames ran late.
 - Vulkan (Windows, Linux, Android): the hearts show as red hearts, not dark hearts in a red box.
