@@ -2074,6 +2074,31 @@ static void compile_program(Prog *pr) {
     pr->ready = true;
 }
 
+// EoW's rift mask (fragment hash 44b584f0d922d49d) reads the rift map (slot 3) five times: at the point and +-1/512
+// uv to each side, two of the 1024x1024 map's texels. With the map larger than the Switch's (metal.m tex_rift_map, in
+// wide windows) the taps stay 1/512 apart and skip texels: a row of sharp teeth along the rifts' edges. Each offset
+// is divided by the map's scale (rscale[4].x, the slot's texture scale): two texels again, at any size, and the
+// game's own offsets at 1x. MSL only (the Vulkan backend translates to GLSL and has no rift map scale).
+static uint64_t hmix(uint64_t h, const void *p, size_t n);
+static void rift_mask_taps(ShaderInfo *fi, const uint8_t *fcode, size_t fmax) {
+    if (!game_other() || !fcode || fmax < 0x230 || !strstr(fi->msl, "texture2d<float> t3 [[texture(3)]]")) return;
+    if (hmix(1469598103934665603ull, fcode + 0x30, 0x200) != 0x44b584f0d922d49dull) return;
+    static const char *from[2] = {"as_type<float>(0x3b000000u)", "as_type<float>(0xbb000000u)"};
+    static const char *to[2] = {"(0.001953125f / rscale[4][0])", "(-0.001953125f / rscale[4][0])"};
+    size_t n = 0, len = strlen(fi->msl);
+    for (int k = 0; k < 2; k++) for (const char *p = fi->msl; (p = strstr(p, from[k])); p += strlen(from[k])) n++;
+    if (n != 4) { LOG("[rift] mask taps: %zu offsets, not 4: left as they are\n", n); return; }
+    char *out = malloc(len + n * 16 + 1), *o = out;
+    for (const char *p = fi->msl; *p;) {
+        int k = !strncmp(p, from[0], strlen(from[0])) ? 0 : !strncmp(p, from[1], strlen(from[1])) ? 1 : -1;
+        if (k >= 0) { o += sprintf(o, "%s", to[k]); p += strlen(from[k]); }
+        else *o++ = *p++;
+    }
+    *o = 0;
+    free(fi->msl);
+    fi->msl = out;
+}
+
 // Translates a program's two stages into pr (false: failed, logged). vaddr / faddr: the code's guest addresses
 // (debug names; 0 when preparing from the game files)
 static bool translate_program(Prog *pr, const uint8_t *vcode, size_t vmax, const uint8_t *fcode, size_t fmax,
@@ -2094,6 +2119,7 @@ static bool translate_program(Prog *pr, const uint8_t *vcode, size_t vmax, const
     }
     fkey->vs_out_mask = pr->vi->out_mask;
     pr->fi = slow_translate(fcode, fmax, STAGE_FRAGMENT, fkey);
+    if (pr->fi->msl) rift_mask_taps(pr->fi, fcode, fmax);
     if (!pr->fi->msl) { LOG("[shader] FS translate failed: %s\n", pr->fi->error); pr->failed = true; return false; }
     if (getenv("LARECOMP_SAVE_MSL") && vaddr) {
         mkdir("build/msl", 0755);
@@ -3488,7 +3514,7 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
         {   static float map_rows[12], final_rows[12]; static uint64_t map_frame = ~0ull, final_frame, mask_addr, mask_frame;
             static int off = -1; if (off < 0) off = ENV("LARECOMP_RIFT_ROWS_OFF") ? 1 : 0;  // (debug: the game's rows as they are)
             static int first = -1; if (first < 0) first = ENV("LARECOMP_RIFT_FIRST_ROWS") ? 1 : 0;
-            static int wide_off = -1; if (wide_off < 0) wide_off = ENV("LARECOMP_RIFT_WIDE_OFF") ? 1 : 0;  // (A/B: as before: no hold, the first view after 4 frames)
+            static int wide_off = -1; if (wide_off < 0) wide_off = ENV("LARECOMP_RIFT_WIDE_OFF") ? 1 : 0;  // (A/B: as before: no hold, the first view after 4 frames, the map at 1x)
             if (!off && game_other() && stage == 0 && k == 4 && g_cur_fs_hash == 0xd6c58a42e55a9f9eull && r.size >= 32) {
                 uint64_t fr = renderer_exec_frame();
                 if (mask_addr && map_frame != fr) {  // (a new frame: the last mask's rows, final if the game has written them)
