@@ -227,43 +227,14 @@ without touching the installed game, your game files or your saves.
 
 ## Credits
 
-**Contributors** - thank you to everyone who has sent code (GitHub handles, in order of first contribution; the
-numbers are LAS Recomp pull requests):
-- **[@dvilelaf](https://github.com/dvilelaf)** - the System language setting (#15), a packaging fix (#10) and the
-  level-transition crash fix (#34)
-- **[@Tensorlong](https://github.com/Tensorlong)** - the fix for the white Link on M1 Macs (#18)
-- **[@mansarip](https://github.com/mansarip)** - support for unrecognised controllers (#26)
-- **[@we11adam](https://github.com/we11adam)** - the right font for each language (#27) and the Chinese language
-  codes (#25)
-- **[@Maganra](https://github.com/Maganra)** - faster graphics checks on Linux (#42)
-- **[@hjqcan](https://github.com/hjqcan)** - game addresses in one place (#57), settings and Traditional Chinese fixes
-  (#53), much less memory used on Windows (#107), Vulkan fixes (#108, #127, #128), an x86 rounding fix (#115), movie
-  memory fixes (#112), Windows logs (#114), resumable game-code builds (#56), and save fixes (#169, #170, #182)
-- **[@gitarre1234rr5](https://github.com/gitarre1234rr5)** - controller rumble (#104) and a regression test (#88)
-- **[@rkammoun](https://github.com/rkammoun)** - the fix for the black walls in the Ukuku Prairie cave on Mac (#215, #216)
-- **[@NevesHenry](https://github.com/NevesHenry)** - a clear message on Linux when no file window can open (#298),
-  the rumble test running in CI (#299), Linux builds finding their own SDL3 (#437), font re-imports that no longer
-  empty the font (#490), a message box on Linux for a CPU without AVX2 (#491), the build and system in the log bot's
-  summary (#582), an FFmpeg licence check that really checks (#583), the GPU driver in the log bot's summary (#588),
-  each attached log counted once (#589), the game files check in the log bot's summary (#600), summaries for
-  logs attached by editing a comment (#601), a Linux AppImage build that stops when its container fails (#653), and
-  a zig download that starts over after being cut off (#667)
-- **[@ky1vstar](https://github.com/ky1vstar)** - a much faster Linux ARM release build (#319), touch menus and on-screen controls for phones (#634), the frame interpolation presenter on CADisplayLink (#649), one shared macOS and iOS host layer (#685), the iOS cleanup after #238 (#697), iOS fixes for saves, errors and Files (#690), a safer, simpler iOS kit export (#704), seed generation on iOS that shows its progress and handles room shuffle re-runs (#735), a clear message on iPhones and iPads that can't run the game (#761), checksums for every iOS download (#762), and a leaner iOS CI job (#763)
-- **[@theb0rg](https://github.com/theb0rg)** - the fix for AMD integrated graphics on Windows (#335)
-- **[@gtf-dot](https://github.com/gtf-dot)** - the game-text font on Linux (#330)
-- **[@cfcosta](https://github.com/cfcosta)** - full speed on Linux AMD handhelds like the Steam Deck and ROG Ally (#392)
-- **[@gsel001](https://github.com/gsel001)** - a check in CI that the Mac app starts (#420), and rupees up to 9,999 in the
-  cheats and save editor (#453)
-- **[@wimw85](https://github.com/wimw85)** - much faster game code setup on the Steam Deck and other PCs (#434)
-- **[@missionfloyd](https://github.com/missionfloyd)** - a much smaller game code build, without debug info (#487)
-- **[@wolfchimneyrock](https://github.com/wolfchimneyrock)** - full speed on ARM Mali graphics (#527), the CPU and GPU working in parallel on Mali (#529), and faster render passes on Mali (#528, #534), a cheaper FSR upscale (#532), the game on the big cores of ARM and Intel hybrid CPUs on Linux (#533), no more flickering grass and shadows on Mali (#546), the game starting on Snapdragon (Adreno) devices (#561), much faster shaders on Mali and Adreno (#562, #563, #579), faster graphics memory on Mali with Mesa (#564), GPU tuning tools for Vulkan (#565), no more memory leak on Arm's Mali driver (#607), smaller shader stacks that keep 4 GB Mali boards from running out of memory (#645), and less shader scratch memory on PanVK (#646)
-- **[@bgevko](https://github.com/bgevko)** - an option to keep the area's music during Guardian Acorns and Pieces of Power (#642)
+**Contributors** - ReTri shares its code base with [LAS Recomp](https://github.com/peiikai/LASRecomp). Thank you to
+everyone who has contributed to it; they're listed in its README.
 
 **Mobile ports** - special thanks to the people who brought the game to phones and tablets:
 - Android: **[@Nycolazs](https://github.com/Nycolazs)** ([LASRecomp-Android-Plus](https://github.com/Nycolazs/LASRecomp-Android-Plus))
   and **[@mamcjr](https://github.com/mamcjr)** ([LASRecompAndroid](https://github.com/mamcjr/LASRecompAndroid)), the
   Android ports our Android app is built from
-- iOS: **[@ky1vstar](https://github.com/ky1vstar)** - the game on iPhone and iPad (#238)
+- iOS: **[@ky1vstar](https://github.com/ky1vstar)** - the game on iPhone and iPad
 
 Thanks also to everyone who reports issues and tests builds. Your logs and screenshots find most of the bugs.
 
