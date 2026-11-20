@@ -58,6 +58,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- With Aspect ratio Unlocked, the lock-on reticle sits on its target in wide windows (it was pulled toward the
+  centre), and so do action prompts and other markers placed over things in the world.
 - Mac: trees, bushes and grass cast shadows again.
 - Shadow edges no longer show steps at Shadows 2x and 4x.
 - Mac: chests and other metal keep their shine in shadow.

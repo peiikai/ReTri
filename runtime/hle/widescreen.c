@@ -92,6 +92,11 @@ float rt_aspect_site(int site) {
     return base * g_wide;  // the output's aspect (wider or narrower than 16:9)
 }
 
+#define NSPOT 32
+static struct { float x, y; uint64_t frame; } g_spot[NSPOT];  // spots placed by rt_screen_spot (moved: k != 1)
+static volatile unsigned g_nspot;
+static float g_cam_shape = 1.0f;  // (another game) the shape the camera's projection was last built with (site 2)
+
 // Another game (tools/gen.py eow_aspect): the places its code builds 16:9 get the output's aspect instead.
 // Only site 2 is the camera's projection (EoW, 2026-11-05: each site alone at 32:9 in the town; site 3, also every
 // frame, stretches the picture, the rest run once at a level load). LARECOMP_ASPECT_OTHER=mask picks other sites;
@@ -103,7 +108,7 @@ uint32_t rt_aspect_other(int site) {
     float f = 16.0f / 9.0f;
     if (mask & (1LL << site)) f *= g_wide;
     // (the camera ran this frame: frames without it - title, file select, loading - are boxed, as LA's site 0)
-    if (site == 2) { extern uint64_t renderer_present_count(void); g_site0_frame = renderer_present_count(); }
+    if (site == 2) { extern uint64_t renderer_present_count(void); g_site0_frame = renderer_present_count(); g_cam_shape = f / (16.0f / 9.0f); }
     static uint64_t n[32], last;
     if (ENV("LARECOMP_LOG_ASPECT")) {
         n[site & 31]++;
@@ -120,6 +125,61 @@ uint32_t rt_aspect_other(int site) {
     uint32_t b;
     memcpy(&b, &f, 4);
     return b;
+}
+
+// Another game (tools/gen.py eow_spot): layouts the game places at a spot on screen - the lock-on reticle
+// (L_LockOn_00) and the other sites there - get their root pane's translation (layout units from the centre, y up)
+// here. The game works the spot out with the camera's projection, widened to the window's shape, and turns it into
+// the 16:9 layout's units, which are drawn in the centred 16:9 box: at 32:9 the reticle sat halfway between its
+// target and the centre (user report 2026-11-16). Scaled back out to the window's shape: x by the shape on a wide
+// window, y by 1 / shape on a tall one (the camera keeps the 16:9 view's width there and shows more above and below).
+// Only while the camera runs widened (site 2 this frame or the last two: interiors keep a 16:9 camera).
+// LARECOMP_LOG_SPOTS: each site's pane name and spot, once a second.
+void rt_screen_spot(int site, uint64_t pane, float *xy) {
+    extern uint64_t renderer_present_count(void);
+    uint64_t now = renderer_present_count();
+    int64_t ago = (int64_t)(now - g_site0_frame);
+    float k = ago >= -2 && ago <= 2 ? g_cam_shape : 1.0f;
+    if (ENV("LARECOMP_LOG_SPOTS")) {
+        static uint64_t last[8];
+        if (site >= 0 && site < 8 && now >= last[site] + 60) {
+            last[site] = now;
+            LOG("[spot] site %d %s (%.1f, %.1f) shape %.3f\n", site, (const char *)(uintptr_t)(pane + 0xB0), xy[0], xy[1], k);
+        }
+    }
+    if (k > 1.0f) xy[0] *= k;
+    else if (k > 0.1f && k < 1.0f) xy[1] /= k;
+    if (k != 1.0f) {  // (for widescreen_spot_ubo: the render thread draws these past the 16:9 box)
+        unsigned i = g_nspot++ % NSPOT;
+        g_spot[i].x = xy[0], g_spot[i].y = xy[1], g_spot[i].frame = now;
+    }
+}
+
+// Render thread: layout draws go into the centred 16:9 box (renderer.m / vulkan/exec.c), which cuts off a layout
+// placed past its sides above. A draw whose pane sits near a spot placed in the last few frames gets the window-wide
+// viewport and a copy of its uniforms with the projection divided by the stretch (k, ky), as the phones' HUD corners
+// do (runtime/hle/hud_corners.c): the same pixels inside the box, and no longer cut off at its edge. NULL otherwise.
+// (vertex uniforms: projection in floats 0-15, the pane's model-view rows in 16-27; 560 bytes: panes, 128: text)
+const void *widescreen_spot_ubo(const float *u, uint64_t size, float k, float ky) {
+    if (!u || (size != 560 && size != 128) || (k <= 1.001f && ky <= 1.001f) || !g_nspot) return NULL;
+    if (u[15] != 1 || u[12] != 0 || u[13] != 0 || !(u[0] > 0) || u[5] == 0) return NULL;  // (orthographic projection)
+    extern uint64_t renderer_exec_frame(void);
+    uint64_t fr = renderer_exec_frame();
+    float px = u[0] * u[19] + u[1] * u[23] + u[2] * u[27] + u[3], py = u[4] * u[19] + u[5] * u[23] + u[6] * u[27] + u[7];
+    bool near = false;
+    for (unsigned i = 0; i < NSPOT && !near; i++) {
+        int64_t d = (int64_t)(fr - g_spot[i].frame);
+        if (d < -3 || d > 3) continue;
+        float sx = u[0] * g_spot[i].x + u[1] * g_spot[i].y + u[3], sy = u[4] * g_spot[i].x + u[5] * g_spot[i].y + u[7];
+        near = fabsf(px - sx) < 0.35f && fabsf(py - sy) < 0.5f;  // (a reticle, a prompt with its text box)
+    }
+    if (!near) return NULL;
+    static float ring[1024][140];
+    static unsigned at;
+    float *c = ring[at++ & 1023];
+    memcpy(c, u, size);
+    for (int i = 0; i < 4; i++) c[i] /= k, c[4 + i] /= ky;
+    return c;
 }
 
 // Culling aspect: the game's own value (camera field), widened like the camera.
