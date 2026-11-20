@@ -3,7 +3,7 @@
 # The same files as the AppImage, unpacked into one "ReTri" folder, for places with no FUSE to mount an
 # AppImage (a Flatpak sandbox such as a launcher's). Start it with ./AppRun (or ./eowrecomp, a link to it).
 # portable.txt in the folder keeps the saves, settings and game files there, like the Windows zip
-# (runtime/paths.c); delete it to use ~/.local/share/eowrecomp.
+# (runtime/paths.c); delete it to use ~/.local/share/retri.
 # See docs/linux.md.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -19,7 +19,7 @@ cp -a "$APPDIR/." "$STAGE/ReTri/"
 ln -s AppRun "$STAGE/ReTri/eowrecomp"
 cat > "$STAGE/ReTri/portable.txt" <<'EOF'
 While this file is here, ReTri keeps its saves, settings and game files in this folder.
-Delete it to keep them in ~/.local/share/eowrecomp instead.
+Delete it to keep them in ~/.local/share/retri instead.
 EOF
 tools/linux/check_no_game_code.sh "$STAGE/ReTri"
 mkdir -p build/dist && rm -f "$OUT"

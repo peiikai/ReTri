@@ -10,11 +10,11 @@
 //      extracted`, the test scripts) - used as is
 //   3. the folder named in data_root.txt in the platform's folder (4), chosen on the start screen (never inside the
 //      app); asks to try again / use the default when it's missing (a drive not connected)
-//   4. macOS: ~/Library/Application Support/com.peiikai.eowrecomp (the .app bundle itself is never written to)
+//   4. macOS: ~/Library/Application Support/com.peiikai.retri (the .app bundle itself is never written to)
 //      Windows: the folder of the .exe (portable, no installer); refuses to start, with a message, if not writable
-//      Linux: <file>.AppImage.home/.local/share/eowrecomp when that folder is next to the AppImage (the AppImage
+//      Linux: <file>.AppImage.home/.local/share/retri when that folder is next to the AppImage (the AppImage
 //      runtime's portable mode); the tarball's own folder when it has portable.txt (like the Windows zip); else
-//      $XDG_DATA_HOME/eowrecomp (~/.local/share/eowrecomp)
+//      $XDG_DATA_HOME/retri (~/.local/share/retri)
 //      LARECOMP_DATA_HOME (tests) stands in for it.
 //
 // Resources: files that ship with the app (helper programs, the window icon) - next to the executable (the
@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#define RT_BUNDLE_ID "com.peiikai.eowrecomp"
+#define RT_BUNDLE_ID "com.peiikai.retri"
 
 void rt_paths_init(void);         // first thing in main(), after plat_init
 const char *rt_data_root(void);   // absolute

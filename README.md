@@ -204,9 +204,9 @@ shaderc and Vulkan Memory Allocator from your distribution. Packages, cross buil
    checks the x86-64 AppImage before a release.
 
 Where files live (game files, saves, settings and logs):
-- macOS: `~/Library/Application Support/com.peiikai.eowrecomp/`
+- macOS: `~/Library/Application Support/com.peiikai.retri/`
 - Windows: next to `eowrecomp.exe`, so keep the `ReTri` folder somewhere writable (not Program Files).
-- Linux: `~/.local/share/eowrecomp/` (the tarball: its own folder; see [docs/linux.md](docs/linux.md))
+- Linux: `~/.local/share/retri/` (the tarball: its own folder; see [docs/linux.md](docs/linux.md))
 - Android: `Android/data/com.retri.android/files` in the phone's storage.
 - iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > ReTri).
 - You can move it to another folder or drive in Settings > System > Data folder.

@@ -14,7 +14,7 @@ its vertex cache, and textures re-checked only where the game wrote. Older kerne
 `[plat] no page write tracking: ...`); `LARECOMP_WRITE_TRACKING=0` turns it off.
 The start screen asks for the folder with your own game files and sets them up.
 
-Everything the app writes lives in `~/.local/share/eowrecomp` (`$XDG_DATA_HOME/eowrecomp`): game files (`extracted/`),
+Everything the app writes lives in `~/.local/share/retri` (`$XDG_DATA_HOME/retri`): game files (`extracted/`),
 saves, settings (`larecomp.ini`), shader caches, imported fonts. Started without a terminal the log is
 `eowrecomp.log` in that folder, always the latest run; up to five recent runs are kept as `eowrecomp-backup-*.log`
 (from a terminal it prints there instead). `--data-dir <folder>` (or `LARECOMP_DATA_ROOT`) uses another folder for
@@ -25,7 +25,7 @@ To keep everything next to the AppImage instead, make the AppImage's portable fo
     ./ReTri-<version>-linux-x64.AppImage --appimage-portable-home
 
 That creates `ReTri-<version>-linux-x64.AppImage.home` next to it (making that folder by hand works too), and
-the data goes in its `.local/share/eowrecomp`.
+the data goes in its `.local/share/retri`.
 
 ## The tarball (no FUSE)
 
@@ -36,7 +36,7 @@ where an AppImage can't mount itself, like inside a Flatpak sandbox:
     "ReTri/eowrecomp"
 
 It keeps its data in its own folder, like the Windows zip, because of the `portable.txt` file in it. Delete that file
-to use `~/.local/share/eowrecomp` instead. An AppImage that a launcher unpacked works the same way: `portable.txt`
+to use `~/.local/share/retri` instead. An AppImage that a launcher unpacked works the same way: `portable.txt`
 next to its `AppRun` keeps the data there.
 
 ## Launchers
@@ -82,7 +82,7 @@ game code itself, as the AppImage does. The generator is part of the app (`runti
 command-line tool). Python 3 is only needed for the tests.
 
 Run `./build/eowrecomp` from the repo root: with `extracted/` in the starting folder it uses that folder for
-everything (dev mode) instead of `~/.local/share/eowrecomp`.
+everything (dev mode) instead of `~/.local/share/retri`.
 
 `ARCH` picks the target, separately from the OS: the generated code differs per arch (aarch64 runs the guest's
 FP/SIMD as inline asm, like Apple Silicon; x86-64 lowers it to C with `-march=x86-64-v3`, like Windows). `make gen`
@@ -140,13 +140,13 @@ arm64 is less tested than x64, so reports from ARM machines are welcome. Please 
    `deviceName`, `driverName` and `driverInfo`.
 3. **What happened**: start screen? extraction? in game? where it stopped, any visual problems (screenshots help).
    With a controller: its model, and whether it works (the log names it: `[input] gamepad: ...`).
-4. **The log**: `~/.local/share/eowrecomp/eowrecomp.log` (or the terminal output when started from a terminal).
+4. **The log**: `~/.local/share/retri/eowrecomp.log` (or the terminal output when started from a terminal).
    A crash writes `*** signal ...` and a backtrace there; attach the whole file (or if the problem was in
    an earlier run, that run's `eowrecomp-backup-*.log`, by date modified).
 5. **A crash backtrace with gdb** when the log's isn't enough:
 
        ./ReTri-<version>-linux-arm64.AppImage --appimage-extract    # -> squashfs-root/
-       cd ~/.local/share/eowrecomp
+       cd ~/.local/share/retri
        gdb -batch -ex 'handle SIGSEGV nostop noprint pass' -ex run -ex 'thread apply all bt 20' \
            --args ~/squashfs-root/usr/bin/eowrecomp > gdb.txt 2>&1
 

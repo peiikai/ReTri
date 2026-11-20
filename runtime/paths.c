@@ -123,6 +123,22 @@ static void exe_dir(char *out, size_t n) {
     if (s) *s = 0;
 }
 
+// The folders were named after the project's old name (eowrecomp, com.peiikai.eowrecomp) before the first release:
+// a copy that used the old name moves it to the new one once, so the tester's saves and game files come along.
+// Same parent folder, so it's a rename.
+#if (defined(__APPLE__) && !PLAT_IOS) || (defined(__linux__) && !defined(__ANDROID__))
+static void adopt_old(const char *root, const char *old_name) {
+    char old[1100];
+    snprintf(old, sizeof old, "%s", root);
+    char *s = strrchr(old, '/');
+    if (!s || exists(root)) return;
+    snprintf(s + 1, sizeof old - (s + 1 - old), "%s", old_name);
+    if (!is_dir(old)) return;
+    if (rename(old, root) == 0) fprintf(stderr, "[paths] moved the data folder from %s to %s\n", old, root);
+    else fprintf(stderr, "[paths] couldn't move the data folder from %s to %s: %s\n", old, root, strerror(errno));
+}
+#endif
+
 #if defined(__linux__) && !defined(__ANDROID__)
 // An unpacked AppImage's folder with portable.txt in it: the tarball (tools/linux/tarball.sh), or an AppImage a
 // launcher unpacked (RecompLauncher's Flatpak: no FUSE there; it starts AppRun with APPDIR set, APPIMAGE not).
@@ -142,8 +158,11 @@ static void tarball_dir(char *out, size_t n) {
 static bool linux_portable(char *root, size_t n) {
     const char *ai = getenv("APPIMAGE");
     char p[1100];
-    if (ai && *ai == '/' && (size_t)snprintf(p, sizeof p, "%s.home", ai) < sizeof p && is_dir(p))
-        return (size_t)snprintf(root, n, "%s/.local/share/eowrecomp", p) < n;
+    if (ai && *ai == '/' && (size_t)snprintf(p, sizeof p, "%s.home", ai) < sizeof p && is_dir(p)) {
+        if ((size_t)snprintf(root, n, "%s/.local/share/retri", p) >= n) return false;
+        adopt_old(root, "eowrecomp");
+        return true;
+    }
     tarball_dir(p, sizeof p);
     return p[0] && (size_t)snprintf(root, n, "%s", p) < n;
 }
@@ -165,15 +184,17 @@ static void default_home(char *root, size_t n) {
     // an unpacked AppImage with portable.txt (the tarball, or a launcher's unpacked copy: data next to the program,
     // like the Windows zip)
     if (linux_portable(root, n)) return;
-    // (the AppImage is read-only): $XDG_DATA_HOME/eowrecomp, ~/.local/share/eowrecomp by default
+    // (the AppImage is read-only): $XDG_DATA_HOME/retri, ~/.local/share/retri by default
     const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME");
-    if (xdg && *xdg == '/') snprintf(root, n, "%s/eowrecomp", xdg);
-    else snprintf(root, n, "%s/.local/share/eowrecomp", home && *home ? home : "/tmp");
+    if (xdg && *xdg == '/') snprintf(root, n, "%s/retri", xdg);
+    else snprintf(root, n, "%s/.local/share/retri", home && *home ? home : "/tmp");
+    adopt_old(root, "eowrecomp");
 #elif PLAT_IOS
     snprintf(root, n, "%s", plat_ios_documents());  // (the app's folder in Files; the pointer file lives there too)
 #else
     const char *home = getenv("HOME");
     snprintf(root, n, "%s/Library/Application Support/" RT_BUNDLE_ID, home && *home ? home : "/tmp");
+    adopt_old(root, "com.peiikai.eowrecomp");
 #endif
 }
 
@@ -427,7 +448,7 @@ void rt_paths_init(void) {
         if (tb[0] && same_dir(tb, root))
             snprintf(msg, sizeof msg, "ReTri can't write to its folder:\n%s\n\nIt keeps game files, saves and settings "
                      "next to the program. Move the folder somewhere you can write to, or delete portable.txt in it to "
-                     "keep them in ~/.local/share/eowrecomp.", root);
+                     "keep them in ~/.local/share/retri.", root);
         else snprintf(msg, sizeof msg, "ReTri can't write to its data folder:\n%s", root);
 #endif
         fail(msg);
