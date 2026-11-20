@@ -92,6 +92,12 @@ Known issues and their status are on the [GitHub issues page](https://github.com
   get Steam's desktop controller layout, which sends extra keyboard presses.
 - If it won't start, add this to the game's launch options in Steam: `APPIMAGE_EXTRACT_AND_RUN=1 %command%`
 
+## Launchers
+
+ReTri can be started from game launchers. `eowrecomp --help` lists the options: start the game directly, choose
+the data folder, set up the game files without a window, change settings for one run. The Windows and Linux releases
+include a profile for RecompLauncher. Details are in [docs/debug-hooks.md](docs/debug-hooks.md#command-line).
+
 ## iPhone and iPad
 
 The iOS app is made on your computer from your own game files, then sideloaded.
@@ -184,7 +190,7 @@ that page.
    `make -j` -> `build/eowrecomp.exe`. Set up your game files (above), then `make gen` and `make -j` again.
 3. Run: `./build/eowrecomp.exe extracted`, from a shell with `C:\msys64\ucrt64\bin` on PATH (for the DLLs).
 4. Package: `make deps-windows` (once: LGPL FFmpeg), `make gen-helper GEN_PY="<path to python.org Python 3.12>"`
-   and `tools/fetch_zig.sh`, then `make dist` -> `build/dist/ReTri-<version>-windows.zip`.
+   and `tools/fetch_zig.sh`, then `make dist` -> `build/dist/ReTri-<version>-windows-x64.zip`.
 
 ### Linux
 
@@ -201,11 +207,11 @@ Vulkan Memory Allocator from your distribution, Python 3.12. Packages, cross bui
 Where files live (game files, saves, settings and logs):
 - macOS: `~/Library/Application Support/com.peiikai.eowrecomp/`
 - Windows: next to `eowrecomp.exe`, so keep the `ReTri` folder somewhere writable (not Program Files).
-- Linux: `~/.local/share/eowrecomp/`
+- Linux: `~/.local/share/eowrecomp/` (the tarball: its own folder; see [docs/linux.md](docs/linux.md))
 - Android: `Android/data/com.lasrecomp.android/files` in the phone's storage.
 - iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > ReTri).
 - You can move it to another folder or drive in Settings > System > Data folder.
-- `LARECOMP_DATA_ROOT=<dir>` overrides all of these.
+- `--data-dir <dir>` (or `LARECOMP_DATA_ROOT=<dir>`) overrides all of these.
 - For a bug report, attach `eowrecomp.log` from that folder.
 
 ### Android

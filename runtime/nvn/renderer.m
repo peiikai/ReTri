@@ -3481,8 +3481,11 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
         // the game has written them), not the first one: the final view fits the rift about 3x tighter, so the map's
         // texels are 3x finer and the rift's edges are clean lines instead of steps (the first view only until a final
         // one is known, and when the rift's map is not drawn for a while). LARECOMP_RIFT_FIRST_ROWS=1: the first rows.
+        // The map's depth row (row 2; the mask's row 35, as is) goes with them: the game writes the final one late too, and
+        // with the first view's depth under the final view's rows 0-1 the map came out empty once the camera moved in
+        // (talking to someone next to a rift: the void was gone for the whole talk).
         bool rift_rows = false;
-        {   static float map_rows[8], final_rows[8]; static uint64_t map_frame = ~0ull, final_frame, mask_addr;
+        {   static float map_rows[12], final_rows[12]; static uint64_t map_frame = ~0ull, final_frame, mask_addr;
             static int off = -1; if (off < 0) off = ENV("LARECOMP_RIFT_ROWS_OFF") ? 1 : 0;  // (debug: the game's rows as they are)
             static int first = -1; if (first < 0) first = ENV("LARECOMP_RIFT_FIRST_ROWS") ? 1 : 0;
             if (!off && game_other() && stage == 0 && k == 4 && g_cur_fs_hash == 0xd6c58a42e55a9f9eull && r.size >= 32) {
@@ -3492,19 +3495,20 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
                     bool identity = g[0] == 1 && g[1] == 0 && g[2] == 0 && g[3] == 0 && g[4] == 0 && g[5] == 1 && g[6] == 0 && g[7] == 0;
                     if (!identity) {
                         for (int i = 0; i < 8; i++) final_rows[i] = (g[i] - ((i & 3) == 3 ? 0.5f : 0.0f)) * 2.0f;
+                        memcpy(final_rows + 8, g + 8, 16);
                         final_frame = fr;
                     }
                     mask_addr = 0;
                 }
                 bool use_final = !first && final_frame && fr - final_frame <= 4;
-                if (map_frame != fr) memcpy(map_rows, use_final ? final_rows : (const float *)(uintptr_t)r.addr, 32);
+                if (map_frame != fr) memcpy(map_rows, use_final ? final_rows : (const float *)(uintptr_t)r.addr, r.size >= 48 ? 48 : 32);
                 map_frame = fr;
                 uint64_t o = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);
-                memcpy((uint8_t *)ring.contents + o, map_rows, 32);
+                memcpy((uint8_t *)ring.contents + o, map_rows, size >= 48 ? 48 : 32);
                 E_buf(stage, ring, o, k);
                 continue;
             }
-            if (!off && game_other() && stage == 1 && k == 4 && g_cur_fs_hash == 0x44b584f0d922d49dull && size >= 35 * 16 &&
+            if (!off && game_other() && stage == 1 && k == 4 && g_cur_fs_hash == 0x44b584f0d922d49dull && size >= 36 * 16 &&
                 map_frame == renderer_exec_frame()) {
                 gpu_written = false;
                 rift_rows = true;
@@ -3514,6 +3518,7 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
                 uint64_t o = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);
                 float *row = (float *)((uint8_t *)ring.contents + o) + 33 * 4;
                 for (int i = 0; i < 8; i++) row[i] = map_rows[i] * 0.5f + ((i & 3) == 3 ? 0.5f : 0.0f);
+                memcpy(row + 8, map_rows + 8, 16);
                 E_buf(stage, ring, o, k);
                 continue;
             }

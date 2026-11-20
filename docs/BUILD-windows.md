@@ -37,7 +37,7 @@ Vulkan, shaderc DLLs).
     make deps-windows   # once: the LGPL FFmpeg the zip ships (build/deps-win; MSYS2's own FFmpeg is GPL)
     make gen-helper     # the game code generator without Python (build/helper/lasgen)
     tools/fetch_zig.sh  # the compiler the start screen builds the game code with (build/zig)
-    make dist           # -> build/dist/ReTri-<version>-windows.zip (no game code inside)
+    make dist           # -> build/dist/ReTri-<version>-windows-x64.zip (no game code inside)
 
 The zip's `ReTri/` folder holds `eowrecomp.exe` (icon from `docs/icon/icon.ico`, via windres),
 `lasgen/`, `zig/` and the MSYS2 DLLs. No installer: game files, saves and settings are kept next to the exe, so

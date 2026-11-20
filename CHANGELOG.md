@@ -12,6 +12,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   button setting.
 - Unlocked aspect ratio: the camera fills wide windows.
 - Logging of shader records the shipped list lacks, once per run.
+- Command line for game launchers (`eowrecomp --help`): set up without a window (`--prepare`), start straight in,
+  pick the data folder, change settings for one run. A RecompLauncher profile ships with the Windows zip and the
+  Linux files. Windows zips are named `windows-x64` / `windows-arm64`.
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
 - iPhone and iPad (ReTri for iOS, bundle ID com.peiikai.retri.ios): the app holds the game code built on a Mac from
   your own game files.
@@ -57,6 +60,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- The rift no longer disappears while talking to someone next to it.
 - Short frame-time spikes in play (30-47 ms every few seconds): the audio renderer made its 5 ms frames in bursts of
   the audio device's period (21 ms on Mac), so the game updated its audio every 21 ms and its main thread waited
   that long whenever it freed an audio buffer. The frames now keep their own 5 ms clock, as on the Switch.

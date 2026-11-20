@@ -17,9 +17,33 @@ The start screen asks for the folder with your own game files and sets them up.
 
 Everything the app writes lives in `~/.local/share/eowrecomp` (`$XDG_DATA_HOME/eowrecomp`): game files (`extracted/`),
 saves, seeds, settings (`larecomp.ini`), shader caches, imported fonts. Started without a terminal the log is
-`~/.local/share/eowrecomp/eowrecomp.log`, always the latest run; up to five recent runs are kept as
-`eowrecomp-backup-*.log` (from a terminal it prints there instead). `LARECOMP_DATA_ROOT=<dir>` uses
-another folder.
+`eowrecomp.log` in that folder, always the latest run; up to five recent runs are kept as `eowrecomp-backup-*.log`
+(from a terminal it prints there instead). `--data-dir <folder>` (or `LARECOMP_DATA_ROOT`) uses another folder for
+one run; Settings > System > Data folder moves it for good.
+
+To keep everything next to the AppImage instead, make the AppImage's portable folder once:
+
+    ./ReTri-<version>-linux-x64.AppImage --appimage-portable-home
+
+That creates `ReTri-<version>-linux-x64.AppImage.home` next to it (making that folder by hand works too), and
+the data goes in its `.local/share/eowrecomp`.
+
+## The tarball (no FUSE)
+
+`ReTri-<version>-linux-<x64|arm64>.tar.gz` holds the same files as the AppImage in one `ReTri` folder. Use it
+where an AppImage can't mount itself, like inside a Flatpak sandbox:
+
+    tar -xzf ReTri-<version>-linux-x64.tar.gz
+    "ReTri/eowrecomp"
+
+It keeps its data in its own folder, like the Windows zip, because of the `portable.txt` file in it. Delete that file
+to use `~/.local/share/eowrecomp` instead. An AppImage that a launcher unpacked works the same way: `portable.txt`
+next to its `AppRun` keeps the data there.
+
+## Launchers
+
+Command-line options for launchers (`--play`, `--data-dir`, `--game-files`, `--prepare`, `--set`, `--fullscreen`,
+`--no-update-check` and more) are in [debug-hooks.md](debug-hooks.md#command-line), or run `eowrecomp --help`.
 
 Controllers work as on the other systems (SDL3's gamepad support, bundled): Xbox, PlayStation (DualShock 4,
 DualSense), Switch Pro / Joy-Con, 8BitDo and other pads through the kernel's drivers, plugged in or paired while the
@@ -91,6 +115,10 @@ holds a copy of the game files. It needs Python's Pillow; on a slow machine rais
 The AppImage holds `eowrecomp`, `lasgen/`, the start screen font and the bundled libraries (SDL3,
 FFmpeg, shaderc). Not bundled: glibc, libstdc++, the Vulkan loader and the GPU drivers (always the system's). No game
 files or fonts.
+
+`make tarball` (after `make appimage`, same `ARCH`) packs that AppDir as the tarball, with `portable.txt` and a
+`eowrecomp` link to `AppRun` (`tools/linux/tarball.sh`). `tools/linux/check_no_game_code.sh` checks both before
+they ship.
 
 ## Differences from macOS / Windows
 - Platform layer `runtime/platform/linux.c`: like macOS, the guest window (0x70_0000_0000..0x73_2000_0000) is one
