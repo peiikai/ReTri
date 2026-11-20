@@ -189,9 +189,9 @@ These are under Video and General in ReTri's menu.
   outdoors and 60 indoors). The game adapts to your device in real time: busy scenes drop the resolution and quiet
   ones raise it again. **Minimum resolution** sets how low it can go. This is a good choice on weaker PCs, and
   especially on phones and tablets, which slow down as they heat up.
-- **The game always aims for 60 fps** at a fixed Resolution with FPS at 60. On the Switch the game drops to 30 when
-  it falls behind; ReTri doesn't, so a device that can't keep up runs a little slow instead. Use Dynamic resolution,
-  or set FPS to 30.
+- **The game's speed is tied to its frame rate.** If it drops below the FPS you picked (30 or 60), the game runs
+  in slow motion. For the best experience, pick the FPS your device can hold at your Resolution, or use Dynamic
+  resolution.
 - **Aspect ratio:** Unlocked fills the window and shows more on wide screens. Original 16:9 keeps the Switch's view
   with bars.
 - **Upscaler:** MetalFX (Apple) or AMD FSR 1 (Windows, Linux, Android) sharpens the picture when the game renders
