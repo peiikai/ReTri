@@ -58,6 +58,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- Mac: trees, bushes and grass cast shadows again.
+- Shadow edges no longer show steps at Shadows 2x and 4x.
+- Mac: chests and other metal keep their shine in shadow.
 - The rift no longer disappears while talking to someone next to it.
 - Short frame-time spikes in play (30-47 ms every few seconds): the audio renderer made its 5 ms frames in bursts of
   the audio device's period (21 ms on Mac), so the game updated its audio every 21 ms and its main thread waited

@@ -37,6 +37,7 @@ const uint8_t *maxwell_const_data;
 uint32_t maxwell_const_size;
 bool maxwell_gmem_mirror;
 bool maxwell_skip_unsupported_stores;  // (shader.h)
+uint32_t maxwell_shadow_texel_off = 0x240;  // (shader.h)
 const uint8_t *maxwell_dbg_code;
 static bool g_dbg_now;  // (translating the LARECOMP_DBG_FS shader)
 uint32_t maxwell_dbg_pc;
@@ -214,8 +215,9 @@ static const char *cbuf_ref(Ctx *c, int idx, int64_t off, const char *dyn, char 
     if (off + 16 > (int64_t)c->info->cbuf_size[idx]) c->info->cbuf_size[idx] = (uint32_t)((off + 16 + 255) & ~255);
     if (dyn) c->info->cbuf_dynamic |= 1u << idx;
     if (!dyn && idx < 18 && off >= 0 && (uint32_t)(off >> 4) + 1 > c->cbuf_need[idx]) c->cbuf_need[idx] = (uint32_t)(off >> 4) + 1;
-    if (!dyn && c->stage == STAGE_FRAGMENT && idx == 4 && (off == 0x240 || off == 0x244)) {  // (see shadow_taps)
-        int k = off == 0x244;
+    int64_t st = maxwell_shadow_texel_off;
+    if (!dyn && c->stage == STAGE_FRAGMENT && idx == 4 && (off == st || off == st + 4)) {  // (see shadow_taps)
+        int k = off != st;
         c->shadow_tap[k] = true;
         sprintf(buf, "stap%d", k);
         return buf;
@@ -1044,12 +1046,13 @@ static void ao_grid_fix(Ctx *c, const uint64_t *code, size_t end, uint32_t pc) {
 }
 
 // The game's shadow lookups (issue #602): four compare taps on its shadow map (a 2D array sampler, one layer), offset
-// by the texel size the game writes to its scene constants (c4[0x240]: 1/2048, 1/2048). With the map at another size
-// than the game's (output_scale_shadow) the taps would stay that far apart in the map, so the edges would stay as wide
-// as the Switch's at 2x to 4x, and the taps would fall between texels at 0.5x.
+// by the texel size the game writes to its scene constants (c4[0x240]: 1/2048, 1/2048; EoW: c4[0x280], 1024x1024
+// layers, maxwell_shadow_texel_off). With the map at another size than the game's (output_scale_shadow) the taps
+// would stay that far apart in the map, so the edges would stay as wide as the Switch's at 2x to 4x, and the taps
+// would fall between texels at 0.5x. (EoW's at 4x: each edge a staircase of four steps.)
 // The texel size is divided by the map's scale, rscale[1 + slot].x: the real texel again, and the game's value at the
 // Switch's size. The reads go through a local set at the start, so a raw move of the constant is covered too. Without
-// a shadow array in the shader c4[0x240] is something else and is left alone.
+// a shadow array in the shader that constant is something else and is left alone.
 static void shadow_taps(Ctx *c, Str *s) {
     int slot = -1;
     for (int i = 0; i < c->info->ntex && slot < 0; i++)
@@ -1057,10 +1060,11 @@ static void shadow_taps(Ctx *c, Str *s) {
     for (int k = 0; k < 2; k++) {
         if (!c->shadow_tap[k]) continue;
         if (slot >= 0 && c->uses_rscale)
-            sp(s, c->glsl ? "  uint stap%d = floatBitsToUint(uintBitsToFloat(cb4[36][%d]) / rscale[%d][0]);\n"
-                          : "  uint stap%d = as_type<uint>(as_type<float>(cb4[36][%d]) / rscale[%d][0]);\n", k, k, slot + 1);
+            sp(s, c->glsl ? "  uint stap%d = floatBitsToUint(uintBitsToFloat(cb4[%u][%d]) / rscale[%d][0]);\n"
+                          : "  uint stap%d = as_type<uint>(as_type<float>(cb4[%u][%d]) / rscale[%d][0]);\n",
+               k, maxwell_shadow_texel_off >> 4, k, slot + 1);
         else
-            sp(s, "  uint stap%d = cb4[36][%d];\n", k, k);
+            sp(s, "  uint stap%d = cb4[%u][%d];\n", k, maxwell_shadow_texel_off >> 4, k);
     }
 }
 
@@ -2139,7 +2143,7 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         }
         sp(&c->body, "      }\n    }\n");
     } else if (!c->glsl && c->stage == STAGE_COMPUTE && OPM(0xeb20000000000000ull, 0xfff8000000000000ull) &&
-               getenv("LARECOMP_SUST") && atoi(getenv("LARECOMP_SUST"))) {  // (opt-in, LARECOMP_SUST=1: EoW's env-map stores came out as garbage - a mosaic)
+               !(getenv("LARECOMP_SUST") && !atoi(getenv("LARECOMP_SUST")))) {  // (LARECOMP_SUST=0: skipped)
         // SUST.B (Metal compute; Ryujinx InstSustB): formatted store of R[d..] (the Rgba mask's components, in order) at
         // R[a] (x), R[a+1] (y), R[a+2] (layer: 2D array / cube faces) into the image whose handle is R[c]
         int rgba = (int)bits(w, 20, 4), dim = (int)bits(w, 33, 3), hc = (int)bits(w, 39, 8);
