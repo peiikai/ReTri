@@ -30,10 +30,10 @@ void update_restart(void) {}
 
 extern "C" const char *larecomp_version(void);  // runtime/ui/launcher.mm (LARECOMP_VERSION)
 
-// The public half of the key that signs every manifest (UPDATE_SIGNING_KEY; tools/update_sign.cpp). The
-// same key signs the macOS updates for Sparkle (SUPublicEDKey in tools/bundle_macos.sh, base64 there). Never change
-// it: builds out there only accept manifests signed by this one. All zeros: no key yet (Sparkle off, no manifests).
-#define UPDATE_PUBLIC_KEY "0000000000000000000000000000000000000000000000000000000000000000"
+// The public half of the key that signs every manifest (UPDATE_SIGNING_KEY, the repo secret; tools/update_sign.cpp).
+// The same key signs the macOS updates for Sparkle (SUPublicEDKey in tools/bundle_macos.sh, base64 there). Never
+// change it: builds out there only accept manifests signed by this one.
+#define UPDATE_PUBLIC_KEY "2db21a65c7efd6b29bb2593bac3dc9006616181a99f26417c88e497dee9418cc"
 #define DOWNLOAD_URL "https://github.com/peiikai/ReTri/releases/download"
 
 // Where the app is: the folder whose files the manifest lists (Windows), or the AppImage's folder and its name
