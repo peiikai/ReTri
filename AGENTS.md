@@ -30,7 +30,7 @@
   | Rendering | `runtime/nvn/cmdbuf.c` (recording), `renderer.m` / `metal.m` (Metal), `vulkan/exec.c` (Vulkan), `maxwell/translate.c` (shaders); per-GPU Vulkan defaults: [docs/vulkan-gpu-defaults.md](docs/vulkan-gpu-defaults.md) |
   | Game behaviour or a new feature | `runtime/hle/` (EoW's: `*_other.c`) and EoW's patches in `runtime/gen/patches.cpp` (`build_other_patches`; `tools/patches.py` is the reference) |
   | Saves | [docs/save-format.md](docs/save-format.md), `runtime/services/fs.c` |
-  | Game addresses | CONTRIBUTING "Project layout" (`runtime/game_addresses/games.h`) |
+  | Game addresses | CONTRIBUTING "Project layout" (`runtime/game_addresses/games.h`, `eow_v1_0_x.h`, `OTHER(NAME)`) |
   | Menu text | `python3 tools/menu_strings.py check` |
 
 - **No Nintendo files, ever.**
@@ -53,10 +53,12 @@
   - Patch the game's own code minimally rather than replacing whole systems.
 
 - **Addresses and patches.**
-  - EoW is found by its main program's build ID (`runtime/game_addresses/games.h`). Version 1.0.2 is supported;
-    unknown build IDs are refused.
-  - EoW's patch sites are in `build_other_patches` (`runtime/gen/patches.cpp`, mirrored in `tools/patches.py`). The
-    `GA(NAME)` tables (`versions.h`, `patches_v1_0_*.h`, `runtime_v1_0_*.h`) are LA's.
+  - EoW ships as 1.0.0, 1.0.1 and 1.0.2. Each build is a row of `runtime/game_addresses/games.h`, found by its main
+    program's build ID, with its own table (`eow_v1_0_x.h`, the same names in each). Unknown build IDs are refused.
+  - Every EoW address goes through those tables: `OTHER(NAME)` in the runtime, `T("NAME")` in `runtime/gen/patches.cpp`
+    (`build_other_patches`) and `T['NAME']` in `tools/gen.py`. The `GA(NAME)` tables (`versions.h`,
+    `patches_v1_0_*.h`, `runtime_v1_0_*.h`) are LA's.
+  - Run `python3 tools/test_game_addresses.py` after touching addresses.
   - Every patch asserts the original instruction word, so a wrong address fails loudly. Keep it that way.
   - A generator or patch change goes into both `runtime/gen/` and `tools/gen.py` / `tools/patches.py`, and
     `tools/test_gen_cpp.py` must report the C identical (CONTRIBUTING "The game code generator").

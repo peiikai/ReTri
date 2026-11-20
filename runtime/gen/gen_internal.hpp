@@ -266,14 +266,19 @@ const AddressTable &address_table(const std::string &key);
 // game_addresses.version_for_build_id; throws GenError (the message the app shows) for an unknown build ID
 std::string version_for_build_id(const std::string &build_id);
 
-// game_addresses.GAMES: other games on the same engine (runtime/game_addresses/games.h), no address tables
+// game_addresses.GAME_BUILDS: other games on the same engine (runtime/game_addresses/games.h), one row per build with
+// its own address table (<key>_<table>.h, OTHER_ADDR lines)
 struct OtherGame {
-    const char *key, *label, *build_id;
+    const char *key, *table, *label, *release, *build_id;
     uint64_t sdk_base;
 };
-const OtherGame *other_game(const std::string &key);  // nullptr: not one
+const OtherGame *other_game(const std::string &key);  // its first build; nullptr: not one
+// game_addresses.game_build: the games.h row of a main build ID, or nullptr (LA, or unknown)
+const OtherGame *other_build(const std::string &build_id);
 // game_addresses.game_for_build_id: the games.h key for a main build ID, or "" (LA, or unknown)
 std::string game_for_build_id(const std::string &build_id);
+// game_addresses.other_table: the build's address table
+const AddressTable &other_table(const OtherGame &g);
 
 // game_addresses.addr_text: @NAME@ -> hex digits
 std::string addr_text(const AddressTable &a, const std::string &code);
@@ -298,7 +303,8 @@ PatchSet build_patches(const std::string &version_key);
 
 // gen.py --game: main's patches for another game (none of LA's), and the functions it builds without optimisation
 // (gen.OPTNONE: guest address -> first instruction word, checked here)
-void build_other_patches(const std::string &game, Module &m, PatchSet &ps, std::map<uint64_t, uint32_t> &optnone);
+void build_other_patches(const std::string &game, const AddressTable *t, Module &m, PatchSet &ps,
+                         std::map<uint64_t, uint32_t> &optnone);
 // (debug, gen.py GEN_TRACE_STORE_OFF) traced stores at these comma-separated offsets; returns how many
 int add_trace_store_patches(Module &m, PatchSet &ps, const char *list);
 std::string trace_store_offsets_text();  // sorted(hex(o) for o in offs), as gen.py prints it

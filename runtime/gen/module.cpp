@@ -746,19 +746,21 @@ static void run(const LasgenOptions &o) {
     PatchSet ps;
     std::string version;
     const std::string game = o.game && *o.game ? o.game : "la";
+    const OtherGame *ob = nullptr;  // (another game: main's build, its own address table)
     std::map<uint64_t, uint32_t> optnone;
     if (game != "la") {
         // another game on the same engine (runtime/game_addresses/games.h): no LA patches or hooks (all of them are
         // LA addresses)
         const OtherGame *og = other_game(game);
         if (!og) throw GenError("unknown game " + game);
-        if (name == "main" && game_for_build_id(m.nso.build_id) != game) {
+        if (name == "main") ob = other_build(m.nso.build_id);
+        if (name == "main" && (!ob || ob->key != game)) {
             std::string bid = m.nso.build_id.substr(0, 16);
             for (auto &ch : bid) ch = (char)toupper((unsigned char)ch);
             throw GenError("main build ID " + bid + " is not " + game);
         }
-        r.log("%s: game %s (no LA patches)", name.c_str(), og->label);
-        build_other_patches(game, m, ps, optnone);
+        r.log("%s: game %s%s%s (no LA patches)", name.c_str(), og->label, ob ? " " : "", ob ? ob->release : "");
+        build_other_patches(game, ob ? &other_table(*ob) : nullptr, m, ps, optnone);
         const char *trace = getenv("GEN_TRACE_STORE_OFF");
         if (name == "main" && trace && *trace) {
             int n = add_trace_store_patches(m, ps, trace);
@@ -1053,7 +1055,7 @@ static void run(const LasgenOptions &o) {
         write_if_changed(outdir / (name + "_table.c"), f);
     }
     if (name == "main" && game != "la")
-        write_if_changed(outdir / "main_build_id.txt", std::string(other_game(game)->build_id) + "\n");
+        write_if_changed(outdir / "main_build_id.txt", std::string(ob->build_id) + "\n");
     else if (name == "main")  // (what this code was generated from: the Makefile's game code library id, GAMELIB_BUILD_ID)
         for (int i = 0; i < GAME_VERSION_COUNT; i++)
             if (version == GAME_VERSIONS[i].key)

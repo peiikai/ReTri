@@ -421,10 +421,12 @@ std::string delegate_forwarder(Module &m, uint64_t a) {
                ")) return; c->x[1] = c->x[0]; }", "  /* ", ax(a), ": mov x1, x0 (delegate forwarder: nothing to forward to) */");
 }
 
-// ---- Echoes of Wisdom (gen.py --game eow): main's own patches. None of LA's apply (they are LA addresses), and EoW has
-// no address table yet, so its sites are written here as addresses of the one build games.h accepts.
+// ---- Echoes of Wisdom (gen.py --game eow): main's own patches. None of LA's apply (they are LA addresses); the sites
+// are the build's own (runtime/game_addresses/eow_<table>.h, set by build_other_patches), each checked by its word.
+std::vector<uint64_t> eow_aspect_sites, eow_spot_sites;
+uint64_t eow_fps_limit_30;
 
-// (warp, runtime/hle/warp_other.c) the level-jump request processor (main+0x160f7e0, x0 = its object, the request at
+// (warp, runtime/hle/warp_other.c) the level-jump request processor (WARP_REQUEST_PROC, x0 = its object, the request at
 // +0x10): its `mov x20, x0` tells us where the request is
 std::string eow_request(Module &m, uint64_t a) {
     uint32_t w = m.image_word(a);
@@ -444,9 +446,9 @@ std::string eow_tilt(Module &m, uint64_t a) {
 }
 
 // (resolution, runtime/nvn/output_scale.c) the game's own dynamic resolution, off - as LA's GAME_DYNRES_SITE. Its frame
-// controller (main+0x346530) reads the scaler's enabled byte (+0x480 of its object); on, it turns the GPU timing
+// controller (1.0.2: main+0x346530) reads the scaler's enabled byte (+0x480 of its object); on, it turns the GPU timing
 // counters into a load figure and steps its 3D a level (1080 - 36 x level lines) after 6 samples over 90% / under 70%
-// (main+0x3468c0). It started at 1408x792 and climbed to 1920x1080 on a fast GPU: our scale (Match display maps 792
+// (1.0.2: main+0x3468c0). It started at 1408x792 and climbed to 1920x1080 on a fast GPU: our scale (Match display maps 792
 // lines to the window) then drew the 3D at up to 1.9x the window's pixels (6982x1964 for 5120x1440), new targets at
 // each step, and frames over 16.7 ms once our own window step (SMAA, upscale) came on top. Read as 0: it stays at
 // 1408x792. LARECOMP_GAME_DYNRES=1 (test): the game's own again.
@@ -460,15 +462,18 @@ std::string eow_dynres(Module &m, uint64_t a) {
 // (frame pacing, runtime/nvn/pace.c rt_other_fps_window) the frame controller at 30 fps, at the end of a 12-frame
 // window, reads how many of its frames took over 1/60 s; 0 takes it back to 60. On phone and tablet GPUs its frames
 // read slow at 30 by the lowered clock alone: the runtime may answer 0 to try 60
+// (1.0.2: `ldr w9, [x26, #0x4fc]`; 1.0.0 keeps its counters 8 bytes lower: the offset is the instruction's)
 std::string eow_fps_window(Module &m, uint64_t a) {
     uint32_t w = m.image_word(a);
-    check(w == 0xb944ff49, a, w);  // ldr w9, [x26, #0x4fc]
-    return cat("{ extern uint32_t rt_other_fps_window(uint32_t); c->x[9] = rt_other_fps_window(LD32(c->x[26] + 0x4fc)); }",
-               "  /* ", ax(a), ": ldr w9, [x26, #0x4fc] (30 fps window: its slow frames) */");
+    check((w & 0xFFC003FF) == 0xB9400349, a, w);  // ldr w9, [x26, #off]
+    uint64_t off = ((w >> 10) & 0xFFF) * 4;
+    return cat("{ extern uint32_t rt_other_fps_window(uint32_t); c->x[9] = rt_other_fps_window(LD32(c->x[26] + ", ax(off),
+               ")); }", "  /* ", ax(a), ": ldr w9, [x26, #", ax(off), "] (30 fps window: its slow frames) */");
 }
 
 // ... and at 60, its count of frames in a row over 1/60 s (at 1 or 2 it goes to 30): 0 for a moment after a try, while
-// the clock comes up
+// the clock comes up. 1.0.0 has no such count (one slow frame takes it to 30: the runtime's 60 fps limit gives the same
+// grace there, rt_other_fps_limit)
 std::string eow_slow60(Module &m, uint64_t a) {
     uint32_t w = m.image_word(a);
     check(w == 0xb945034a, a, w);  // ldr w10, [x26, #0x500]
@@ -478,28 +483,21 @@ std::string eow_slow60(Module &m, uint64_t a) {
 
 // ... and the frame time it calls slow, 1/60 s (`movk w9, #0x3c88, lsl #16` after `mov w9, #0x8889`), in its 30 and its
 // 60 fps branch: with Dynamic resolution the FPS target decides instead (rt_other_fps_limit)
-constexpr uint64_t EOW_FPS_LIMIT_30 = 0x7000347340, EOW_FPS_LIMIT_60 = 0x700034756c;
 std::string eow_fps_limit(Module &m, uint64_t a) {
     uint32_t w = m.image_word(a);
     check(w == 0x72a79109, a, w);  // movk w9, #0x3c88, lsl #16
-    int at30 = a == EOW_FPS_LIMIT_30 ? 1 : 0;
+    int at30 = a == eow_fps_limit_30 ? 1 : 0;
     return cat("{ extern uint32_t rt_other_fps_limit(int); c->x[9] = rt_other_fps_limit(", at30, "); }", "  /* ", ax(a),
                ": movk w9, #0x3c88, lsl #16 (1/60 s: a slow frame, ", at30 ? "30" : "60", " fps branch) */");
 }
 
 // (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
 // `movz wD, #0x8e39; movk wD, #0x3fe3, lsl #16`: the movk gets the runtime's aspect instead
-const uint64_t EOW_ASPECT[] = {
-    0x700033d32c, 0x700033e6f8, 0x7000348b70, 0x7000351e20, 0x7000c2bd3c, 0x7000c2c8b4, 0x7000c3268c,
-    0x7000c409bc, 0x7000c41084, 0x7000c42784, 0x7000c4597c, 0x7000c46da8, 0x7001583b40, 0x7001584390,
-    0x70015866d0, 0x70015879dc, 0x70015ec260, 0x7001628908, 0x7001645218, 0x7001646d58, 0x70020ebc34,
-    0x700231dfe8, 0x700231e050, 0x7002703a30, 0x7002722884, 0x700279adcc,
-};
 std::string eow_aspect(Module &m, uint64_t a) {
     uint32_t w = m.image_word(a);
     check((w & 0xFFFFFFE0) == 0x72A7FC60, a, w);  // movk wD, #0x3fe3, lsl #16
     int d = (int)(w & 31), idx = 0;
-    while (EOW_ASPECT[idx] != a) idx++;
+    while (eow_aspect_sites[idx] != a) idx++;
     return cat("{ extern uint32_t rt_aspect_other(int); c->x[", d, "] = rt_aspect_other(", idx, "); }", "  /* ", ax(a),
                ": movk w", d, ", #0x3fe3, lsl #16 (16:9) */");
 }
@@ -508,12 +506,11 @@ std::string eow_aspect(Module &m, uint64_t a) {
 // reticle L_LockOn_00 and the others below): the code works the spot out with the widened camera and turns it into the
 // 16:9 layout's units (x 960, y 540 from the centre), then stores it as the root pane's translation,
 // `stp sA, sB, [xN, #0x30]` = x, y. The runtime rescales them to the window's shape.
-const uint64_t EOW_SPOT[] = {0x700249be34, 0x70024b7ae4, 0x70024b7db4, 0x70024d4408, 0x70025532fc, 0x70025efc48};
 std::string eow_spot(Module &m, uint64_t a) {
     uint32_t w = m.image_word(a);
     check((w & 0xFFFF8000) == 0x2D060000, a, w);  // stp sA, sB, [xN, #0x30]
     int ra = (int)(w & 31), rn = (int)((w >> 5) & 31), rb = (int)((w >> 10) & 31), idx = 0;
-    while (EOW_SPOT[idx] != a) idx++;
+    while (eow_spot_sites[idx] != a) idx++;
     return cat("{ extern void rt_screen_spot(int site, uint64_t pane, float *xy); float xy_[2]; ",
                "memcpy(&xy_[0], &c->v[", ra, "], 4); memcpy(&xy_[1], &c->v[", rb, "], 4); ",
                "rt_screen_spot(", idx, ", c->x[", rn, "], xy_); memcpy((void *)(uintptr_t)(c->x[", rn, "] + 0x30), xy_, 8); }",
@@ -664,30 +661,43 @@ PatchSet build_patches(const std::string &version_key) {
     return ps;
 }
 
-void build_other_patches(const std::string &game, Module &m, PatchSet &ps, std::map<uint64_t, uint32_t> &optnone) {
-    if (m.name != "main") return;
+void build_other_patches(const std::string &game, const AddressTable *t, Module &m, PatchSet &ps,
+                         std::map<uint64_t, uint32_t> &optnone) {
+    if (m.name != "main" || !t) return;
     auto &P = ps.patches;
+    auto T = [&](const char *name) {
+        auto it = t->find(name);
+        if (it == t->end()) throw GenError(std::string("KeyError: ") + name);
+        return it->second;
+    };
     if (game == "eow") {
-        // (optnone) a 25 500-line function behind a data table at main+0x3d85e90, never entered in 4 200 frames of
-        // start, file load and play (LARECOMP_FNPROF); at -O1 it took 30+ minutes to compile
-        optnone[0x7001390b70] = 0xa9ba7bfd;  // stp x29, x30, [sp, #-0x60]!
+        // (optnone) a 25 500-line function behind a data table (1.0.2: main+0x3d85e90), never entered in 4 200 frames
+        // of start, file load and play (LARECOMP_FNPROF); at -O1 it took 30+ minutes to compile
+        optnone[T("OPTNONE_TABLE_FN")] = 0xa9ba7bfd;  // stp x29, x30, [sp, #-0x60]!
         // a 27 300-line function called once while the game starts (LARECOMP_FNPROF: once in boot to the overworld);
         // at -O2 it took 8 minutes on a Mac and 30+ on a Snapdragon 865 (Android builds it on the phone)
-        optnone[0x70020e7fa0] = 0xa9ba7bfd;  // stp x29, x30, [sp, #-0x60]!
+        optnone[T("OPTNONE_SLOW_FN")] = 0xa9ba7bfd;  // stp x29, x30, [sp, #-0x60]!
         for (auto &e : optnone) {
             uint32_t got = m.image_word(e.first);
             if (got != e.second)
                 throw GenError("AssertionError: OPTNONE " + ax(e.first) + ": " + ax(got) + ", not " + ax(e.second));
         }
-        P[0x700160f804] = eow_request;
-        P[0x70027802e8] = eow_tilt;
-        P[0x7000346580] = eow_dynres;
-        P[0x7000347370] = eow_fps_window;
-        P[0x7000347668] = eow_slow60;
-        P[EOW_FPS_LIMIT_30] = eow_fps_limit;
-        P[EOW_FPS_LIMIT_60] = eow_fps_limit;
-        for (uint64_t a : EOW_ASPECT) P[a] = eow_aspect;
-        for (uint64_t a : EOW_SPOT) P[a] = eow_spot;
+        P[T("REQUEST_SITE")] = eow_request;
+        P[T("TILT_SITE")] = eow_tilt;
+        P[T("DYNRES_SITE")] = eow_dynres;
+        P[T("FPS_WINDOW_SITE")] = eow_fps_window;
+        if (T("SLOW60_SITE")) P[T("SLOW60_SITE")] = eow_slow60;
+        eow_fps_limit_30 = T("FPS_LIMIT_30_SITE");
+        P[eow_fps_limit_30] = eow_fps_limit;
+        P[T("FPS_LIMIT_60_SITE")] = eow_fps_limit;
+        // (in name order, as gen.py: the index is the site's number for the runtime)
+        eow_aspect_sites.clear(), eow_spot_sites.clear();
+        for (auto &e : *t) {
+            if (!e.first.compare(0, 12, "ASPECT_SITE_")) eow_aspect_sites.push_back(e.second);
+            if (!e.first.compare(0, 10, "SPOT_SITE_")) eow_spot_sites.push_back(e.second);
+        }
+        for (uint64_t a : eow_aspect_sites) P[a] = eow_aspect;
+        for (uint64_t a : eow_spot_sites) P[a] = eow_spot;
     }
 }
 
