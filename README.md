@@ -203,8 +203,7 @@ These are under Video and General in ReTri's menu.
 
 ## Performance tips
 
-- Turn on Dynamic resolution and pick an FPS target. On phones, tablets and handhelds, a target of 30 keeps the
-  picture sharper and the device cooler.
+- Turn on Dynamic resolution and pick an FPS target.
 - With a fixed Resolution, try a lower one (75% or 50%) with MetalFX or FSR 1, or set FPS to 30.
 - Set Ambient occlusion to Off on weaker GPUs.
 - Let the shaders finish preparing before you play.
