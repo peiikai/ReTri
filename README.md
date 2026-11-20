@@ -177,7 +177,7 @@ By default it is:
 - macOS: `~/Library/Application Support/com.peiikai.eowrecomp`
 - Windows: next to the program
 - Linux: `~/.local/share/eowrecomp`
-- Android: `Android/data/com.retri.android/files`, reachable over USB and from file managers
+- Android: `Android/data/com.retri.android/files`, which you can open from a computer over USB
 
 ## Settings worth knowing
 
