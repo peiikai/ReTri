@@ -1160,6 +1160,30 @@ bool output_scale_shadow_off(void) {
     return g_settings.shadow_quality == SHADOW_OFF;
 }
 
+// EoW's rift map: one 1024x1024 RGBA8 render target (2D, not multisampled), a top-down map of the rifts that their mask
+// pass reads back by world position (renderer.m: the rift rows). The game fits it to the ground the camera sees; in a
+// window wider than 16:9 that ground is about as many times wider, so its texels are that much coarser and the rifts'
+// edges came out as a staircase. Its scale: the widescreen factor (output aspect over 16:9; 1 at 16:9: the Switch's
+// size), up to 4. The mask's five taps on it follow the scale (renderer.m rift_mask_taps).
+// LARECOMP_RIFT_MAP_SCALE=<n> (test, 1 to 4): n; LARECOMP_RIFT_WIDE_OFF=1 (A/B): 1.
+bool output_scale_is_rift_map(uint32_t target, uint32_t samples, uint32_t w, uint32_t h, uint32_t format, bool render_target) {
+    return game_other() && target == 1 && samples <= 1 && w == 1024 && h == 1024 && format == 0x25 && render_target;
+}
+
+float output_scale_rift_map(void) {
+    static float test = -1;
+    if (test < 0) {
+        const char *e = getenv("LARECOMP_RIFT_MAP_SCALE");
+        test = e ? (float)atof(e) : 0;
+    }
+    if (test >= 1 && test <= 4) return test;
+    if (ENV("LARECOMP_RIFT_WIDE_OFF")) return 1;
+    extern float widescreen_factor(void);
+    float f = widescreen_factor();
+    if (!(f > 1.01f)) return 1;
+    return f > 4 ? 4 : ceilf(f * 4) / 4;  // (quarter steps: a window being resized reallocates it a few times, not every frame)
+}
+
 void output_scale_log(unsigned long long frame, double dw, double dh, const OutScale *o) {
     static double psx, psy, pdw, pdh;
     static int nlog;

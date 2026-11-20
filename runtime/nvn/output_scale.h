@@ -36,6 +36,8 @@ bool output_scale_is_shadow_map(uint32_t target, uint32_t samples, uint32_t w, u
 float output_scale_shadow(void);
 float output_scale_shadow_slope(void);  // the slope factor of its polygon offset times this
 bool output_scale_shadow_off(void);  // Shadows Off: nothing is drawn into it
+bool output_scale_is_rift_map(uint32_t target, uint32_t samples, uint32_t w, uint32_t h, uint32_t format, bool render_target);
+float output_scale_rift_map(void);  // EoW's rift map: the widescreen factor (1 at 16:9)
 // (diagnostics) "[scale] frame f drawable WxH -> render scale sx x sy" whenever the render scale or the window changes
 void output_scale_log(unsigned long long frame, double dw, double dh, const OutScale *o);  // the frame rate Dynamic holds (60 out of reach), else 0
 
