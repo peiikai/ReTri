@@ -34,7 +34,7 @@ fit together. File names are on the current development branch.
   accounts, applet messages and amiibo, enough for this game.
 - **HLE** (`runtime/hle/`): replacements for SDK functions (libc, heaps, input, movies) plus the game features that
   hook into the game's code. EoW's are named `*_other` (`warp_other.c`, `rt_aspect_other` for wide windows,
-  `rt_other_fps_*` in `runtime/nvn/pace.c`).
+  `rt_other_fps_limit` in `runtime/nvn/pace.c`).
 - **Addresses**: Echoes of Wisdom's builds (1.0.0, 1.0.1, 1.0.2) are rows of `runtime/game_addresses/games.h`, each
   with its own table (`eow_v1_0_x.h`, the same names in each), read through `OTHER(NAME)` by the runtime and by both
   generators. So one source supports every game version. The `GA(NAME)` tables (`versions.h`, `patches_v1_0_*.h`,

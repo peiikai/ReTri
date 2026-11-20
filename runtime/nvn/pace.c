@@ -267,12 +267,10 @@ static uint64_t pace_scene(void) {
 // every other), and nothing here did - it ran as fast as the Mac could. The wait is where the Switch's is: acquiring the
 // next window texture (objects.c), not in the present - EoW times its frame across the present and, waiting there, it
 // counted the wait as its own work and stayed in its 30 fps mode.
-static void other_try_interval(int interval);
 void pace_other_cadence(void) {
     extern int g_nvn_present_interval;
     static uint64_t v_exit;
     int interval = g_nvn_present_interval < 1 ? 1 : g_nvn_present_interval > 4 ? 4 : g_nvn_present_interval;
-    other_try_interval(interval);
     if (v_exit) {
         uint64_t target = v_exit + (uint64_t)interval, t0 = plat_now_ns();
         for (;;) {  // (bounded, as hold_cadence: a stalled vsync timer must not stall the game)
@@ -325,8 +323,6 @@ void pace_hud(PaceHud *h) {
 static double gpu_avg = -1;
 double pace_gpu_frame_ms(void) { return gpu_avg; }
 
-static void pace_other_frame(uint64_t p_ns);
-static void other_try_reset(const char *what);
 void pace_frame(void) {
     spike_test();
     static int on = -1;
@@ -377,14 +373,12 @@ void pace_frame(void) {
     // below would also make its timing counters read 20 ms a frame (pace_end_counter), and its way back to 60 needs
     // LA's scenes: EoW was held at 30 from one heavy moment until the next restart (Zora Sea Village: 33 fps).
     if (game_other()) {  // (no 30 fps hold, see above; Show advanced information still gets its numbers)
-        const char *reset = __atomic_exchange_n(&reset_what, (const char *)NULL, __ATOMIC_ACQ_REL);
-        if (reset) other_try_reset(reset);
         extern int64_t pace_gpu_ns(void);
         static int64_t other_gpu = -1;
         int64_t g = pace_gpu_ns();
         double g_ms = g >= 0 && other_gpu >= 0 && g >= other_gpu ? (g - other_gpu) / 1e6 : -1;
         other_gpu = g;
-        if (!first) hud_note(p, tc, rc, rcpu != 0, g_ms), pace_other_frame(p);
+        if (!first) hud_note(p, tc, rc, rcpu != 0, g_ms);
         return;
     }
     // GPU time per frame (pace_gpu_ns: the backend's GPU timer, cumulative; -1 without one), moving average (~20 frames).
@@ -589,132 +583,21 @@ void pace_frame(void) {
     hold_cadence(hold_30(pace_slow));
 }
 
-// Another game on a phone or tablet GPU (iOS, Android): EoW picks 30 or 60 itself (its frame controller, 1.0.2:
-// main+0x346530). At 30 it goes back to 60 only after a 12-frame window in which every frame took under 1/60 s by the
-// larger of its own frame time and its GPU time (these counters). Those GPUs clock to the load, so at 30 the same
-// scene reads longer, and its own frame time waits on that GPU too: an iPad Pro M4 in the overworld took 14.8 ms a
-// frame at 60, then read 20-23 ms at 30 and stayed there for the rest of a 16-minute session (one heavy moment took it
-// there). Paced at 60 regardless (LARECOMP_KEEP_60), the same place kept 14.8 ms. So at the end of each such window
-// (runtime/gen/patches.cpp: its read of the window's slow-frame count, FPS_WINDOW_SITE) the count reads 0 once it has held 30 for
-// OTHER_TRY_S: the game takes its own way back to 60, and for OTHER_TRY_GRACE_S its frames there that miss 1/60 s don't
-// send it straight back (rt_other_slow60) while the clock comes back up (10 s was a long stretch at 30 for
-// a dip; frames already missing 60 before the drop - a scene too heavy for it - start at OTHER_TRY_HEAVY_S, so a
-// device at its limit isn't sent back to 60 every second). Back at 30 within OTHER_TRY_FAIL_S
-// doubles the wait (a minute at most: a scene that doesn't fit 60 tries rarely, a second at 60 each time); a minute at
-// 60 resets it, and so does a setting that changes the GPU's load (a resolution back down). LARECOMP_OTHER_TRY=0 / 1: off / on (default: on for iOS and Android only).
-#define OTHER_TRY_S 1.0  // (a dip from a clock that hadn't come up yet: back within a second)
-#define OTHER_TRY_MAX_S 60.0
-#define OTHER_TRY_FAIL_S 3.0
-#define OTHER_TRY_GRACE_S 1.0   // a try: frames at 60 that miss its 1/60 s don't take it back to 30 for this long (the clock
-                                // speeding up: one slow frame at 60 sends EoW to 30, and a try's first frames are at the low clock)
-#define OTHER_TRY_HEAVY_S 10.0  // the first try when frames already missed 60 before the drop (a scene too heavy for it)
-#define OTHER_LATE_MS 20.0      // a frame at 60 shown this long after the one before missed a vsync
-#define OTHER_LATE_OK 3         // ... and the drop came after a dip: at most this many of the last 60 frames at 60
-#ifdef __ANDROID__
-#define OTHER_TRY_DEFAULT 1
-#else
-#define OTHER_TRY_DEFAULT PLAT_IOS
-#endif
-static uint64_t ot_at30, ot_at60, ot_try_at;  // since when at 30 / at 60; the latest try (0: none out)
-static double ot_wait = OTHER_TRY_S;
-static uint8_t ot_late[60];  // the last 60 frames at 60: shown a vsync late (pace_other_frame)
-static int ot_late_i, ot_late_n;
-// The frame controller's 30 fps window ended with `slow` frames over 1/60 s: what it reads (0: back to 60).
-static bool other_try_on(void) {
-    static int on = -1;
-    if (on < 0) {
-        const char *e = getenv("LARECOMP_OTHER_TRY");
-        on = e ? atoi(e) != 0 : OTHER_TRY_DEFAULT;
-    }
-    return on && !g_settings.dyn_res;  // (Dynamic resolution: the FPS target holds it, rt_other_fps_limit)
-}
-
-// The frame time the frame controller calls slow (runtime/gen/patches.cpp: its 1/60 s, in its 30 and its 60 fps branch), as float
-// bits. With Dynamic resolution the game's own 60 / 30 choice is out of it: the FPS target holds its mode and the
-// resolution does the rest, as in LAS - target 60: no frame is slow (1 s), it stays at 60 or goes straight back;
-// target 30 (pace_target_30): every frame is, its 30 fps mode (two world steps a frame) for good. Without it: 1/60 s.
-uint32_t rt_other_fps_limit(int at30) {
-    if (!g_settings.dyn_res) {
-        // (a build with no count of slow frames in a row, 1.0.0: one slow frame at 60 sends it to 30, so a try's grace
-        // is no frame slow at 60 - what rt_other_slow60 gives the other builds)
-        if (!at30 && !OTHER(SLOW60_SITE) && ot_try_at && other_try_on() &&
-            plat_now_ns() - ot_try_at < (uint64_t)(OTHER_TRY_GRACE_S * 1e9))
-            return 0x3f800000u;  // 1 s
-        return 0x3c888889u;  // 1/60 s
-    }
-    return pace_target_30() ? 0u /* 0.0 */ : 0x3f800000u /* 1.0 */;
-}
-uint32_t rt_other_fps_window(uint32_t slow) {
-    if (!other_try_on() || !slow) return slow;
-    uint64_t now = plat_now_ns();
-    if (!ot_at30) ot_at30 = now;
-    if (now - ot_at30 < (uint64_t)(ot_wait * 1e9)) return slow;
-    LOG("[pace] EoW at 30 for %.0f s (%u of the last 12 frames over 1/60 s, by its time with a lowered GPU clock): "
-        "trying 60\n", ot_wait, slow);
-    ot_try_at = now, ot_at30 = now;
-    return 0;
-}
-
-// The frame controller at 60 reads how many frames in a row took over 1/60 s (runtime/gen/patches.cpp, SLOW60_SITE): at 1 or 2
-// it goes to 30. Within OTHER_TRY_GRACE_S of a try it reads 0.
-uint32_t rt_other_slow60(uint32_t slow) {
-    if (!slow || !ot_try_at || !other_try_on()) return slow;
-    return plat_now_ns() - ot_try_at < (uint64_t)(OTHER_TRY_GRACE_S * 1e9) ? 0 : slow;
-}
-
-// A setting that changes the GPU's load (pace_settings_changed): the wait starts over, a try at the next window.
-static void other_try_reset(const char *what) {
-    if (!other_try_on()) return;
-    LOG("[pace] EoW: %s setting changed, wait cleared\n", what);
-    ot_wait = OTHER_TRY_S, ot_try_at = 0;
-    if (ot_at30) ot_at30 = plat_now_ns() - (uint64_t)(OTHER_TRY_S * 1e9);
-}
-
-// Each frame (pace_other_cadence): the game's present interval now. At 30 again within OTHER_TRY_FAIL_S of a try:
-// the try failed.
-static void other_try_interval(int interval) {
-    static int last = 1;
-    if (!other_try_on()) return;
-    uint64_t now = plat_now_ns();
-    if (interval >= 2) {
-        if (last < 2) {
-            ot_at30 = now, ot_at60 = 0;
-            // frames missing 60 before it went to 30 (not a dip): the first try waits longer
-            if (!ot_try_at && ot_late_n > OTHER_LATE_OK && ot_wait < OTHER_TRY_HEAVY_S) {
-                ot_wait = OTHER_TRY_HEAVY_S;
-                LOG("[pace] EoW to 30 after %d of 60 frames late at 60: first try in %.0f s\n", ot_late_n, ot_wait);
-            }
-            if (ot_try_at && now - ot_try_at < (uint64_t)(OTHER_TRY_FAIL_S * 1e9)) {
-                ot_wait = ot_wait * 2 > OTHER_TRY_MAX_S ? OTHER_TRY_MAX_S : ot_wait * 2;
-                LOG("[pace] EoW back at 30 within %.0f s of trying 60: next try in %.0f s\n", OTHER_TRY_FAIL_S, ot_wait);
-            }
-            ot_try_at = 0;
-        }
-        last = interval;
-        return;
-    }
-    last = interval, ot_at30 = 0;
-    if (!ot_at60) ot_at60 = now;
-    if (ot_wait > OTHER_TRY_S && now - ot_at60 >= 60000000000ull) ot_wait = OTHER_TRY_S;
-    if (ot_try_at && now - ot_try_at >= (uint64_t)(OTHER_TRY_FAIL_S * 1e9)) {
-        LOG("[pace] EoW stays at 60\n");
-        ot_try_at = 0;
-    }
-}
-
-// Each presented frame of another game (pace_frame): `p_ns` since the one before. At 60, whether it was a vsync late.
-static void pace_other_frame(uint64_t p_ns) {
-    extern int g_nvn_present_interval;
-    if (g_nvn_present_interval >= 2) return;
-    uint8_t late = p_ns > (uint64_t)(OTHER_LATE_MS * 1e6);
-    ot_late_n += late - ot_late[ot_late_i];
-    ot_late[ot_late_i] = late, ot_late_i = (ot_late_i + 1) % 60;
+// Another game (EoW): its own frame controller switches between 30 and 60 fps by its frame and GPU times (1.0.2:
+// main+0x346530) - and once at 30 it often stayed there: it goes back only after 12 frames under 1/60 s, and a GPU
+// that clocks down with the load reads slower at 30 (an iPad Pro M4 at 20-23 ms a frame there against 14.8 ms at 60;
+// a Mac at 5120x1440, 18.8 ms of GPU a frame at 30 against 13.7 ms at 60). That switch is off: the frame time it
+// calls slow (runtime/gen/patches.cpp, its three 1/60 s limits) is 1 s, so it always runs at 60. Slower machines have
+// Dynamic resolution with its FPS target; a target of 30 (pace_target_30) puts every frame over the limit (0 s): the
+// game's own 30 fps mode, two world steps a frame, for as long as the target holds.
+uint32_t rt_other_fps_limit(void) {
+    return pace_target_30() ? 0u /* 0.0 */ : 0x3f800000u /* 1.0 */;  // (the target is Dynamic resolution's: 60 without it)
 }
 
 uint64_t pace_end_counter(const uint64_t *start_entry, const uint64_t *entry, uint64_t value) {
     if (start_entry && (const uint8_t *)entry - (const uint8_t *)start_entry == 16 && value >= start_entry[1]) {
         // LARECOMP_SLOW_COUNTER=<from>,<to> (test): the pairs read 25 ms from <from> to <to> s after the first one, a
-        // heavy moment that takes another game to 30 (rt_other_fps_window's way back)
+        // heavy moment (another game: stays at 60 through it, rt_other_fps_limit)
         static double sc_from = -2, sc_to;
         static uint64_t sc_t0;
         if (sc_from == -2) {
