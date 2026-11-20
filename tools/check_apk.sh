@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tools/check_apk.sh <apk>: the APK holds only what the app ships - the runtime, SDL, shaderc, FFmpeg, the shipped fonts
 # and icon with their licences, and the game code builder's files in assets/gen.zip (zig's lib/ and the headers),
-# checked file by file. Nothing of the game. (.github/workflows/ci.yml, experimental.yml)
+# checked file by file. Nothing of the game. Run it on every APK before it ships.
 set -eu
 APK=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT

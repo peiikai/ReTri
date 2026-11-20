@@ -7,7 +7,7 @@ same path from the start.
 
 Nothing owned by Nintendo is ever committed or attached to an issue or pull request. That means:
 - no game files, extracted or otherwise
-- no generated code (`generated-eow/`)
+- no generated code (`generated*/`)
 - no fonts
 - no textures, models, music, text or level files
 
@@ -68,7 +68,65 @@ To bootstrap a release branch, the maintainer can allow a single push with `EOW_
 
 ## Building
 
-See `CLAUDE.md` for the build and run commands.
+You need your own extracted game files of Echoes of Wisdom (version 1.0.2), with `exefs/` and `romfs/` in a folder
+named `extracted/` in the checkout. Then:
+
+    make -j GEN=generated-eow                 # the app, build/eowrecomp
+    make gen GEN=generated-eow                # once: the game code, from extracted/exefs, into generated-eow/
+    make -j GEN=generated-eow                 # the game code library, build/eowgame.*
+    ./build/eowrecomp extracted               # the start screen
+
+`GEN=generated-eow` matters: the Makefile still picks LA's layout when `GEN` doesn't name EoW. Without `make gen`,
+run `tools/fetch_zig.sh` once and set the game files up on the start screen: it builds the game code itself, as
+for players.
+
+Each platform has its own page: macOS needs Apple Silicon, Homebrew `sdl3` and `ffmpeg` (`make app` and `make dmg`
+package it, after `make deps` and `tools/fetch_zig.sh`); Windows: [docs/BUILD-windows.md](docs/BUILD-windows.md);
+Linux: [docs/linux.md](docs/linux.md); iPhone and iPad: [docs/ios.md](docs/ios.md); Android:
+[docs/android.md](docs/android.md).
+
+## Project layout
+
+- `runtime/gen/`: the game code generator (C++, also built into the app). It turns `exefs/main` and `exefs/sdk` into
+  C. `patches.cpp` changes or hooks game instructions while generating; EoW's are in `build_other_patches`.
+- `runtime/game_addresses/games.h`: the supported EoW build, by the main program's build ID. The other tables in that
+  folder (`versions.h`, `patches_v1_0_*.h`, `runtime_v1_0_*.h`, read through `GA(NAME)`) are LA's, from LAS Recomp.
+- `runtime/`: the host.
+  - `kernel.c`, `loader.c`, `services/`: the Switch OS stand-in (threads, memory, files and saves, input, audio).
+  - `hle/`: SDK replacements and game features; EoW's are the `*_other.c` files.
+  - `nvn/`: graphics. Recording (`cmdbuf.c`), Metal (`renderer.m`, `metal.m`), Vulkan (`vulkan/`), the shader
+    translator (`maxwell/translate.c`).
+  - `ui/`: the start screen and the overlay menu (Dear ImGui), with the translation tables in `ui/lang/`.
+  - `platform/`: one file per OS.
+- `android/`: the Android app (Gradle) and its dependency scripts.
+- `tools/`: tests, packaging scripts, and the Python reference generator (`gen.py`, `patches.py`).
+- `docs/`: [architecture](docs/architecture.md), [debug hooks](docs/debug-hooks.md), saves, per-platform pages.
+
+## Testing your change
+
+- Build cleanly on your platform. If you touch rendering, say which backend you tested: a Metal change usually needs
+  a Vulkan counterpart, and the other way round.
+- Test in game and look at the result: a fix isn't verified until you've seen it work.
+- `tools/shot.sh <frame> [seconds]` runs the game with `LARECOMP_*` switches (scripted input, warps) and saves a
+  screenshot. Give test runs a scratch save folder (`LARECOMP_SAVE_DIR`, `tools/fresh_save.sh`) so your own saves
+  stay untouched. The switches are listed in [docs/debug-hooks.md](docs/debug-hooks.md).
+- `LARECOMP_VK_VALIDATION_STOP=1` stops a Vulkan run at the first validation error (needs the Khronos validation
+  layer). `LARECOMP_VK_VALIDATION=1` only logs them.
+
+## Tests
+
+None of these need game files unless they say so.
+
+- `python3 tools/menu_strings.py check`: what each menu language is missing (untranslated text shows in English).
+- `python3 tools/test_save.py`: the save handlers commit and reload, and a failed save keeps the last one.
+- `python3 tools/test_build_cache.py` and `python3 tools/test_gamebuild_resume.py`: the game code build's cache and
+  resume.
+- `python3 tools/test_cli.py`: the command line for launchers (needs `build/eowrecomp`).
+- `python3 tools/test_data_move.py`: moving the data folder.
+- `python3 tools/test_gen_cpp.py build/lasgen <extracted folder> --game eow`: the C++ generator against the Python
+  one (needs game files).
+- Windows: `python tools/test_windows_processes.py` (helper processes and crash exit codes).
+- Shaders: `tools/test_translate.sh` and `tools/test_vk_pipelines.sh` ([docs/BUILD-windows.md](docs/BUILD-windows.md)).
 
 ## The game code generator
 

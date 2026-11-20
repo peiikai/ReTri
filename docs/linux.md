@@ -1,8 +1,7 @@
-# ReTri on Linux (x86-64)
+# ReTri on Linux (x64 and arm64)
 
-Status: **not released yet.** The Linux build is being brought up (Vulkan, the same renderer as Windows); this page
-says what has been checked so far. aarch64 builds from source but is not a release target.
-`make appimage` packages the AppImage.
+ReTri runs on Linux with Vulkan, the same renderer as Windows. Releases come as an AppImage and a tarball for x64 and
+arm64; arm64 is less tested. `make appimage` packages the AppImage.
 
 ## Running the AppImage
     chmod +x ReTri-<version>-linux-x64.AppImage
@@ -16,7 +15,7 @@ its vertex cache, and textures re-checked only where the game wrote. Older kerne
 The start screen asks for the folder with your own game files and sets them up.
 
 Everything the app writes lives in `~/.local/share/eowrecomp` (`$XDG_DATA_HOME/eowrecomp`): game files (`extracted/`),
-saves, seeds, settings (`larecomp.ini`), shader caches, imported fonts. Started without a terminal the log is
+saves, settings (`larecomp.ini`), shader caches, imported fonts. Started without a terminal the log is
 `eowrecomp.log` in that folder, always the latest run; up to five recent runs are kept as `eowrecomp-backup-*.log`
 (from a terminal it prints there instead). `--data-dir <folder>` (or `LARECOMP_DATA_ROOT`) uses another folder for
 one run; Settings > System > Data folder moves it for good.
@@ -72,9 +71,11 @@ yourself: `make SHADERC=-lshaderc_shared` (or `-lshaderc`).
 
 Then from the repo root:
 
-    make -j         # the app (no game code yet)
-    make gen        # once, with your game files in extracted/ (exefs/, romfs/): recompile the game's code
-    make -j         # -> build/eowrecomp and the game code library build/eowgame.so
+    make -j GEN=generated-eow    # the app (no game code yet)
+    make gen GEN=generated-eow   # once, with your game files in extracted/ (exefs/, romfs/): recompile the game's code
+    make -j GEN=generated-eow    # -> build/eowrecomp and the game code library build/eowgame.so
+
+(`GEN=generated-eow` picks EoW's layout; without it the Makefile still uses LA's.)
 
 Without `extracted/` here, run `tools/fetch_zig.sh` once and set up your game files on the start screen: it builds the
 game code itself, as the AppImage does. The generator is part of the app (`runtime/gen/`; `make lasgen` builds it as a
@@ -86,7 +87,7 @@ everything (dev mode) instead of `~/.local/share/eowrecomp`.
 `ARCH` picks the target, separately from the OS: the generated code differs per arch (aarch64 runs the guest's
 FP/SIMD as inline asm, like Apple Silicon; x86-64 lowers it to C with `-march=x86-64-v3`, like Windows). `make gen`
 passes the matching `--simd`. A cross build (`ARCH=aarch64` on an x86-64 machine, `SYSROOT=<arm64 root filesystem>`)
-keeps its own `generated-aarch64/` and `build/aarch64/`. Distributions that name shaderc's library
+keeps its own `build/aarch64/`; give it its own generated code folder too (`GEN=generated-eow-aarch64`). Distributions that name shaderc's library
 `libshaderc_shared.so` need `SHADERC=-lshaderc_shared`.
 
 ## AppImages
@@ -132,7 +133,7 @@ they ship.
 - Pages: 4K and 16K kernels (Asahi) work; 64K-page kernels (some ARM servers) are not supported.
 
 ## Testing on ARM (aarch64): what to report
-ReTri has no aarch64 release yet. If you build it from source on an ARM machine, reports are welcome. Please include:
+arm64 is less tested than x64, so reports from ARM machines are welcome. Please include:
 
 1. **Distribution and kernel**: `cat /etc/os-release | head -3; uname -r; getconf PAGESIZE`
 2. **GPU and Vulkan driver**: `vulkaninfo --summary` (package `vulkan-tools`); at least the devices section with

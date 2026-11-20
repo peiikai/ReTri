@@ -6,14 +6,15 @@ fit together. File names are on the current development branch.
 ## From the game files to a running game
 
 1. **Game files.** The player picks a folder with their own extracted game files (`exefs/` and `romfs/`). The start
-   screen (`runtime/ui/launcher.mm`) checks the game version by the main program's build ID (v1.0.0, v1.0.1 and
-   v1.1.0 are supported) and keeps the files in the data folder. Nothing from the game ships with the app.
+   screen (`runtime/ui/launcher.mm`) checks the game version by the main program's build ID (Echoes of Wisdom 1.0.2,
+   `runtime/game_addresses/games.h`) and keeps the files in the data folder. Nothing from the game ships with the app.
 2. **Recompiling.** The generator (`runtime/gen/`, in the app; `make lasgen` builds it as a command-line tool) turns
    the AArch64 code of
    `exefs/main` and `exefs/sdk` into C, one C function per game function. Indirect calls go through a lookup table
    from guest address to function (`runtime/dispatch.c`). FP and SIMD instructions become C helpers
    (`runtime/simd.h`, `simd_fp.h`) that match the Switch CPU's results, fused multiply-add included.
-3. **Code patches.** While generating, `runtime/gen/patches.cpp` changes or hooks specific instructions. Every patch checks
+3. **Code patches.** While generating, `runtime/gen/patches.cpp` (EoW's: `build_other_patches`) changes or hooks
+   specific instructions. Every patch checks
    the original instruction word first, so a wrong address or version fails the build instead of patching the wrong
    thing. A hook site calls `rt_hook()` (`runtime/hle/hooks.c`), so what a hook does can change without rebuilding
    the game code.
@@ -32,9 +33,10 @@ fit together. File names are on the current development branch.
 - **Services** (`runtime/services/`): file system and saves (`fs.c`), controllers (`hid_set.c`), audio, time,
   accounts, applet messages and amiibo, enough for this game.
 - **HLE** (`runtime/hle/`): replacements for SDK functions (libc, heaps, input, movies) plus the game features that
-  hook into the game's code: warps, quality-of-life changes, D-pad items, the run timer.
-- **Addresses**: everything that touches the game's memory or code by address reads it from the version tables in
-  `runtime/game_addresses/` through `GA(NAME)`, so one source supports every game version.
+  hook into the game's code. EoW's are named `*_other` (`warp_other.c`, `rt_aspect_other` for wide windows,
+  `rt_other_fps_*` in `runtime/nvn/pace.c`).
+- **Addresses**: EoW's addresses are in its patches (`build_other_patches`) and its `*_other` code. The tables in
+  `runtime/game_addresses/` read through `GA(NAME)` are LA's, from LAS Recomp, and EoW doesn't use them.
 
 ## Graphics
 
@@ -64,11 +66,11 @@ The overlay menu and the start screen use Dear ImGui (`runtime/ui/`, `third_part
 `runtime/settings.c` and are saved in `larecomp.ini` in the data folder. Menu text is English in the code, with
 translation tables per language.
 
-## The randomizer
+## Left over from LAS Recomp
 
-LAS's Link's Awakening randomizer was removed. What stays is the game-neutral seed plumbing (`runtime/rando.c`: a seed
-is a folder `rando/<name>/` with replacement game files and its own saves) and the start screen's Randomizer entry,
-both off (`RANDO_ON` in `runtime/rando.h`) until EoW has a randomizer of its own.
+ReTri is built on LAS Recomp, the Link's Awakening recompiler, and the runtime still holds some of LA's code: its
+address tables, patches and hooks, and the randomizer's seed plumbing (`runtime/rando.c`), which is off (`RANDO_ON` in
+`runtime/rando.h`). ReTri has no randomizer.
 
 ## Debugging
 

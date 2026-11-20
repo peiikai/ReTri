@@ -10,6 +10,9 @@ The defaults are set in `runtime/nvn/vulkan/exec.c` (`vk_exec_init` and nearby) 
 
 Vendor IDs: 0x13B5 Arm (Mali), 0x5143 Qualcomm (Adreno), 0x8086 Intel, 0x1002 AMD.
 
+These defaults came from LAS Recomp: the numbers in the Added column are its pull requests and issues, and the
+timings in Tested on were measured in Link's Awakening. Re-check a default on EoW before relying on its numbers.
+
 | Default | Where it's on | Tested on | Added | Switch |
 |---|---|---|---|---|
 | Structured shaders (static branch stacks, no jump loop) | Mali, Adreno | PanVK (RK3588), Turnip | #562 | `LARECOMP_VK_STRUCTURE` |

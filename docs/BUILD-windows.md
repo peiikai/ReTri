@@ -1,12 +1,12 @@
 # Building ReTri on Windows (x86-64, and ARM64 experimental)
 
-Status: part of main. Builds and runs the game on Vulkan (with your own game files); `make dist` packages the
+Status: builds and runs the game on Vulkan (with your own game files); `make dist` packages the
 release zip.
 
 ## One-time setup
 Clone with LF line endings to a short path (deep folders hit Windows' path length limit), e.g.:
 
-    git clone -c core.autocrlf=false https://github.com/peiikai/LASRecomp.git C:\dev\eowrecomp
+    git clone -c core.autocrlf=false https://github.com/peiikai/ReTri.git C:\dev\retri
 
 (The setup script also sets `core.autocrlf=false`, but files already checked out keep CRLF until they are checked
 out again, and the bash tools break on CRLF.)
@@ -23,9 +23,11 @@ endings.
 From an MSYS2 UCRT64 shell, or Git Bash with MSYS2 first on PATH:
 
     export PATH="/c/msys64/ucrt64/bin:/c/msys64/usr/bin:$PATH"
-    make -j         # -> build/eowrecomp.exe (no game code yet)
-    make gen        # once, with your game files in extracted/ (exefs\, romfs\): recompile the game's code
-    make -j         # -> the game code library build/eowgame.dll
+    make -j GEN=generated-eow    # -> build/eowrecomp.exe (no game code yet)
+    make gen GEN=generated-eow   # once, with your game files in extracted/ (exefs\, romfs\): recompile the game's code
+    make -j GEN=generated-eow    # -> the game code library build/eowgame.dll
+
+(`GEN=generated-eow` picks EoW's layout; without it the Makefile still uses LA's.)
 
 Without `extracted/` in the checkout, run `tools/fetch_zig.sh` once and set up the game files on the start screen: it
 builds the game code itself, as for players. The generator is part of the app (`runtime/gen/`; `make lasgen` builds it
@@ -58,8 +60,7 @@ above:
     make dist           # -> build/dist/ReTri-<version>-windows-arm64.zip
 
 Everything in the zip is ARM64, the game code generator included (it is part of the exe). AArch64 FP/SIMD
-instructions stay inline assembly (`--simd asm`), as on the Mac. The ARM64 zip is not part of the normal releases.
-It is built by `.github/workflows/experimental.yml` for the Experimental builds page.
+instructions stay inline assembly (`--simd asm`), as on the Mac. ARM64 is less tested than x64.
 
 Running it needs a Vulkan 1.3 driver (on Snapdragon X, Qualcomm's). To test without one, Mesa's lavapipe (a CPU
 Vulkan driver) for ARM64 works: set `VK_DRIVER_FILES=<its folder>\lvp_icd.aarch64.json`. The Vulkan loader ignores
@@ -72,7 +73,7 @@ driver entries under HKCU. Lavapipe is slow, so keep the window minimized while 
   inline-asm passthrough (Windows on ARM keeps the inline asm).
 - Renderer: Vulkan (runtime/nvn/vulkan) instead of Metal; shaders are translated to GLSL and compiled with
   shaderc. macOS keeps Metal.
-- Seed switches and "Title screen" reboot the game in place on both (runtime/main.c); the only re-exec left is
+- "Title screen" reboots the game in place on both (runtime/main.c); the only re-exec left is
   the startup retry when the guest window is taken, which on Windows starts a new process and exits.
 
 ## Tests

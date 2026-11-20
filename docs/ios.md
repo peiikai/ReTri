@@ -65,7 +65,7 @@ Open the app and choose that folder when it asks. Use the same game version as o
 
 ### Where things are
 
-Saves, seeds, settings and `eowrecomp.log` are in the app's folder in Files (On My iPhone / On My iPad > ReTri).
+Saves, settings and `eowrecomp.log` are in the app's folder in Files (On My iPhone / On My iPad > ReTri).
 You can move them to another folder or a drive in Settings > System > Data folder. For a bug report, attach
 `eowrecomp.log` from that folder.
 
@@ -184,8 +184,8 @@ What is still open or worth knowing. Fixed items are in git history.
 
 ### From the Android port
 
-The Android port is [Nycolazs/LASRecomp-Android-Plus](https://github.com/Nycolazs/LASRecomp-Android-Plus). Still worth
-checking:
+Ideas from [Nycolazs/LASRecomp-Android-Plus](https://github.com/Nycolazs/LASRecomp-Android-Plus), which ReTri's
+Android port builds on, still worth checking:
 - `rt_dispatch` dcache inside `Cpu` instead of `__thread`: on Apple the TLV getter keeps a stack frame. Measured on an
   iPhone 15 Pro: at most ~0.1 ms a frame, for a regeneration and a new library id. Not worth it while the game thread
   has headroom (4.1 ms of 16.7).
@@ -193,8 +193,8 @@ checking:
 
 ### Tried and declined
 
-- Interiors at the phone's aspect and side bars of the picture's blurred edges: ported to Metal and checked on all
-  three game versions, not worth it (the wide interiors cost a fifth of the render's lines at 19.5:9). Kept on the
+- Interiors at the phone's aspect and side bars of the picture's blurred edges (tried in LAS Recomp, on Link's
+  Awakening): not worth it (the wide interiors cost a fifth of the render's lines at 19.5:9). Kept on the
   branch `ios-wide-interiors-bars`.
 - Not applicable to iOS: Vulkan / Turnip / SGSR, a pre-rotated swapchain, on-device builds (no spawn), root power
   modes. Metal hashes only the pipeline fields in use and binds index buffers in place, so the Vulkan render thread's

@@ -1,13 +1,13 @@
 # Android
 
-The Android port is coming in pieces, from [mamcjr's LASRecompAndroid](https://github.com/mamcjr/LASRecompAndroid)
+The Android port comes from [mamcjr's LASRecompAndroid](https://github.com/mamcjr/LASRecompAndroid)
 (MIT), with parts from [Nycolazs's LASRecomp-Android-Plus](https://github.com/Nycolazs/LASRecomp-Android-Plus)
 (MIT), by way of LAS Recomp's Android port. The app is ReTri (`com.retri.android`), so it installs next to
 LAS Recomp. The player picks their game files folder with Android's own folder picker, the setup copies them in and
 builds the game code on the device, and the game plays with a controller or touch controls.
 
 The floor is a Snapdragon 865 (Adreno 650) or as fast, 8 GB of RAM, at 720p. Older Adreno phones ship a Vulkan 1.1
-driver and need a Turnip driver package (Settings > System); the README names the one we tested last.
+driver and need a Turnip driver package (Settings > System); "Tested devices" below names the one we tested last.
 
 Nothing from the game ships in the app. The game code is built on the device from the player's own extracted game
 files, as on the desktop.
@@ -23,11 +23,10 @@ cd android && ./gradlew assembleDebug  # android/app/build/outputs/apk/debug/app
 ```
 
 `./gradlew assembleRelease` makes the release build. Android installs an update only over an app signed with the same
-key, so every published APK (releases and the experimental builds) is signed with one fixed key (`LARECOMP_KEYSTORE`,
-`LARECOMP_KEYSTORE_PASSWORD`, alias `lasrecomp`; the workflows take it from the repository's secrets). Never make a new one:
-every player would have to uninstall, and lose the app's data folder, to update. `LARECOMP_VERSION_NAME` and
-`LARECOMP_VERSION_CODE` set the version; the code has to grow from build to build (the workflow uses minutes since
-2026-01-01).
+key, so every published APK is signed with one fixed key (`LARECOMP_KEYSTORE`, `LARECOMP_KEYSTORE_PASSWORD`, alias
+`lasrecomp`). Never make a new one: every player would have to uninstall, and lose the app's data folder, to update.
+`LARECOMP_VERSION_NAME` and `LARECOMP_VERSION_CODE` set the version; the code has to grow from build to build (minutes
+since 2026-01-01 works).
 
 CMake's file lists are globs, read once: after a pull that adds a source file, delete `android/app/.cxx` or the link
 fails (or, worse, Gradle quietly keeps the old library).
