@@ -493,7 +493,7 @@ build/gen-venv/.ok:
 	$(GEN_VPY) -m pip install -q capstone==5.0.9 unicorn==2.1.4 lz4==4.4.5 pyinstaller==6.22.3
 	touch $@
 
-# Linux: build/dist/ReTri-<version>-linux-<arch>.AppImage, built in Ubuntu 22.04 containers (podman) with SDL3, LGPL
+# Linux: build/dist/ReTri-<version>-linux-<x64|arm64>.AppImage, built in Ubuntu 22.04 containers (podman) with SDL3, LGPL
 # FFmpeg, shaderc and the game code generator helper inside; the Vulkan loader and GPU drivers are the system's.
 # `make appimage` (ARCH: this machine's, or aarch64 cross-compiled), `make appimages` both. See docs/linux.md.
 appimage:
@@ -504,7 +504,7 @@ appimages:
 # `make tarball` (after make appimage): the same files in a .tar.gz, for places without FUSE (docs/linux.md)
 tarball:
 	tools/linux/tarball.sh $(ARCH)
-# release check of the x86-64 AppImage: start screen, into the game, warps to the overworld and every dungeon
+# release check of the x86-64 AppImage: setup, start screen, a new game into the first room
 smoketest:
 	tools/linux/smoketest.sh
 
