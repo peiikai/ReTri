@@ -11,10 +11,11 @@ A new release (X.Y.0):
 3. Cut `release/X.Y` from that tag on `main`. It holds the current release, and urgent fixes target it.
 4. Set `VERSION` on `develop` to the next version.
 
+Whenever an urgent fix lands on `release/X.Y`, merge `release/X.Y` into `develop` so the next release has it too.
+
 A patch release (X.Y.Z), from the urgent fixes merged into `release/X.Y`:
 1. On `release/X.Y`, set `VERSION` to `X.Y.Z` and move its `CHANGELOG.md` lines under `## [X.Y.Z] - <date>`.
 2. Open a PR from `release/X.Y` into `main`. Once it's merged, tag the merge commit `vX.Y.Z`.
-3. Merge `release/X.Y` back into `develop`, so the fixes reach the next release too.
 
 Tags are plain `vX.Y.Z`: the update check ignores anything after the version (`v0.1.0-beta.1` is never offered).
 During the beta, `v0.N.M` shows as "Beta N.M".
