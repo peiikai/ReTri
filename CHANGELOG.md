@@ -38,6 +38,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Game versions 1.0.0 and 1.0.1 work too, besides 1.0.2. The start screen shows which version the game files are.
 
 ### Changed
+- The game always runs at 60 fps: its own switch to 30 fps when frames run long is off (it could get stuck at 30).
+  On slower devices, turn on Dynamic resolution; its FPS target of 30 uses the game's 30 fps mode.
 - The game code generator is part of the app (C++, from LAS Recomp): no release ships Python any more, and setup
   generates the game code in seconds instead of a minute or more.
 - Setup no longer spends 10 minutes or more compiling one large function the game runs once at start: it is built

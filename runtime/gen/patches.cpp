@@ -424,7 +424,6 @@ std::string delegate_forwarder(Module &m, uint64_t a) {
 // ---- Echoes of Wisdom (gen.py --game eow): main's own patches. None of LA's apply (they are LA addresses); the sites
 // are the build's own (runtime/game_addresses/eow_<table>.h, set by build_other_patches), each checked by its word.
 std::vector<uint64_t> eow_aspect_sites, eow_spot_sites;
-uint64_t eow_fps_limit_30;
 
 // (warp, runtime/hle/warp_other.c) the level-jump request processor (WARP_REQUEST_PROC, x0 = its object, the request at
 // +0x10): its `mov x20, x0` tells us where the request is
@@ -459,36 +458,17 @@ std::string eow_dynres(Module &m, uint64_t a) {
                ax(a), ": ldrb w8, [x26, #0x480] (the game's dynamic resolution: off) */");
 }
 
-// (frame pacing, runtime/nvn/pace.c rt_other_fps_window) the frame controller at 30 fps, at the end of a 12-frame
-// window, reads how many of its frames took over 1/60 s; 0 takes it back to 60. On phone and tablet GPUs its frames
-// read slow at 30 by the lowered clock alone: the runtime may answer 0 to try 60
-// (1.0.2: `ldr w9, [x26, #0x4fc]`; 1.0.0 keeps its counters 8 bytes lower: the offset is the instruction's)
-std::string eow_fps_window(Module &m, uint64_t a) {
-    uint32_t w = m.image_word(a);
-    check((w & 0xFFC003FF) == 0xB9400349, a, w);  // ldr w9, [x26, #off]
-    uint64_t off = ((w >> 10) & 0xFFF) * 4;
-    return cat("{ extern uint32_t rt_other_fps_window(uint32_t); c->x[9] = rt_other_fps_window(LD32(c->x[26] + ", ax(off),
-               ")); }", "  /* ", ax(a), ": ldr w9, [x26, #", ax(off), "] (30 fps window: its slow frames) */");
-}
-
-// ... and at 60, its count of frames in a row over 1/60 s (at 1 or 2 it goes to 30): 0 for a moment after a try, while
-// the clock comes up. 1.0.0 has no such count (one slow frame takes it to 30: the runtime's 60 fps limit gives the same
-// grace there, rt_other_fps_limit)
-std::string eow_slow60(Module &m, uint64_t a) {
-    uint32_t w = m.image_word(a);
-    check(w == 0xb945034a, a, w);  // ldr w10, [x26, #0x500]
-    return cat("{ extern uint32_t rt_other_slow60(uint32_t); c->x[10] = rt_other_slow60(LD32(c->x[26] + 0x500)); }",
-               "  /* ", ax(a), ": ldr w10, [x26, #0x500] (60 fps: frames over 1/60 s in a row) */");
-}
-
-// ... and the frame time it calls slow, 1/60 s (`movk w9, #0x3c88, lsl #16` after `mov w9, #0x8889`), in its 30 and its
-// 60 fps branch: with Dynamic resolution the FPS target decides instead (rt_other_fps_limit)
+// (frame pacing, runtime/nvn/pace.c rt_other_fps_limit) the frame controller's own 30 / 60 fps switch, off: the frame
+// time it calls slow, 1/60 s (`movk wD, #0x3c88, lsl #16` after `mov wD, #0x8889`) - in its 30 fps branch (a 12-frame
+// window with none slow goes back to 60), its 60 fps branch (slow frames there go to 30) and the flag of a slow frame
+// that sends it to 30 the next frame - is the runtime's: 1 s, no frame slow, always 60 (0 with the FPS target at 30:
+// every frame slow, its 30 fps mode)
 std::string eow_fps_limit(Module &m, uint64_t a) {
     uint32_t w = m.image_word(a);
-    check(w == 0x72a79109, a, w);  // movk w9, #0x3c88, lsl #16
-    int at30 = a == eow_fps_limit_30 ? 1 : 0;
-    return cat("{ extern uint32_t rt_other_fps_limit(int); c->x[9] = rt_other_fps_limit(", at30, "); }", "  /* ", ax(a),
-               ": movk w9, #0x3c88, lsl #16 (1/60 s: a slow frame, ", at30 ? "30" : "60", " fps branch) */");
+    check((w & 0xFFFFFFE0) == 0x72A79100, a, w);  // movk wD, #0x3c88, lsl #16
+    int d = (int)(w & 31);
+    return cat("{ extern uint32_t rt_other_fps_limit(void); c->x[", d, "] = rt_other_fps_limit(); }", "  /* ", ax(a),
+               ": movk w", d, ", #0x3c88, lsl #16 (1/60 s: a slow frame) */");
 }
 
 // (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
@@ -685,11 +665,9 @@ void build_other_patches(const std::string &game, const AddressTable *t, Module 
         P[T("REQUEST_SITE")] = eow_request;
         P[T("TILT_SITE")] = eow_tilt;
         P[T("DYNRES_SITE")] = eow_dynres;
-        P[T("FPS_WINDOW_SITE")] = eow_fps_window;
-        if (T("SLOW60_SITE")) P[T("SLOW60_SITE")] = eow_slow60;
-        eow_fps_limit_30 = T("FPS_LIMIT_30_SITE");
-        P[eow_fps_limit_30] = eow_fps_limit;
+        P[T("FPS_LIMIT_30_SITE")] = eow_fps_limit;
         P[T("FPS_LIMIT_60_SITE")] = eow_fps_limit;
+        P[T("FPS_LIMIT_FLAG_SITE")] = eow_fps_limit;
         // (in name order, as gen.py: the index is the site's number for the runtime)
         eow_aspect_sites.clear(), eow_spot_sites.clear();
         for (auto &e : *t) {

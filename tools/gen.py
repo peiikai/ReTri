@@ -610,39 +610,19 @@ def main():
                         'c->x[8] = rt_game_dynres() ? LD8(c->x[26] + 0x480) : 0; }'
                         f'  /* {a:#x}: ldrb w8, [x26, #0x480] (the game\'s dynamic resolution: off) */')
             PATCHES[T['DYNRES_SITE']] = _eow_dynres
-            # (frame pacing, runtime/nvn/pace.c rt_other_fps_window) the frame controller at 30 fps, at the end of a
-            # 12-frame window, reads how many of its frames took over 1/60 s; 0 takes it back to 60. On phone and tablet
-            # GPUs its frames read slow at 30 by the lowered clock alone: the runtime may answer 0 to try 60
-            # (1.0.2: `ldr w9, [x26, #0x4fc]`; 1.0.0 keeps its counters 8 bytes lower: the offset is the instruction's)
-            def _eow_fps_window(gen, a):
-                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-                assert (w & 0xFFC003FF) == 0xB9400349, hex(w)  # ldr w9, [x26, #off]
-                off = ((w >> 10) & 0xFFF) * 4
-                return ('{ extern uint32_t rt_other_fps_window(uint32_t); '
-                        f'c->x[9] = rt_other_fps_window(LD32(c->x[26] + {off:#x})); }}'
-                        f'  /* {a:#x}: ldr w9, [x26, #{off:#x}] (30 fps window: its slow frames) */')
-            PATCHES[T['FPS_WINDOW_SITE']] = _eow_fps_window
-            # ... and at 60, its count of frames in a row over 1/60 s (at 1 or 2 it goes to 30): 0 for a moment
-            # after a try, while the clock comes up. 1.0.0 has no such count (one slow frame takes it to 30: the
-            # runtime's 60 fps limit gives the same grace there, rt_other_fps_limit)
-            def _eow_slow60(gen, a):
-                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-                assert w == 0xb945034a, hex(w)  # ldr w10, [x26, #0x500]
-                return ('{ extern uint32_t rt_other_slow60(uint32_t); '
-                        'c->x[10] = rt_other_slow60(LD32(c->x[26] + 0x500)); }'
-                        f'  /* {a:#x}: ldr w10, [x26, #0x500] (60 fps: frames over 1/60 s in a row) */')
-            if T['SLOW60_SITE']:
-                PATCHES[T['SLOW60_SITE']] = _eow_slow60
-            # ... and the frame time it calls slow, 1/60 s (`movk w9, #0x3c88, lsl #16` after `mov w9, #0x8889`), in its 30
-            # and its 60 fps branch: with Dynamic resolution the FPS target decides instead (rt_other_fps_limit)
+            # (frame pacing, runtime/nvn/pace.c rt_other_fps_limit) the frame controller's own 30 / 60 fps switch, off:
+            # the frame time it calls slow, 1/60 s (`movk wD, #0x3c88, lsl #16` after `mov wD, #0x8889`) - in its 30 fps
+            # branch (a 12-frame window with none slow goes back to 60), its 60 fps branch (slow frames there go to 30)
+            # and the flag of a slow frame that sends it to 30 the next frame - is the runtime's: 1 s, no frame slow,
+            # always 60 (0 with the FPS target at 30: every frame slow, its 30 fps mode)
             def _eow_fps_limit(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-                assert w == 0x72a79109, hex(w)  # movk w9, #0x3c88, lsl #16
-                at30 = 1 if a == T['FPS_LIMIT_30_SITE'] else 0
-                return ('{ extern uint32_t rt_other_fps_limit(int); '
-                        f'c->x[9] = rt_other_fps_limit({at30}); }}'
-                        f'  /* {a:#x}: movk w9, #0x3c88, lsl #16 (1/60 s: a slow frame, {"30" if at30 else "60"} fps branch) */')
-            for a in (T['FPS_LIMIT_30_SITE'], T['FPS_LIMIT_60_SITE']):
+                assert (w & 0xFFFFFFE0) == 0x72A79100, hex(w)  # movk wD, #0x3c88, lsl #16
+                d = w & 31
+                return ('{ extern uint32_t rt_other_fps_limit(void); '
+                        f'c->x[{d}] = rt_other_fps_limit(); }}'
+                        f'  /* {a:#x}: movk w{d}, #0x3c88, lsl #16 (1/60 s: a slow frame) */')
+            for a in (T['FPS_LIMIT_30_SITE'], T['FPS_LIMIT_60_SITE'], T['FPS_LIMIT_FLAG_SITE']):
                 PATCHES[a] = _eow_fps_limit
             # (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
             # `movz wD, #0x8e39; movk wD, #0x3fe3, lsl #16`: the movk gets the runtime's aspect instead
