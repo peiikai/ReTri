@@ -1,4 +1,4 @@
-// The LAS Recomp Android app (android/app). Build: android/deps/build_deps.sh once, then ./gradlew assembleDebug here.
+// ReTri's Android app (android/app). Build: android/deps/build_deps.sh once, then ./gradlew assembleDebug here.
 pluginManagement {
     repositories {
         google()

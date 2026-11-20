@@ -17,7 +17,7 @@ android {
         applicationId = "com.retri.android"
         minSdk = 30
         targetSdk = 36
-        // (experimental builds: .github/workflows/experimental.yml sets the build's version and a code that grows)
+        // (published builds set the version and a code that grows from build to build: docs/android.md)
         versionCode = System.getenv("LARECOMP_VERSION_CODE")?.toInt() ?: 1
         versionName = System.getenv("LARECOMP_VERSION_NAME") ?: "0.1-dev"
         ndk {
@@ -25,7 +25,7 @@ android {
         }
     }
 
-    // The published APKs' key (.github/workflows/experimental.yml, from the repository's secrets): Android installs an
+    // The published APKs' key (docs/android.md, "Building"): Android installs an
     // update only over an app signed with the same key. Without it, the release build is unsigned.
     signingConfigs {
         System.getenv("LARECOMP_KEYSTORE")?.let { ks ->

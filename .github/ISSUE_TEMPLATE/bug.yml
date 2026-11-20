@@ -15,8 +15,8 @@ body:
   - type: input
     id: system
     attributes:
-      label: Mac and window
-      description: Chip (for example M2 Pro), macOS version, window size or aspect ratio
+      label: Device
+      description: Mac, PC, Linux, iPhone / iPad or Android; the chip or GPU, the OS version, and the window size or aspect ratio
     validations:
       required: true
   - type: textarea
@@ -30,4 +30,4 @@ body:
     id: log
     attributes:
       label: Log
-      description: Attach the latest log from the data folder
+      description: Attach eowrecomp.log from the data folder
