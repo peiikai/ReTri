@@ -15,6 +15,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Command line for game launchers (`eowrecomp --help`): set up without a window (`--prepare`), start straight in,
   pick the data folder, change settings for one run. A RecompLauncher profile ships with the Windows zip and the
   Linux files. Windows zips are named `windows-x64` / `windows-arm64`.
+- The RecompLauncher profile names what the PC needs (Windows 10, glibc 2.35, Vulkan 1.3), so the launcher can say
+  when a PC is too old.
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
 - iPhone and iPad (ReTri for iOS, bundle ID com.peiikai.retri.ios): the app holds the game code built on a Mac from
   your own game files.
