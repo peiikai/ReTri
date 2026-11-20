@@ -9,7 +9,7 @@
 # Result: build/smoke/report.txt (PASS / FAIL per check), build/smoke/sheet.png (every screenshot, labelled) and the
 # screenshots in build/smoke/shots/. Exit status 0 = ready for release.
 # Uses this checkout's extracted/ (as the folder a player picks), copied into build/smoke/root by the setup (delete
-# build/smoke afterwards to free the space). Nothing in ~/.local/share/eowrecomp is used or changed.
+# build/smoke afterwards to free the space). Nothing in ~/.local/share/retri is used or changed.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 REPO=$PWD
