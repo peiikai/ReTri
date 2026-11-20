@@ -8,6 +8,11 @@
 > in the controversy in relation to this project. You may simply ignore this project and its code.
 > As with anything on the internet, you run the code at your own discretion.
 
+> [!WARNING]
+> **This is the first public release.** A playable game with a good experience isn't a certainty yet. It works on our
+> hardware; now we need yours to find the gaps. Please open a [GitHub issue](https://github.com/peiikai/ReTri/issues)
+> for any problem you come across, and include your `eowrecomp.log` file and your system specifications.
+
 **ReTri** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch, 2024) into a
 native Windows, macOS, Linux, Android and iOS application.
 
@@ -152,6 +157,54 @@ GetMoreRam. More on the iOS app is there too.
   match your controller (Xbox, PlayStation or Nintendo).
 - Stereo or 5.1 surround sound.
 - Can be started from game launchers, with a profile for RecompLauncher (see [Launchers](#launchers)).
+
+## Setup
+
+> [!IMPORTANT]
+> **You must bring your own extracted game files.** They come as two folders, `exefs` and `romfs`. ReTri works with
+> versions 1.0.0, 1.0.1 and 1.0.2.
+
+1. Download the release for your platform from the [releases](https://github.com/peiikai/ReTri/releases) page and
+   open ReTri. On iPhone and iPad, follow [iPhone and iPad](#iphone-and-ipad) instead.
+2. On the start screen, choose **Set up game files**.
+3. Click **Game files folder** and choose the folder that has `exefs` and `romfs` in it.
+4. Click **Set up game files**. ReTri copies the files it needs and builds the game code from them. You only do
+   this once. It takes a few minutes on a fast computer and longer on slower ones and on phones.
+5. ReTri then prepares the shaders, which takes a minute or more. You can skip it and play right away, but new
+   areas may stutter the first time, so we don't recommend it.
+6. Choose **Play**.
+
+In game, open ReTri's menu with F1, or Home or Minus + Plus on a controller.
+
+Saves and settings are kept in ReTri's data folder. Settings > System > Data folder shows where it is and can move it.
+By default it is:
+
+- macOS: `~/Library/Application Support/com.peiikai.retri`
+- Windows: next to the program
+- Linux: `~/.local/share/retri`
+- Android: `Android/data/com.retri.android/files`, which you can open from a computer over USB
+
+## Settings worth knowing
+
+These are under Video and General in ReTri's menu.
+
+- **Resolution** sets a fixed render size: Match display (your screen's resolution), 1x to 4x the Switch's 1080p,
+  or 75%, 50% and 25% for slower machines. Its **FPS** row picks 30 or 60.
+- **Dynamic resolution** raises and lowers the render size as you play to hold its **FPS target** (30, 60, or 30
+  outdoors and 60 indoors). The game adapts to your device in real time: busy scenes drop the resolution and quiet
+  ones raise it again. **Minimum resolution** sets how low it can go. This is a good choice on weaker PCs, and
+  especially on phones and tablets, which slow down as they heat up.
+- **The game's speed is tied to its frame rate.** If it drops below the FPS you picked (30 or 60), the game runs
+  in slow motion. For the best experience, pick the FPS your device can hold at your Resolution, or use Dynamic
+  resolution.
+- **Aspect ratio:** Unlocked fills the window and shows more on wide screens. Original 16:9 keeps the Switch's view
+  with bars.
+- **Upscaler:** MetalFX (Apple) or AMD FSR 1 (Windows, Linux, Android) sharpens the picture when the game renders
+  below your screen's resolution. It does nothing at full resolution.
+- **Ambient occlusion:** the soft shadows in corners and around objects. Default matches the Switch, High is
+  sharper, Off removes them.
+- **Remove tilt-shift blur** (General) turns off the blur at the top and bottom of the screen.
+- **Button icons** (Controls) shows Nintendo, Xbox or PlayStation buttons. Auto matches your controller.
 
 ## Building from source
 
