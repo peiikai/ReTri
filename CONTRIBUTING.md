@@ -38,6 +38,8 @@ Rules:
 - Branch names are lower case with dashes, for example `fix/12-text-box-flicker`. Never `claude/...`.
 - Never target `main`.
 - Urgent fixes target `release/X.Y`. Features, and fixes that are less urgent or higher risk, target `develop`.
+- A PR that targets `release/X.Y` says briefly why it can't wait for the next release. The maintainer may move it
+  to `develop` instead.
 - `main`, `develop` and `release/*` only change through pull requests. A local pre-push hook refuses direct pushes
   to them (see below).
 - Merge pull requests with a merge commit, so each branch's history stays readable. Delete the branch after it is
