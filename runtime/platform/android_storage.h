@@ -1,5 +1,5 @@
 // Android: the game files folder through the system's own folder picker and storage framework (the activity,
-// android/app/src/main/java/com/lasrecomp/LASRecompActivity.java). A picked folder is a content:// URI, not a path.
+// android/app/src/main/java/com/retri/ReTriActivity.java). A picked folder is a content:// URI, not a path.
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>

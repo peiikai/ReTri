@@ -209,7 +209,7 @@ Where files live (game files, saves, settings and logs):
 - macOS: `~/Library/Application Support/com.peiikai.eowrecomp/`
 - Windows: next to `eowrecomp.exe`, so keep the `ReTri` folder somewhere writable (not Program Files).
 - Linux: `~/.local/share/eowrecomp/` (the tarball: its own folder; see [docs/linux.md](docs/linux.md))
-- Android: `Android/data/com.lasrecomp.android/files` in the phone's storage.
+- Android: `Android/data/com.retri.android/files` in the phone's storage.
 - iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > ReTri).
 - You can move it to another folder or drive in Settings > System > Data folder.
 - `--data-dir <dir>` (or `LARECOMP_DATA_ROOT=<dir>`) overrides all of these.

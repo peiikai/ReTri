@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "LASRecomp"
+rootProject.name = "ReTri"
 include(":app")

@@ -495,7 +495,7 @@ int plat_thread_realtime_check(uint64_t period_ns) { (void)period_ns; return -1;
 static char g_log_path[1024];
 
 #ifdef __ANDROID__
-// stdout / stderr go through a pipe: each line to logcat (tag LASRecomp) and to eowrecomp.log in the data folder, which
+// stdout / stderr go through a pipe: each line to logcat (tag ReTri) and to eowrecomp.log in the data folder, which
 // players attach to bug reports as on the desktop
 static int g_log_fd = -1;
 static void *log_pump(void *arg) {
@@ -510,14 +510,14 @@ static void *log_pump(void *arg) {
         char *start = buf, *nl;
         while ((nl = memchr(start, '\n', (size_t)(buf + n - start)))) {
             *nl = 0;
-            __android_log_write(ANDROID_LOG_INFO, "LASRecomp", start);
+            __android_log_write(ANDROID_LOG_INFO, "ReTri", start);
             start = nl + 1;
         }
         n = (size_t)(buf + n - start);
         memmove(buf, start, n);
         if (n == sizeof buf - 1) {  // (a line longer than the buffer: in pieces)
             buf[n] = 0;
-            __android_log_write(ANDROID_LOG_INFO, "LASRecomp", buf);
+            __android_log_write(ANDROID_LOG_INFO, "ReTri", buf);
             n = 0;
         }
     }
@@ -661,7 +661,7 @@ bool plat_exe_path(char *buf, size_t size) {
     // the process is app_process64: "the executable" is a file in the folder the activity copies the shipped resources
     // to (internal storage, files/res: the start screen's font, the icon), so rt_resource finds them next to it
     const char *files = SDL_GetAndroidInternalStoragePath();
-    return files && (size_t)snprintf(buf, size, "%s/res/lasrecomp", files) < size;
+    return files && (size_t)snprintf(buf, size, "%s/res/eowrecomp", files) < size;
 #endif
     ssize_t n = readlink("/proc/self/exe", buf, size - 1);
     if (n <= 0) return false;

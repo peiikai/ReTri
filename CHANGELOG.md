@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   pick the data folder, change settings for one run. A RecompLauncher profile ships with the Windows zip and the
   Linux files. Windows zips are named `windows-x64` / `windows-arm64`.
 - "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
+- Android (arm64): the app ReTri (`com.retri.android`), which installs next to LAS Recomp. The game code
+  is built on the device from your own game files, as in LAS Recomp's Android port.
 - iPhone and iPad (ReTri for iOS, bundle ID com.peiikai.retri.ios): the app holds the game code built on a Mac from
   your own game files.
 - Touch controls for EoW: the whole Switch pad on screen (stick, D-pad, A B X Y, L R ZL ZR, + and -), each
@@ -66,6 +68,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- Retroid Pocket: the face buttons match their labels (A and B, X and Y were swapped).
 - With Aspect ratio Unlocked, the lock-on reticle sits on its target in wide windows (it was pulled toward the
   centre), and so do action prompts and other markers placed over things in the world.
 - Mac: trees, bushes and grass cast shadows again.
