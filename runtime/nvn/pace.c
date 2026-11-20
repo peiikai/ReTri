@@ -589,13 +589,13 @@ void pace_frame(void) {
     hold_cadence(hold_30(pace_slow));
 }
 
-// Another game on a phone or tablet GPU (iOS, Android): EoW picks 30 or 60 itself (its frame controller,
+// Another game on a phone or tablet GPU (iOS, Android): EoW picks 30 or 60 itself (its frame controller, 1.0.2:
 // main+0x346530). At 30 it goes back to 60 only after a 12-frame window in which every frame took under 1/60 s by the
 // larger of its own frame time and its GPU time (these counters). Those GPUs clock to the load, so at 30 the same
 // scene reads longer, and its own frame time waits on that GPU too: an iPad Pro M4 in the overworld took 14.8 ms a
 // frame at 60, then read 20-23 ms at 30 and stayed there for the rest of a 16-minute session (one heavy moment took it
 // there). Paced at 60 regardless (LARECOMP_KEEP_60), the same place kept 14.8 ms. So at the end of each such window
-// (runtime/gen/patches.cpp: its read of the window's slow-frame count, main+0x347370) the count reads 0 once it has held 30 for
+// (runtime/gen/patches.cpp: its read of the window's slow-frame count, FPS_WINDOW_SITE) the count reads 0 once it has held 30 for
 // OTHER_TRY_S: the game takes its own way back to 60, and for OTHER_TRY_GRACE_S its frames there that miss 1/60 s don't
 // send it straight back (rt_other_slow60) while the clock comes back up (10 s was a long stretch at 30 for
 // a dip; frames already missing 60 before the drop - a scene too heavy for it - start at OTHER_TRY_HEAVY_S, so a
@@ -634,8 +634,14 @@ static bool other_try_on(void) {
 // resolution does the rest, as in LAS - target 60: no frame is slow (1 s), it stays at 60 or goes straight back;
 // target 30 (pace_target_30): every frame is, its 30 fps mode (two world steps a frame) for good. Without it: 1/60 s.
 uint32_t rt_other_fps_limit(int at30) {
-    (void)at30;
-    if (!g_settings.dyn_res) return 0x3c888889u;  // 1/60 s
+    if (!g_settings.dyn_res) {
+        // (a build with no count of slow frames in a row, 1.0.0: one slow frame at 60 sends it to 30, so a try's grace
+        // is no frame slow at 60 - what rt_other_slow60 gives the other builds)
+        if (!at30 && !OTHER(SLOW60_SITE) && ot_try_at && other_try_on() &&
+            plat_now_ns() - ot_try_at < (uint64_t)(OTHER_TRY_GRACE_S * 1e9))
+            return 0x3f800000u;  // 1 s
+        return 0x3c888889u;  // 1/60 s
+    }
     return pace_target_30() ? 0u /* 0.0 */ : 0x3f800000u /* 1.0 */;
 }
 uint32_t rt_other_fps_window(uint32_t slow) {
@@ -649,7 +655,7 @@ uint32_t rt_other_fps_window(uint32_t slow) {
     return 0;
 }
 
-// The frame controller at 60 reads how many frames in a row took over 1/60 s (runtime/gen/patches.cpp, main+0x347668): at 1 or 2
+// The frame controller at 60 reads how many frames in a row took over 1/60 s (runtime/gen/patches.cpp, SLOW60_SITE): at 1 or 2
 // it goes to 30. Within OTHER_TRY_GRACE_S of a try it reads 0.
 uint32_t rt_other_slow60(uint32_t slow) {
     if (!slow || !ot_try_at || !other_try_on()) return slow;

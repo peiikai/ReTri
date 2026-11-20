@@ -34,7 +34,9 @@ fit together. File names are on the current development branch.
 - **HLE** (`runtime/hle/`): replacements for SDK functions (libc, heaps, input, movies) plus the game features that
   hook into the game's code: warps, quality-of-life changes, D-pad items, the run timer.
 - **Addresses**: everything that touches the game's memory or code by address reads it from the version tables in
-  `runtime/game_addresses/` through `GA(NAME)`, so one source supports every game version.
+  `runtime/game_addresses/` through `GA(NAME)`, so one source supports every game version. Echoes of Wisdom's builds
+  (1.0.0, 1.0.1, 1.0.2) are rows of `games.h`, each with its own table (`eow_v1_0_x.h`, read through `OTHER(NAME)`
+  by the runtime and by both generators).
 
 ## Graphics
 

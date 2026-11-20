@@ -12,6 +12,7 @@ keyed by the module file, the mode and the Python sources, since gen.py takes mi
 Exit status 0 only when everything matched.
 """
 import argparse
+import glob
 import hashlib
 import os
 import shutil
@@ -27,7 +28,8 @@ MODES = {'asm': ['--simd', 'asm'], 'c': ['--simd', 'c'],
          'asm-dyn': ['--simd', 'asm', '--dyn-base'], 'c-dyn': ['--simd', 'c', '--dyn-base']}
 PY_SOURCES = ['gen.py', 'lifter.py', 'analyze.py', 'nso.py', 'patches.py', 'chunk_bounds.py', 'simd_c.py',
               'game_addresses.py', '../runtime/hle/hle_symbols.txt', '../runtime/game_addresses/versions.h',
-              '../runtime/game_addresses/games.h']
+              '../runtime/game_addresses/games.h'] + sorted(  # (and each EoW build's table)
+    os.path.relpath(p, TOOLS) for p in glob.glob(os.path.join(ROOT, 'runtime/game_addresses/eow_v*.h')))
 
 
 def digest(paths):
@@ -43,7 +45,7 @@ def gen_args(module, nso, out, mode, game):
     if game != 'la' and module == 'sdk':
         sys.path.insert(0, TOOLS)
         import game_addresses
-        base = hex(game_addresses.GAMES[game][2])
+        base = hex(next(b['sdk_base'] for b in game_addresses.GAME_BUILDS if b['key'] == game))
     a = [module, nso, base, out] + MODES[mode]
     if module == 'sdk':
         a += ['--hle', os.path.join(ROOT, 'runtime/hle/hle_symbols.txt')]
