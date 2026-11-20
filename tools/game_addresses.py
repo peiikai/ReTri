@@ -55,8 +55,8 @@ VERSIONS = load_versions(TABLE_DIR / 'versions.h')
 def load_games(path):
     """{key: (label, main build ID, sdk base)} from games.h: other games on the same engine (no address tables)."""
     games = {}
-    if not path.exists():
-        return games
+    if not path.exists():  # (the frozen generator without it said "unknown game eow": tools/lasgen.spec)
+        raise FileNotFoundError(f'{path} is missing')
     for line in path.read_text(encoding='utf-8').splitlines():
         if not line.startswith('GA_GAME'):
             continue

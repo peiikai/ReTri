@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "../../game_addresses.h"
 #include "../../paths.h"
 #include "../../rt.h"  // (HEAP_MAX: lazy_heap_predicted)
 #include "../../settings.h"
@@ -897,6 +898,7 @@ static void create_device(void) {
     b->shaderInt64 = h->shaderInt64;
     b->depthBiasClamp = h->depthBiasClamp;
     b->depthClamp = h->depthClamp;
+    g_vk.depth_clamp = h->depthClamp;
     b->largePoints = h->largePoints;
     b->wideLines = h->wideLines;
     b->imageCubeArray = h->imageCubeArray;
@@ -906,6 +908,8 @@ static void create_device(void) {
     b->robustBufferAccess = h->robustBufferAccess;  // guest shaders index cbufs freely: keep OOB reads harmless
     g_vk.ssbo_chunks = h->fragmentStoresAndAtomics && h->vertexPipelineStoresAndAtomics && h->robustBufferAccess;
     b->shaderClipDistance = h->shaderClipDistance;
+    b->shaderStorageImageWriteWithoutFormat = h->shaderStorageImageWriteWithoutFormat;  // (compute SUST.B: shader.h)
+    g_vk.storage_write_no_format = h->shaderStorageImageWriteWithoutFormat;
     if (!h->shaderInt64) LOG("[vk] warning: no shaderInt64 (64-bit address math in shaders)\n");
     VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR en_pexec = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR, .pipelineExecutableInfo = VK_TRUE};
@@ -1939,6 +1943,9 @@ void backend_present_now(NvnTexture *t, uint64_t frame) {
 }
 
 // The game thread's side of a present: the frame counters and the per-frame hooks (input, pacing, test hooks).
+// (hle/input.c, LARECOMP_BLIP_WATCH) F10 saves the last frames on Metal only (metal.m): nothing to save here.
+void blip_request(void) {}
+
 static void present_hooks(void) {
     total_frames++;
     g_frame_counter++;
@@ -1952,14 +1959,19 @@ static void present_hooks(void) {
     if (slow_ms > 0 && total_frames > 2600 && (!slow_until || (long)total_frames < slow_until)) SDL_Delay((Uint32)slow_ms);
     extern void fnprof_frame(uint64_t frame);
     fnprof_frame(total_frames);
-    extern void warp_frame(uint64_t frame);
-    warp_frame(total_frames);
     extern void reboot_test_frame(uint64_t frame);  // runtime/main.c (LARECOMP_REBOOT_AT)
     reboot_test_frame(total_frames);
-    extern void save_editor_frame(uint64_t frame);
-    save_editor_frame(total_frames);
-    extern void vk_level_change_check(void);
-    vk_level_change_check();
+    if (!game_other()) {  // (LA's warp, save editor and level change read LA's addresses; EoW has its own warp)
+        extern void warp_frame(uint64_t frame);
+        warp_frame(total_frames);
+        extern void save_editor_frame(uint64_t frame);
+        save_editor_frame(total_frames);
+        extern void vk_level_change_check(void);
+        vk_level_change_check();
+    } else {
+        extern void warp_other_frame(uint64_t frame);  // runtime/hle/warp_other.c
+        warp_other_frame(total_frames);
+    }
     static long debug_at = -1;
     if (debug_at < 0) { const char *e = getenv("LARECOMP_DEBUG_FRAME"); debug_at = e ? atol(e) : 0; }
     extern volatile int g_debug_frame_request;

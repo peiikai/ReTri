@@ -73,10 +73,10 @@ typedef struct {
     bool mirror_mode;    // the world mirrored left to right (Gameplay tab): renderers + runtime/hle/input.c
     int language;        // LANG_AUTO or an index into g_language_codes: the game's text language
     int prompts;         // PROMPTS_*: button glyphs (auto = follow the controller SDL reports): runtime/nvn/texpatch.c
-    // Button layout "Xbox / PlayStation": on Xbox / PlayStation pads the game's A and B swap (A on the bottom button; X / Y
-    // keep the Switch's positions), and our menus confirm with the bottom button (runtime/ui/pad_nav.mm)
+    // Confirm button "Bottom": on every pad the game's A and B swap (A on the bottom button, B on the right; X / Y keep
+    // the Switch's positions), and our menus confirm with the bottom button too (runtime/hle/bindings.c bind_pad_host,
+    // runtime/ui/pad_nav.mm). Never depends on the pad's type or the Button icons setting. (ini: face_buttons_by_label)
     bool face_by_label;
-                         // positions (bottom = A, right = B, left = X, top = Y): runtime/hle/bindings.c bind_pad_host
     bool aspect_asked;   // the start screen's one-time "authentic 16:9 or unlocked?" question was answered
     bool menu_tip_seen;  // the start screen's one-time "how to open the menu" note was shown (first PLAY ever)
     bool onedrive_kept;  // the start screen's OneDrive warning (Windows) was answered with Keep here
@@ -120,7 +120,7 @@ typedef struct {
     float touch_size;    // 0.6 .. 1.6 (1 = the default layout)
     // the layout editor (touch_controls.mm): per control, moved (its place: share of the screen), size (x), hidden;
     // saved as touch_ctl_<name> = x, y, size, hidden
-#define TOUCH_NCTL 14
+#define TOUCH_NCTL 15
     bool touch_moved[TOUCH_NCTL];
     float touch_pos[TOUCH_NCTL][2];
     float touch_scale[TOUCH_NCTL];
@@ -147,6 +147,8 @@ const char *touch_control_name(int i);  // the on-screen controls' ini names (to
 
 void settings_load(void);
 void settings_save(void);
+// The settings as larecomp.ini would hold them, with this run's --set ones (malloc'd; NULL: couldn't): --list-settings
+char *settings_text(void);
 // At device init: the defaults that depend on the GPU. integrated (Vulkan: an integrated GPU; never on macOS): plain
 // bilinear upscaling instead of the sharp upscaler, whose pass at the window's size costs as much as the game's frame
 // there (UHD 770: FSR 1 + SMAA 8 ms of GPU per frame at 1080p, 20 ms at 4K), and Dynamic resolution instead of Match

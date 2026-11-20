@@ -51,9 +51,11 @@ typedef struct {
     VkSemaphore timeline;      // value = last completed submission number
     VkCommandPool pool;        // render thread only
     bool custom_border, divisor, host_import, dmabuf;
+    bool storage_write_no_format;  // shaderStorageImageWriteWithoutFormat: compute image stores (SUST.B) translated
     // VK_EXT_vertex_input_dynamic_state (exec.c): the vertex layout is set per draw (vkCmdSetVertexInputEXT), not
     // baked into each pipeline - fewer pipelines. Off: no extension / feature, or LARECOMP_VK_DYN_VERTEX=0.
     bool vids;
+    bool depth_clamp;  // the depthClamp feature (EoW's nvnCommandBufferSetDepthClamp; exec.c PipeKey)
     PFN_vkCmdSetVertexInputEXT set_vertex_input;
     // LARECOMP_VK_GPL_PROBE=1 only (exec.c gpl_probe, measurement): VK_EXT_graphics_pipeline_library enabled
     bool gpl_probe;
@@ -124,6 +126,7 @@ typedef struct TexBackend {
     uint32_t wgen;  // page write tracking generation at the last upload check (textures.c)
     bool scalable, presented;
     bool ao;             // (scalable) the game's ambient occlusion: at its own scale (textures.c tex_ao)
+    bool two_d;          // (scalable) another game's 1080-line 2D: the frame's scale times output_scale_2d (tex_2d)
     bool shadow;         // (scalable) the game's shadow map: at its own scale (textures.c tex_shadow)
     uint64_t touched_frame, frame_cleared;
     uint32_t level_gen;
@@ -142,6 +145,8 @@ typedef struct TexBackend {
     // (g_vk.lean_usage) the only formats views of this image may have: nview_fmt 0 = any compatible one
     VkFormat view_fmt[2];
     uint8_t nview_fmt;
+    VkImageUsageFlags usage;  // the image's usage
+    bool want_storage;   // created for a texture registered as an image (NvnTexture.image_use): storage usage if the format has it
 } TexBackend;
 
 TexBackend *vk_tex(NvnTexture *t, bool for_render);  // backend image (uploads CPU contents unless for_render)
@@ -157,6 +162,7 @@ VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool 
 VkImageView vk_image_view(TexBackend *b, VkImageViewType type, VkFormat fmt, uint32_t lv0, uint32_t nlv, uint32_t ly0,
                           uint32_t nly, VkComponentMapping sw, VkImageAspectFlags aspect);
 VkImageView vk_dummy_view(int textype);
+VkImageView vk_dummy_storage_view(void);  // 1x1 RGBA8 2D array with storage usage (compute image slots with nothing bound)
 VkImageView vk_dummy_depth_view(int textype);  // shadow (depth compare) slots: 1x1 depth, cleared to 1.0
 bool vk_format_depth_compare(VkFormat f);  // SAMPLED_IMAGE_DEPTH_COMPARISON
 bool vk_tex_depth_compare(NvnTexture *t);  // t's image can be sampled with a depth compare

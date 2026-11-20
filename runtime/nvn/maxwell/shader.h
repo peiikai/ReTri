@@ -102,6 +102,10 @@ typedef struct {
 #define IMG_TEX_BASE 23
 #define IMG_SLOTS 8
 #define IMG_HANDLE_BUFFER 23
+// (GLSL compute, Vulkan) the same 8 slots as storage images (image2DArray, written without a format) at bindings
+// IMG_GLSL_BINDING.., their handles in a uniform buffer at IMG_GLSL_HANDLE_BINDING (uvec4[2]).
+#define IMG_GLSL_HANDLE_BINDING 22
+#define IMG_GLSL_BINDING 23
 #define SMAP_BUFFER_INDEX 22
 // (GLSL compute, Vulkan) the fast copy of a dispatch's storage buffers: its address table and its data
 #define GMAP_BUFFER_INDEX 20
@@ -144,6 +148,9 @@ extern bool maxwell_glsl_push;  // (the backend's default: c1 inlined + push con
 // whose min / max return the operand that isn't NaN and whose clamp to [0, 1] saturates NaN to 0 (Adreno, as D3D
 // requires). The backend's default (exec.c: Android); LARECOMP_VK_FAST_MINMAX=1 / =0 overrides.
 extern bool maxwell_glsl_fast_minmax;
+// (GLSL) compute image stores (SUST.B) translated: the backend's default where the device can write storage images
+// without a format (exec.c); LARECOMP_SUST=0 skips them. Off: skipped as unsupported stores.
+extern bool maxwell_glsl_image_stores;
 // (GLSL) fragment quad xor shuffles (SHFL.BFLY with lane mask 1 / 2 / 3) as the neighbour's value from fine
 // derivatives, and the lane as the pixel's place in its quad: for drivers without subgroup operations in fragment
 // shaders (Turnip on Adreno 6xx lists compute only; subgroupShuffleXor there hung the GPU). The backend's default

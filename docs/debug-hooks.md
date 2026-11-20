@@ -23,6 +23,46 @@ Put a copy of a save in `build/testsave/save_0/` first (`savedata0.bin`), so the
 `tools/shot.sh <frame> [max seconds]` runs `./build/eowrecomp extracted` with your `LARECOMP_*` variables, saves the
 window at that frame to `build/window.png` and exits.
 
+## Command line
+
+For launchers and scripts. Every option except the one-shot ones (`--prepare`, `--list-settings`, `--help`,
+`--version`) also works as an environment variable, which restarts keep (an update, a data folder move).
+
+| Option | Variable | What it does |
+|---|---|---|
+| `--play` | `LARECOMP_PLAY=1` | Skip the start screen and start the game. Shaders are still prepared first; if that takes more than a moment (the first start), the start screen shows its progress bar and then plays. |
+| `--data-dir <folder>` | `LARECOMP_DATA_ROOT` | Use this folder for game files, saves, settings and caches this run. It comes before every other rule (`runtime/paths.h`), writes no `data_root.txt`, and Settings > System > Data folder can't move it. |
+| `--new-data-dir <folder>` | `LARECOMP_NEW_DATA_DIR` | Where to keep the data when ReTri has none yet (a launcher's game folder). If that folder already has data, it's used. If the usual data folder has data, that one is kept, so a player who played before keeps everything. |
+| `--game-files <folder>` | `LARECOMP_GAME_FILES` | Use the extracted game files in that folder. If the data folder already has that version set up, the game starts. If not, the start screen sets them up (copy, game code build, shaders) and then plays. |
+| `--prepare` | | The setup without a window, then exit: the game files from `--game-files` if needed, the game code, the shaders. Prints `progress <0-1> <step>` lines on stdout and exits 0 when the game is ready to play. On a failure it prints `error <why>` and exits 1 (details in the log). Stopped (SIGINT / SIGTERM): exits 3; the finished game code pieces are kept, so the next run goes on from there. |
+| `--fullscreen` / `--windowed` | | Start fullscreen or in a window this run. Short for `--set fullscreen=1` / `--set fullscreen=0`. |
+| `--set <key>=<value>` | `LARECOMP_SET="key=value;key=value"` | Any `larecomp.ini` setting for this run only. Repeatable; the last one for a key wins. It isn't saved: the file keeps its own value, unless you change that setting in the menu during the run. Unknown keys are ignored with a line in the log. |
+| `--list-settings` | | Print the settings as `larecomp.ini` lines (the data folder's file plus this run's `--set`) and exit. |
+| `--no-update-check` | `LARECOMP_NO_UPDATE_CHECK=1` | No update check this run. |
+| `--version`, `--help` | | Print and exit. |
+
+Printed output goes to stdout, also when it's a file or pipe. On Windows the exe is a GUI program: output goes to its
+stdout when one was handed to it (a redirect, a pipe, a launcher capturing it), else to the console it was started from,
+else to a message box. PowerShell doesn't wait for a GUI program: pipe it (`.\eowrecomp.exe --version | Out-String`) or
+use `Start-Process -Wait`.
+
+Started by RecompLauncher (`RECOMPLAUNCHER=1` is set), there is no update check (the launcher installs updates), and
+`RECOMPLAUNCHER_MODE=bigpicture` starts fullscreen unless the command line says `--windowed`.
+
+The Windows zip, the AppImage (at its root) and the Linux tarball carry `recomplauncher.json`
+(`tools/recomplauncher.json`), RecompLauncher's profile: it asks for the extracted game files, runs `--prepare` on
+them, starts the game, and shows a few video settings and the choice of start screen or straight into the game. Both
+pass `--new-data-dir` with the game's install folder: a new player's data goes there, and a player who already has data
+(an earlier install, or ReTri played without the launcher) keeps it where it is. The profile lists both places for
+saves, settings and logs. Not in the macOS .dmg.
+
+Example: a launcher that keeps everything in its own folder.
+
+```sh
+eowrecomp --prepare --data-dir ~/Games/ReTri --game-files ~/Games/ReTri-files   # once: set up, exit 0
+eowrecomp --play --data-dir ~/Games/ReTri --no-update-check --set resolution=2x
+```
+
 ## Running and test runs
 
 | Variable | Values | What it does |
@@ -31,8 +71,8 @@ window at that frame to `build/window.png` and exits.
 | `LARECOMP_FORCE_LAUNCHER` | 1 | Show the start screen even when `LARECOMP_INPUT` is set (which normally skips it). |
 | `LARECOMP_LAUNCHER_AUTOPLAY` | 1, `once` | Press PLAY on the start screen at once. `once`: only the first time, so a "Title screen" reboot stays on the start screen. |
 | `LARECOMP_LAUNCHER_PLAY_AT` | seconds | Press PLAY on the start screen that many seconds in. |
-| `LARECOMP_LAUNCHER_KEYS` | `frame:key,...` | Press keys on the start screen at those frames (`left right up down enter esc`, controller `pl pr pu pd pa pb`). The log names the RANDOMIZER row's choice when it changes. |
-| `LARECOMP_NO_UPDATE_CHECK` | 1 | Skip the update check on the start screen. |
+| `LARECOMP_LAUNCHER_KEYS` | `frame:key,...` | Press keys on the start screen at those frames (`left right up down enter esc`, controller `pl pr pu pd pa pb`, or `b.<button>` with a larecomp.ini button name such as `b.north` or `b.rtrigger`: a real controller event that goes through ReTri Menu). The log names the RANDOMIZER row's choice when it changes. |
+| `LARECOMP_NO_UPDATE_CHECK` | 1 | Skip the update check on the start screen. Same as `--no-update-check`. |
 | `LARECOMP_INPUT` | script (see below) | Scripted controller input for player 1. Also skips the start screen and blocks your own input. |
 | `LARECOMP_NO_USER_INPUT` | 0 / 1 | Ignore keyboard, mouse and controllers. On by default when a scripted input hook is set; `0` lets your input through during a scripted run. |
 | `LARECOMP_HOST_INPUT` | script (see below) | Scripted host input that goes through the bindings and menus like a player's: keys, controller buttons, typing, mouse, window resize, screenshots. |
@@ -41,7 +81,7 @@ window at that frame to `build/window.png` and exits.
 | `LARECOMP_PAD_TYPE` | `xbox`, `playstation` (or `ps`), other = Nintendo | Pretend the controller is of this family (button labels and confirm/back layout). |
 | `LARECOMP_SAVE_DIR` | folder | Use this folder for save slots (`save_0/savedata0.bin` ...) instead of the normal save folder. Test runs should always set it to a scratch copy. |
 | `LARECOMP_SETTINGS` | file path | Use this settings file instead of `larecomp.ini`, so test runs never change the player's settings. |
-| `LARECOMP_DATA_ROOT` | folder | Use this folder as the data folder (game files copy, settings, saves, caches). |
+| `LARECOMP_DATA_ROOT` | folder | Use this folder as the data folder (game files copy, settings, saves, caches). Same as `--data-dir`. |
 | `LARECOMP_NO_AUDIO` | 1 / 0 | No audio output at all (game and menu sounds). `0` keeps sound. |
 | `LARECOMP_NO_MOVIE_AUDIO` | 1 | Play movies without their audio track. |
 | `LARECOMP_WINDOW` | `WxH` | Window size in points (default: the remembered size, else 1280x720). Also stops fullscreen. |
@@ -98,6 +138,7 @@ Comma-separated entries, each starting with a frame:
 
 | Variable | Values | What it does |
 |---|---|---|
+| `--load-save` / `LARECOMP_LOAD_SAVE` | `1`, `2`, `1:3` or a save folder path | Boot straight into a save (see below). |
 | `LARECOMP_WARP_AT` | `frame:level:locator,...` (see below) | Warp to that level and spawn point at each frame. |
 | `LARECOMP_WARP_ON_LOAD` | `level:locator` | Warp once, about a second after a save is loaded. |
 | `LARECOMP_WARP_MENU_PICK` | text | Warp through the menu's warp tab to the first place whose name matches the text. |
@@ -107,6 +148,30 @@ Comma-separated entries, each starting with a frame:
 | `LARECOMP_SET_FLAGS` | `i,j,...` or `i@frame` | Force those event flags (0-2047) on in the loaded save, optionally from a frame on. |
 | `LARECOMP_CHEATS` | any of `hearts,ammo,rupees` | Turn those cheats on for this run (not saved). |
 | `LARECOMP_RANDO_SEED` | seed folder name | Play this randomizer seed (`rando/<name>/`) instead of the one in the settings, once the randomizer is on (`RANDO_ON`, `runtime/rando.h`). Saves go to the seed's own folder unless `LARECOMP_SAVE_DIR` is set. |
+
+### Loading a save from the command line (Echoes of Wisdom)
+
+```sh
+./build/eow/eowrecomp game --load-save 1                       # File 1, its newest data
+./build/eow/eowrecomp game --load-save 2:3                     # File 2, the third row of its data list
+./build/eow/eowrecomp game --load-save ~/Downloads/save_0      # a save folder from elsewhere
+```
+
+Skips the start screen, the title and the file select, and loads the save the game's own way: it presses what a
+player would (A on the title, Down for File 2, A, Down to the row, A, Up to Yes on "Load this data?", A), so the game
+lands where that save puts you. Combine with `LARECOMP_WARP_TOUR` or `LARECOMP_WARP_AT` to go somewhere from there.
+It is a debug option: the shader list is not prepared first (as with `--play`).
+
+- `1`, `2`: File 1 or File 2 of the file select (`save/save_0/slot00`, `slot01`), its newest data. `1:3`: the third
+  row of File 1's data list (newest first). `LARECOMP_SAVE_DIR` applies as usual.
+- A path: the save folder holding `save.meta` (`save_0`), the folder above it, or anything inside it (a `slot0N` or
+  `fileNN` folder, a `main.bin`). It is copied into a scratch save folder, `load_save/` in the data folder, and loaded
+  from there. The game saves there for the rest of the session, so your own saves are never read or written. A path
+  inside `slot01` picks File 2; one inside a `fileNN` folder picks that data (by its save time).
+- The save is checked first (`save.meta`, and each data's `main.bin`: tag, size, checksum). A missing or damaged one
+  gives one line in the log and on the terminal, and the app starts as it would without the option.
+- Log lines start with `[loadsave]`: which file and row, each screen passed, and when it is in play. It stops pressing
+  once in play, and gives up (leaving the game as it is) if it isn't in play 90 s after boot.
 
 ### LARECOMP_WARP_AT format
 
@@ -190,6 +255,7 @@ These work on both Metal and Vulkan unless noted.
 | `LARECOMP_NO_SCALE` | 1 | Keep all render targets at the game's own size (no resolution scaling). |
 | `LARECOMP_AO_SCALE` | 1 to 4 | Draw the game's ambient occlusion at this many times the Switch's size, whatever the setting and render scale. |
 | `LARECOMP_AO_SCALED` | 1 | Scale the ambient occlusion with the frame, as before issue #356 (shows the old haze and dither). |
+| `LARECOMP_2D_SCALED` | 1 | EoW: scale its 1080-line 2D targets (the composed frame, the HUD) like its 792-line 3D, as before (larger than the window). |
 | `LARECOMP_SHADOW_SCALE` | 0.5 to 4 | Draw the game's shadow map at this many times the Switch's size, whatever the setting. |
 | `LARECOMP_SHADOW_BIAS_RAW` | 1 | Keep the game's polygon offset slope in the shadow map as it is, instead of scaling it with the map's size (A/B tests). |
 | `LARECOMP_AO_NO_GRID` | 1 | Leave the ambient occlusion shaders on the game's own pixel grid when the AO is larger than the Switch's. |
@@ -260,6 +326,9 @@ The per-GPU default switches are explained, with the GPUs they were tested on, i
 | Variable | Values | What it does |
 |---|---|---|
 | `LARECOMP_PACE` | 0 | Turn the frame pacer off (it holds the game's 30 fps mode when frames don't fit 60). |
+| `LARECOMP_OTHER_TRY` | 0 / 1 | EoW: at 30 fps, try its 60 fps mode again (1 s after a dip, 10 s when frames already missed 60, doubling after a failed try). Default on for iOS and Android. |
+| `LARECOMP_KEEP_60` | 1 | Pace frames at 60 whatever the game asks (test: its 30 fps mode then runs fast). Shows whether a scene fits 60. |
+| `LARECOMP_SLOW_COUNTER` | `from,to` | The game's GPU timing counters read 25 ms from `from` to `to` seconds (test: a heavy moment). |
 | `LARECOMP_SIM_SLOW_FRAME_MS` | ms | Sleep this long every frame after frame 2600, to simulate a slow machine. |
 | `LARECOMP_SLOW_FRAME_UNTIL` | frame | With `LARECOMP_SIM_SLOW_FRAME_MS`: stop at that frame (recovery tests). |
 | `LARECOMP_SPIKE_MS` | ms | Stall the presenting thread this long every N frames. |
