@@ -153,6 +153,62 @@ GetMoreRam. More on the iOS app is there too.
 - Stereo or 5.1 surround sound.
 - Can be started from game launchers, with a profile for RecompLauncher (see [Launchers](#launchers)).
 
+## Setup
+
+> [!IMPORTANT]
+> **You must bring your own extracted game files.** They come as two folders, `exefs` and `romfs`. ReTri works with
+> versions 1.0.0, 1.0.1 and 1.0.2.
+
+1. Download the release for your platform from the [releases](https://github.com/peiikai/ReTri/releases) page and
+   open ReTri. On iPhone and iPad, follow [iPhone and iPad](#iphone-and-ipad) instead.
+2. On the start screen, choose **Set up game files**.
+3. Click **Game files folder** and choose the folder that has `exefs` and `romfs` in it.
+4. Click **Set up game files**. ReTri copies the files it needs and builds the game code from them. You only do
+   this once. It takes a few minutes on a fast computer and longer on slower ones and on phones.
+5. ReTri then prepares the shaders, which takes a minute or more. You can skip it and play right away, but new
+   areas may stutter the first time.
+6. Choose **Play**.
+
+In game, open ReTri's menu with F1, or Home or Minus + Plus on a controller.
+
+Saves and settings are kept in ReTri's data folder. Settings > System > Data folder shows where it is and can move it.
+By default it is:
+
+- macOS: `~/Library/Application Support/com.peiikai.eowrecomp`
+- Windows: next to the program
+- Linux: `~/.local/share/eowrecomp`
+- Android: `Android/data/com.retri.android/files`, reachable over USB and from file managers
+
+## Settings worth knowing
+
+These are under Video and General in ReTri's menu.
+
+- **Resolution** sets a fixed render size: Match display (your screen's resolution), 1x to 4x the Switch's 1080p,
+  or 75%, 50% and 25% for slower machines. Its **FPS** row picks 30 or 60.
+- **Dynamic resolution** raises and lowers the render size as you play to hold its **FPS target** (30, 60, or 30
+  outdoors and 60 indoors). The game adapts to your device in real time: busy scenes drop the resolution and quiet
+  ones raise it again. **Minimum resolution** sets how low it can go. This is the best choice on weaker PCs, and
+  especially on phones and tablets, which slow down as they heat up.
+- **The game always aims for 60 fps** at a fixed Resolution with FPS at 60. On the Switch the game drops to 30 when
+  it falls behind; ReTri doesn't, so a device that can't keep up runs a little slow instead. Use Dynamic resolution,
+  or set FPS to 30.
+- **Aspect ratio:** Unlocked fills the window and shows more on wide screens. Original 16:9 keeps the Switch's view
+  with bars.
+- **Upscaler:** MetalFX (Apple) or AMD FSR 1 (Windows, Linux, Android) sharpens the picture when the game renders
+  below your screen's resolution. It does nothing at full resolution.
+- **Ambient occlusion:** the soft shadows in corners and around objects. Default matches the Switch, High is
+  sharper, Off removes them.
+- **Remove tilt-shift blur** (General) turns off the blur at the top and bottom of the screen.
+- **Button icons** (Controls) shows Nintendo, Xbox or PlayStation buttons. Auto matches your controller.
+
+## Performance tips
+
+- Turn on Dynamic resolution and pick an FPS target. On phones, tablets and handhelds, a target of 30 keeps the
+  picture sharper and the device cooler.
+- With a fixed Resolution, try a lower one (75% or 50%) with MetalFX or FSR 1, or set FPS to 30.
+- Set Ambient occlusion to Off on weaker GPUs.
+- Let the shaders finish preparing before you play.
+
 ## Building from source
 
 Every platform needs your own game files (v1.0.0, v1.0.1 or v1.0.2): build first, then use the start screen's game-file setup.
