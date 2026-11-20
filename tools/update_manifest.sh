@@ -1,6 +1,6 @@
 #!/bin/bash
 # The self-updater's signed manifest for one release file (runtime/update_core.h): build/dist/update-<platform>.txt.
-# Run after each platform's release build (CONTRIBUTING "Making a release"), with UPDATE_SIGNING_KEY in the
+# Run after each platform's release build (docs/releasing.md), with UPDATE_SIGNING_KEY in the
 # environment. Without the key (a fork, or a run before the key existed) it only warns: the release still ships, and
 # the start screen's Update needs the manifest, so players there use Download.
 # Usage: tools/update_manifest.sh <version> <platform> <file> [<folder the zip holds>]

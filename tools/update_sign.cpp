@@ -1,5 +1,5 @@
 // Signs the self-updater's manifests (runtime/update_core.h) and the macOS update's Sparkle signature, with one
-// Ed25519 key (Monocypher, CC0). Used at each release (CONTRIBUTING "Making a release"); the private key is the
+// Ed25519 key (Monocypher, CC0). Used at each release (docs/releasing.md); the private key is the
 // UPDATE_SIGNING_KEY environment variable (base64 of the 32-byte seed, the format Sparkle's own tools use), never in
 // the repo.
 // Build: c++ -std=c++17 -O2 -Iruntime tools/update_sign.cpp -o build/update_sign
