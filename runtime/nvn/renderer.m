@@ -3485,22 +3485,49 @@ static void bind_cbufs(int stage, ShaderInfo *si) {
         // with the first view's depth under the final view's rows 0-1 the map came out empty once the camera moved in
         // (talking to someone next to a rift: the void was gone for the whole talk).
         bool rift_rows = false;
-        {   static float map_rows[12], final_rows[12]; static uint64_t map_frame = ~0ull, final_frame, mask_addr;
+        {   static float map_rows[12], final_rows[12]; static uint64_t map_frame = ~0ull, final_frame, mask_addr, mask_frame;
             static int off = -1; if (off < 0) off = ENV("LARECOMP_RIFT_ROWS_OFF") ? 1 : 0;  // (debug: the game's rows as they are)
             static int first = -1; if (first < 0) first = ENV("LARECOMP_RIFT_FIRST_ROWS") ? 1 : 0;
+            static int wide_off = -1; if (wide_off < 0) wide_off = ENV("LARECOMP_RIFT_WIDE_OFF") ? 1 : 0;  // (A/B: as before: no hold, the first view after 4 frames)
             if (!off && game_other() && stage == 0 && k == 4 && g_cur_fs_hash == 0xd6c58a42e55a9f9eull && r.size >= 32) {
                 uint64_t fr = renderer_exec_frame();
                 if (mask_addr && map_frame != fr) {  // (a new frame: the last mask's rows, final if the game has written them)
                     const float *g = (const float *)(uintptr_t)mask_addr + 33 * 4;
                     bool identity = g[0] == 1 && g[1] == 0 && g[2] == 0 && g[3] == 0 && g[4] == 0 && g[5] == 1 && g[6] == 0 && g[7] == 0;
                     if (!identity) {
-                        for (int i = 0; i < 8; i++) final_rows[i] = (g[i] - ((i & 3) == 3 ? 0.5f : 0.0f)) * 2.0f;
-                        memcpy(final_rows + 8, g + 8, 16);
-                        final_frame = fr;
+                        float nr[8];
+                        for (int i = 0; i < 8; i++) nr[i] = (g[i] - ((i & 3) == 3 ? 0.5f : 0.0f)) * 2.0f;
+                        // In a window wider than 16:9 the game's fit flips between two zooms of one view (about 1.14x
+                        // apart, the closer one inside the wider) every few frames while nothing moves, and the rifts'
+                        // edges jumped with it (flashing at 32:9; at 16:9 it holds still). Such a zoom in is taken only
+                        // once the game has asked for it 120 times in a row; the wider view covers all the closer one does.
+                        static int zoom_in_frames;
+                        int big = 0;
+                        for (int i = 1; i < 8; i++) if (fabsf(final_rows[i]) > fabsf(final_rows[big])) big = i;
+                        float z = final_frame && final_rows[big] != 0 ? nr[big] / final_rows[big] : 0;
+                        bool same_view = z > 1.001f && z < 1.6f;
+                        for (int i = 0; i < 8 && same_view; i++)  // (the same direction: rows proportional, offsets apart)
+                            if ((i & 3) != 3 && fabsf(nr[i] - z * final_rows[i]) > 1e-3f * fabsf(nr[big])) same_view = false;
+                        for (int r = 0; r < 2 && same_view; r++) {  // (and all of the closer view inside the wider one)
+                            float lo = (-1 - nr[r * 4 + 3]) / z + final_rows[r * 4 + 3], hi = (1 - nr[r * 4 + 3]) / z + final_rows[r * 4 + 3];
+                            if (lo < -1.001f || hi > 1.001f) same_view = false;
+                        }
+                        if (same_view && !first && !wide_off && ++zoom_in_frames < 120) {
+                            final_frame = fr;  // (the held view stays current)
+                        } else {
+                            zoom_in_frames = 0;
+                            memcpy(final_rows, nr, sizeof nr);
+                            memcpy(final_rows + 8, g + 8, 16);
+                            final_frame = fr;
+                        }
                     }
                     mask_addr = 0;
+                    mask_frame = fr;
                 }
-                bool use_final = !first && final_frame && fr - final_frame <= 4;
+                // (the final view also while the game leaves the mask's rows unwritten for a few frames with the rift
+                // still drawn - every ~50 frames for ~5 standing next to one: the first view, 3x coarser, showed for
+                // those frames, a flash of big steps along the edges)
+                bool use_final = !first && final_frame && (fr - final_frame <= 4 || (!wide_off && mask_frame == fr && fr - final_frame <= 60));
                 if (map_frame != fr) memcpy(map_rows, use_final ? final_rows : (const float *)(uintptr_t)r.addr, r.size >= 48 ? 48 : 32);
                 map_frame = fr;
                 uint64_t o = ring_alloc_padded((void *)(uintptr_t)r.addr, size, need);
