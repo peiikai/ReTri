@@ -87,6 +87,11 @@ const void *pause_fill_ubo(const float *u, uint64_t size, float k, float ky) {
     int edges = tl + tr + tlo + thi;
     bool big = (xr - xl) * (yhi - ylo) >= 4 * 0.15f;
     if (edges < 3 && !(game_other() && edges == 2 && big)) return NULL;
+    // (another game: EoW's map draws its terrain as one pane far larger than the screen (x -1.9..2.1 at 32:9), cut by the
+    // box's edge, and its unexplored cover only over the part a 16:9 screen shows: widened, the terrain past the box
+    // showed every unexplored area (user 2026-11-20). The backdrop pieces end on the box's border; a pane running past
+    // it is content the screen cuts off, and stays in the box.)
+    if (game_other() && (xl < -1.02f || xr > 1.02f || ylo < -1.02f || yhi > 1.02f)) return NULL;
     float el = 0, er = 0, elo = 0, ehi = 0;  // in ndc of the box
     if (tl) el = xl + k + 0.01f;
     if (tr) er = k + 0.01f - xr;

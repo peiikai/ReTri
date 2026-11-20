@@ -81,6 +81,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- Unlocked aspect ratio: the map no longer shows unexplored areas beside the 16:9 part on wide windows.
 - Mac, Aspect ratio Unlocked: rifts no longer flash in wide windows, and their edges are no longer a staircase.
   The outline jumped every few frames while standing still and turned to big steps for a few frames about once a
   second; the rift map now has more pixels in wide windows, so the edges look as they do at 16:9.
