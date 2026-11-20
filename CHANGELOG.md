@@ -60,11 +60,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 - With Aspect ratio Unlocked, the lock-on reticle sits on its target in wide windows (it was pulled toward the
   centre), and so do action prompts and other markers placed over things in the world.
+- Mac: trees, bushes and grass cast shadows again.
+- Shadow edges no longer show steps at Shadows 2x and 4x.
+- Mac: chests and other metal keep their shine in shadow.
 - The rift no longer disappears while talking to someone next to it.
 - Short frame-time spikes in play (30-47 ms every few seconds): the audio renderer made its 5 ms frames in bursts of
   the audio device's period (21 ms on Mac), so the game updated its audio every 21 ms and its main thread waited
   that long whenever it freed an audio buffer. The frames now keep their own 5 ms clock, as on the Switch.
 - A crash at start in a wide window with MetalFX on (MetalFX was asked for an image of no width).
+- Wide windows: the first frames at start no longer show an image of no width (the 16:9 box opened from nothing).
 - No more drops to 35-55 fps in busy areas (seen on Mac): the game's own dynamic resolution is off, as in LAS Recomp. It
   raised the 3D size on a fast GPU (up to 1.9x the window's pixels at Match display) until frames ran late.
 - Vulkan (Windows, Linux, Android): the hearts show as red hearts, not dark hearts in a red box.

@@ -541,6 +541,8 @@ static bool prep_run_locked(const char *romfs, void (*progress)(int done, int to
     double t0 = ms_now();
     extern bool maxwell_skip_unsupported_stores;  // (as nvnDeviceInitialize: the start screen's preparation runs before
     maxwell_skip_unsupported_stores = game_other() != NULL;  // it, and EoW's SUST.B compute shaders failed there)
+    extern uint32_t maxwell_shadow_texel_off;
+    maxwell_shadow_texel_off = game_other() ? 0x280 : 0x240;  // (maxwell/shader.h)
     char *list = NULL;
     if (getenv("LARECOMP_SHADER_LIST")) {
         FILE *f = fopen(getenv("LARECOMP_SHADER_LIST"), "rb");

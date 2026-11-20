@@ -400,7 +400,10 @@ static int room_crop(uint64_t frame, double shape, float *u0, float *u1) {
 // Presented part of the image (crop: uv origin and size) and its place in the window: interiors and dungeons show
 // their 16:9 centre (taller outputs: the 16:9 band), rooms wider than one screen what 16:9 shows of them (room_crop).
 void widescreen_present_crop(uint64_t frame, double shape, float crop[4], double *vx, double *vy, double *vw, double *vh) {
-    static uint64_t last;  // (last wide boxed frame: room changes slide the edges instead of jumping)
+    // (last wide boxed frame: room changes slide the edges instead of jumping; none yet at start: the first one
+    // starts at its target - sliding from the empty 0..0 moved both edges together, a zero-width crop for frames)
+    static uint64_t last;
+    static bool have_last;
     static float cu0, cu1;
     crop[0] = crop[1] = 0, crop[2] = crop[3] = 1;
     g_room_wide = false;
@@ -430,14 +433,14 @@ void widescreen_present_crop(uint64_t frame, double shape, float crop[4], double
     if (m == ROOM_FULL) u0 = 0, u1 = 1;
     mode = m, k0 = u0, k1 = u1;
     g_room_wide = m != ROOM_BOX;
-    if (frame <= last + 2 && frame > last) {
+    if (have_last && frame <= last + 2 && frame > last) {
         const float step = 0.03f;  // of the image width per frame
         cu0 += fmaxf(-step, fminf(step, u0 - cu0));
         cu1 += fmaxf(-step, fminf(step, u1 - cu1));
     } else {
         cu0 = u0, cu1 = u1;
     }
-    last = frame;
+    last = frame, have_last = true;
     // (phones: the HUD at the screen corners, in the bars: the bars were cleared after the scene, runtime/hle/hud_corners.c)
     hud_corners_note_crop(frame, cu0, cu1, 0, 1);
     crop[0] = cu0, crop[2] = cu1 - cu0;
