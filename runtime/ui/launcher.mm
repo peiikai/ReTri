@@ -2223,7 +2223,7 @@ static void data_folder_popup(float s) {
             close = ImGui::Button(L("Cancel"), bw) || esc;
         } else {
             bool room = t.free >= t.need;
-            ImGui::Text(L("Move your saves, seeds, settings and game files there, %.1f GB in all, or start fresh?"),
+            ImGui::Text(L("Move your saves, settings and game files there, %.1f GB in all, or start fresh?"),
                         t.bytes / 1e9);
             if (!room) ImGui::TextColored(red, L("Not enough space there. Only %.1f GB is free."), t.free / 1e9);
             ImGui::Spacing();
@@ -2285,7 +2285,7 @@ static void data_folder_popup(float s) {
 // picked goes through the same question as on the desktop (move the data there, or start fresh).
 static void storage_rows(bool busy) {
     const char *fixed = rt_data_root_fixed() ? L(rt_data_root_fixed()) : NULL;
-    std::string d = std::string(L("Where ReTri keeps game files, saves, seeds and settings.")) + "\n\n" +
+    std::string d = std::string(L("Where ReTri keeps game files, saves and settings.")) + "\n\n" +
                     data_root_shown() + (fixed ? std::string("\n\n") + fixed : "");
     opt_section("Storage");
 #ifdef __ANDROID__
@@ -2384,8 +2384,8 @@ static void prelaunch_tab(float sc) {
     static bool shot_del = getenv("LARECOMP_LAUNCHER_SHOT") && strstr(getenv("LARECOMP_LAUNCHER_SHOT"), ":askdelete");
     if (shot_del) confirm_delete = true, shot_del = false;  // (test: :askdelete)
     if (!confirm_delete) {
-        if (opt_action("Delete game files", gbs, "Frees up the space ReTri's copy of the game files uses. Your saves, "
-                       "seeds and settings stay.", true))
+        if (opt_action("Delete game files", gbs, "Frees up the space ReTri's copy of the game files uses. Your saves "
+                       "and settings stay.", true))
             confirm_delete = true;
     } else {
         std::string d = L("Deletes the extracted game files now.");
@@ -3016,6 +3016,9 @@ extern "C" void launcher_run(const char *root) {
             // (test) LARECOMP_LAUNCHER_KEYS=<frame>:<key>,...: that key pressed at that frame, let go 2 frames later.
             // Keys: left right up down enter esc (keyboard), pl pr pu pd pa pb (controller d-pad, confirm, back), or
             // b.<button> (larecomp.ini name: b.south, b.ltrigger...): a real controller button event, through ReTri Menu
+            // (test) LARECOMP_LAUNCHER_MOUSE=<x>,<y>: the mouse held there (window points), for hover screenshots
+            if (static const char *mp = getenv("LARECOMP_LAUNCHER_MOUSE"); mp && strchr(mp, ','))
+                io.AddMousePosEvent((float)atof(mp), (float)atof(strchr(mp, ',') + 1));
             if (static const char *keys = getenv("LARECOMP_LAUNCHER_KEYS"); keys) {
                 io.BackendFlags |= ImGuiBackendFlags_HasGamepad;  // (no controller needed for its presses)
                 static long kf;
@@ -3478,14 +3481,14 @@ extern "C" void launcher_run(const char *root) {
                     files_gb = -1;  // (re-measured after a setup)
                 } else {
                     // DELETE: frees ReTri's copy (runtime/paths.c removes only what the setup made, only inside
-                    // the data root). Saves, seeds, settings and the user's own files stay.
+                    // the data root). Saves, settings and the user's own files stay.
                     if (files_gb < 0) files_gb = rt_game_files_size(g_root.c_str()) / 1e9;
                     char gb[32];
                     snprintf(gb, sizeof gb, "%.1f GB", files_gb);
                     opt_section("Game files");
                     if (!g_confirm_delete) {
                         if (opt_action("Delete game files", gb, "Frees up the space ReTri's copy of the game files "
-                                       "uses. Your saves, seeds and settings stay.", true))
+                                       "uses. Your saves and settings stay.", true))
                             g_confirm_delete = true;
                         first_row();
                     } else {

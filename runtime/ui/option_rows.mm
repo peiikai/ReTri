@@ -200,7 +200,7 @@ static int row(const char *label, const std::string &value_en, bool changed, con
     if (cards) {
         float vw = value.empty() ? 0 : ImGui::CalcTextSize(value.c_str()).x;
         if (arrows && vw > 0) vw += 2 * (cfs * 0.6f + cfs * 0.55f);
-        if (chevron) vw += cfs * 0.75f;
+        if (chevron || (g_row_button && plastic_theme().button_row && value.empty() && !arrows)) vw += cfs * 0.75f;
         float room = w - 2 * card_pad - 16 * g_scale - 14 * g_scale;  // (the value's own right pad)
         value_below = vw > 0 && vw + cfs > room * 0.5f && desc && *desc;
         desc_w = value_below || vw <= 0 ? room : room - vw - cfs;
@@ -307,6 +307,8 @@ static int row(const char *label, const std::string &value_en, bool changed, con
     float pad = 16 * g_scale, fs = ImGui::GetFontSize();
     bool sel = hov || foc, button = g_row_button;
     g_row_button = false;
+    bool action_mark = button && pt.button_row;  // (EoW: an action is a row with a chevron, not a raised button)
+    if (pt.button_row) button = false;
     ImVec4 col = sel ? pt.row_sel : mark ? pt.row_mark : warn ? pt.danger : button ? pt.button : pt.row;
     if (off) col = sel ? pt.row_mark : ImVec4(col.x, col.y, col.z, col.w * 0.5f);  // (greyed out, the cursor on it: ochre)
     float dep = (sel ? 7 : button ? 6 : 3.5f) * g_scale;
@@ -336,12 +338,12 @@ static int row(const char *label, const std::string &value_en, bool changed, con
         if (clicked && !off && arrow_under) step = arrow_under;
         right = rx - gap;
     }
-    if (chevron) {  // ">", drawn (as the arrows above)
+    if (chevron || (action_mark && value.empty() && !arrows)) {  // ">", drawn (as the arrows above)
         float cw = fs * 0.2f, cy = ty + fs * 0.52f;
         const ImVec2 pts[] = {ImVec2(right - cw, cy - cw * 1.1f), ImVec2(right, cy), ImVec2(right - cw, cy + cw * 1.1f)};
         dl->AddPolyline(pts, 3, ac, 0, 2.6f * g_scale);
         right -= cw + fs * 0.55f;
-        if (step == 1) step = 2, menu_sfx_play(MENU_SFX_DECIDE);  // (Right opens it too)
+        if (chevron && step == 1) step = 2, menu_sfx_play(MENU_SFX_DECIDE);  // (Right opens it too; not an action)
     }
     g_value_x = 0;
     if (!value.empty()) {

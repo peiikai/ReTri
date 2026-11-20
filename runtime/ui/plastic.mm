@@ -41,7 +41,9 @@ static const PlasticTheme &theme_eow(void) {
         t.row_sel = hex(0x463A33);
         t.row_mark = hex(0x3C322D);
         t.row_hot = hex(0x463A33);   // (ImGui's own buttons under the cursor: as the selection)
-        t.button = hex(0xD8B27C);
+        // actions as rows: they light up only under the cursor or the mouse, like the rest (the tan buttons looked lit
+        // at rest, and were LA's gold; user 2026-11-20)
+        t.button = hex(0x2E2826);
         t.danger = hex(0x7A2E28);
         t.tab = hex(0x2E2826);
         t.tab_sel = hex(0x3C302C);
@@ -52,7 +54,7 @@ static const PlasticTheme &theme_eow(void) {
         t.text = hex32(0xF0E8DC);
         t.text_dim = hex32(0x9E9286);
         t.text_sel = hex32(0xF0E8DC);
-        t.text_button = hex32(0x3A2618);
+        t.text_button = hex32(0xF0E8DC);
         t.text_tab_sel = hex32(0xE8A85A);
         t.section = hex32(0xE8A85A);
         t.value = hex32(0xF0E8DC);
@@ -68,6 +70,7 @@ static const PlasticTheme &theme_eow(void) {
         t.glare = 0.0f;
         t.corner = 6.0f;
         t.brackets = true;
+        t.button_row = true;
     }
     return t;
 }
