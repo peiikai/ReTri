@@ -1419,7 +1419,7 @@ static bool menu_tip(float s) {
 
 #ifdef __ANDROID__
 // The game files page's example on Android: the system's folder picker, as it looks with the folder to choose opened
-// ("Game files", exefs and romfs in it) and its "Use this folder" button at the bottom, which a gold arrow points at.
+// ("Game files", exefs and romfs in it) and its "Use this folder" button at the bottom, which an arrow points at.
 // The picker chooses the folder it's in, not one picked from a list. Drawn as the desktop's (shapes and the page's font,
 // sized from the font), up to w wide, at the cursor; it takes its space with a Dummy.
 static float folder_example_height(void) {
@@ -1473,7 +1473,7 @@ static void draw_folder_example(float w) {
         ImVec2 nsz = font->CalcTextSizeA(ts, FLT_MAX, 0, rows[i]);
         dl->AddText(font, ts, ImVec2(gx + g + fs * 0.45f, rmy - nsz.y * 0.5f), text, rows[i]);
     }
-    // the button, bottom right, and over it what to do with a gold arrow down to it
+    // the button, bottom right, and over it what to do with an arrow down to it
     const char *use = L("USE THIS FOLDER");
     ImVec2 usz = font->CalcTextSizeA(ts, FLT_MAX, 0, use);
     float bh = fs * 1.5f, bw = usz.x + fs * 1.3f, bx1 = b.x - fs * 0.5f, bx0 = bx1 - bw, by1 = b.y - fs * 0.45f,
@@ -1485,10 +1485,11 @@ static void draw_folder_example(float w) {
     if (hw > room) hs *= fmaxf(0.7f, room / hw), hw = font->CalcTextSizeA(hs, FLT_MAX, 0, hint).x;
     float hy = by0 - fs * 0.5f - fs * 1.15f * 0.5f, acx = (bx0 + bx1) * 0.5f, hx = fminf(acx - hw * 0.5f, bx1 - hw);
     hx = fmaxf(hx, a.x + fs * 0.5f);
-    dl->AddText(font, hs, ImVec2(hx, hy - font->CalcTextSizeA(hs, FLT_MAX, 0, hint).y * 0.5f), gold, hint);
+    const ImU32 callout = ui_eow_look() ? IM_COL32(226, 191, 166, 255) : gold;  // (EoW: bronze, no gold)
+    dl->AddText(font, hs, ImVec2(hx, hy - font->CalcTextSizeA(hs, FLT_MAX, 0, hint).y * 0.5f), callout, hint);
     float t0 = hy + fs * 0.42f, t1 = by0 - fs * 0.08f, hd = fs * 0.22f;  // (the arrow, from under the hint to the button)
-    dl->AddLine(ImVec2(acx, t0), ImVec2(acx, t1 - hd), gold, th);
-    dl->AddTriangleFilled(ImVec2(acx - hd, t1 - hd), ImVec2(acx + hd, t1 - hd), ImVec2(acx, t1), gold);
+    dl->AddLine(ImVec2(acx, t0), ImVec2(acx, t1 - hd), callout, th);
+    dl->AddTriangleFilled(ImVec2(acx - hd, t1 - hd), ImVec2(acx + hd, t1 - hd), ImVec2(acx, t1), callout);
     ImGui::Dummy(ImVec2(w, h));
 }
 #else
@@ -1570,9 +1571,10 @@ static void draw_folder_example(float w) {
             float hs = ts, hw = font->CalcTextSizeA(hs, FLT_MAX, 0, hint).x;
             if (aw + gap + hw > room) hs *= fmaxf(0.7f, (room - aw - gap) / hw);
             float hx = ax + aw + gap, th = fs * 0.09f, hd = fs * 0.26f;
-            dl->AddLine(ImVec2(ax + th, my), ImVec2(ax + aw, my), gold, th);
-            dl->AddTriangleFilled(ImVec2(ax - th, my), ImVec2(ax + hd, my - hd), ImVec2(ax + hd, my + hd), gold);
-            dl->AddText(font, hs, ImVec2(hx, my - font->CalcTextSizeA(hs, FLT_MAX, 0, hint).y * 0.5f), gold, hint);
+            const ImU32 callout = ui_eow_look() ? IM_COL32(226, 191, 166, 255) : gold;  // (EoW: bronze, no gold)
+            dl->AddLine(ImVec2(ax + th, my), ImVec2(ax + aw, my), callout, th);
+            dl->AddTriangleFilled(ImVec2(ax - th, my), ImVec2(ax + hd, my - hd), ImVec2(ax + hd, my + hd), callout);
+            dl->AddText(font, hs, ImVec2(hx, my - font->CalcTextSizeA(hs, FLT_MAX, 0, hint).y * 0.5f), callout, hint);
         }
     }
     ImGui::Dummy(ImVec2(w, h));
@@ -1628,8 +1630,8 @@ static void menu_band(ImDrawList *dl, ImVec2 at, ImVec2 sz) {
         float half = sz.y * 0.62f;
         y1 = c - half, y2 = c + half, y0 = y1 - f, y3 = y2 + f;
     }
-    ImU32 c = eow_or(IM_COL32(6, 10, 34, 150), IM_COL32(26, 18, 22, 150)), g = IM_COL32(255, 190, 80, 34),
-          n = c & ~IM_COL32_A_MASK, ng = IM_COL32(255, 190, 80, 0);
+    ImU32 c = eow_or(IM_COL32(6, 10, 34, 150), IM_COL32(26, 18, 22, 150)), g = eow_or(IM_COL32(255, 190, 80, 34), IM_COL32(196, 154, 122, 60)),
+          n = c & ~IM_COL32_A_MASK, ng = g & ~IM_COL32_A_MASK;
     for (int pass = 0; pass < 2; pass++) {  // dark band, then the glow over it
         ImU32 a = pass ? g : c, z = pass ? ng : n;
         dl->AddRectFilledMultiColor(ImVec2(x0, y1), ImVec2(x1, y2), a, a, a, a);
@@ -1657,11 +1659,11 @@ static bool menu_item(const char *label, bool enabled, bool *hovered = NULL, con
     ImGui::PopID();
     if (hovered) *hovered = hot;
     ImU32 col = !enabled ? eow_or(IM_COL32(170, 175, 200, 140), IM_COL32(158, 146, 134, 140))
-              : hot ? eow_or(IM_COL32(255, 214, 64, 255), IM_COL32(240, 208, 112, 255))
+              : hot ? eow_or(IM_COL32(255, 214, 64, 255), IM_COL32(240, 220, 200, 255))  // (EoW: cream to bronze, no gold)
                     : eow_or(IM_COL32(250, 250, 255, 255), IM_COL32(240, 232, 220, 255));
     ImDrawList *dl = ImGui::GetWindowDrawList();
     if (hot && enabled) menu_band(dl, at, sz);
-    ImU32 col_b = hot && enabled ? eow_or(IM_COL32(255, 160, 50, 255), IM_COL32(232, 150, 74, 255)) : col;
+    ImU32 col_b = hot && enabled ? eow_or(IM_COL32(255, 160, 50, 255), IM_COL32(196, 154, 122, 255)) : col;
     if (split && enabled) {
         std::string head(label, split - label);
         text_fx(dl, ImGui::GetFont(), ImGui::GetFontSize(), at, col, col_b, head.c_str(), sz.y * 0.05f);
@@ -3128,12 +3130,12 @@ extern "C" void launcher_run(const char *root) {
             float x0 = fmaxf(90 * s, safe_l + 30 * s);
             ImGui::SetCursorPos(ImVec2(x0, 120 * s));
             ImGui::PushFont(g_font_title);
-            if (page == MAIN) {  // gold to orange, shadowed (not behind the Settings / System windows)
+            if (page == MAIN) {  // gold to orange (EoW: cream to bronze), shadowed (not behind the Settings / System windows)
                 const char *t = ui_eow_look() ? "ReTri" : "EoW Recompiled";
                 ImVec2 p = ImGui::GetCursorScreenPos();
                 text_fx(ImGui::GetWindowDrawList(), ImGui::GetFont(), ImGui::GetFontSize(), p,
-                        eow_or(IM_COL32(255, 232, 120, 255), IM_COL32(240, 216, 144, 255)),
-                        eow_or(IM_COL32(255, 138, 48, 255), IM_COL32(232, 150, 74, 255)), t, 3 * s);
+                        eow_or(IM_COL32(255, 232, 120, 255), IM_COL32(240, 226, 210, 255)),
+                        eow_or(IM_COL32(255, 138, 48, 255), IM_COL32(184, 138, 104, 255)), t, 3 * s);
                 ImGui::Dummy(ImGui::CalcTextSize(t));
             }
             ImGui::PopFont();
@@ -3224,7 +3226,7 @@ extern "C" void launcher_run(const char *root) {
                     const char *name = strstr(label, "\xe2\x80\xb9") + 4, *name_end = strstr(label, " \xe2\x80\xba");
                     rando_pressed = menu_item(label, status.empty(), &hov, name,
                                               choice ? eow_or(IM_COL32(250, 250, 255, 255), IM_COL32(240, 232, 220, 255))
-                                                     : eow_or(IM_COL32(246, 232, 176, 255), IM_COL32(216, 178, 124, 255)),
+                                                     : eow_or(IM_COL32(246, 232, 176, 255), IM_COL32(205, 191, 178, 255)),
                                               name_end);  // (the choice keeps its colour when hovered: a seed white, "New
                                                           //  Seed" vanilla cream; the arrows stay white)
                     ImGui::SetWindowFontScale(1.0f);
@@ -3617,7 +3619,7 @@ extern "C" void launcher_run(const char *root) {
                     const char *v = game_release_label((g_root + "/exefs").c_str(), label, sizeof label);
                     version_label = v ? v : "?";
                 }
-                ImGui::TextColored(ui_eow_look() ? ImVec4(0.85f, 0.70f, 0.49f, 1) : ImVec4(0.66f, 0.76f, 0.98f, 1), L("Nintendo Switch  \xc2\xb7  v%s"), version_label.c_str());
+                ImGui::TextColored(ui_eow_look() ? ImVec4(0.77f, 0.60f, 0.48f, 1) : ImVec4(0.66f, 0.76f, 0.98f, 1), L("Nintendo Switch  \xc2\xb7  v%s"), version_label.c_str());
             } else {
                 ImGui::TextColored(ImVec4(1, 0.72f, 0.4f, 1), "!  %s", busy ? L("Setting up the game files...") : shown(status).c_str());
                 ImGui::SetCursorPosX(x0);
@@ -3669,15 +3671,15 @@ extern "C" void launcher_run(const char *root) {
                     float wp = font->CalcTextSizeA(fs, FLT_MAX, 0, pre.c_str()).x;
                     ImVec2 lsz = font->CalcTextSizeA(fs, FLT_MAX, 0, link.c_str());
                     ImVec2 lp(right - lsz.x, y + vsz.y + 2 * s);
-                    text(ImVec2(lp.x - wp, lp.y), fs, eow_or(IM_COL32(200, 214, 250, 255), IM_COL32(216, 178, 124, 255)), pre.c_str(), false);
+                    text(ImVec2(lp.x - wp, lp.y), fs, eow_or(IM_COL32(200, 214, 250, 255), IM_COL32(205, 191, 178, 255)), pre.c_str(), false);
                     ImGui::SetCursorScreenPos(lp);
                     bool click = ImGui::InvisibleButton("update", lsz);
                     bool hover = ImGui::IsItemHovered();
                     // the menu's hover colours (yellow to orange), lighter while the link itself is hovered
-                    ImU32 col = hover ? eow_or(IM_COL32(255, 238, 150, 255), IM_COL32(248, 228, 160, 255))
-                                      : eow_or(IM_COL32(255, 214, 64, 255), IM_COL32(240, 208, 112, 255));
-                    ImU32 col_b = hover ? eow_or(IM_COL32(255, 196, 110, 255), IM_COL32(240, 184, 120, 255))
-                                        : eow_or(IM_COL32(255, 160, 50, 255), IM_COL32(232, 150, 74, 255));
+                    ImU32 col = hover ? eow_or(IM_COL32(255, 238, 150, 255), IM_COL32(248, 240, 230, 255))
+                                      : eow_or(IM_COL32(255, 214, 64, 255), IM_COL32(240, 220, 200, 255));
+                    ImU32 col_b = hover ? eow_or(IM_COL32(255, 196, 110, 255), IM_COL32(226, 191, 166, 255))
+                                        : eow_or(IM_COL32(255, 160, 50, 255), IM_COL32(196, 154, 122, 255));
                     text_fx(dl, font, fs, lp, col, col_b, link.c_str(), 1.5f * s);
                     text_fx(dl, font, fs, ImVec2(lp.x + 0.7f * s, lp.y), col, col_b, link.c_str(), 0);  // (faux bold)
                     if (hover) {

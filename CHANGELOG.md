@@ -43,8 +43,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 - Menus use the EoW colours without LAS Recomp's gold: buttons such as Show in Finder, Import fonts, Return and
-  Apply are plain, lit only under the mouse or the controller cursor; headings are bronze, arrows cream. The System
-  tab no longer mentions seeds.
+  Apply are plain, lit only under the mouse or the controller cursor; headings are bronze, arrows cream. The start
+  screen's title and menu are cream and bronze too. The System tab no longer mentions seeds.
 - The game always runs at 60 fps: its own switch to 30 fps when frames run long is off (it could get stuck at 30).
   On slower devices, set FPS (under Resolution) to 30, or turn on Dynamic resolution and pick its FPS target.
 - The game code generator is part of the app (C++, from LAS Recomp): no release ships Python any more, and setup
