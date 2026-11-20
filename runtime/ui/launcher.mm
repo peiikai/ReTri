@@ -2731,7 +2731,8 @@ extern "C" void launcher_run(const char *root) {
         if (pg && !strcmp(pg + 1, "preparing")) page = SETUP, prep_progress(666, 1585), set_job(LN("Preparing shaders"));
         if (pg && !strcmp(pg + 1, "skipask")) page = SETUP, prep_progress(666, 1585), set_job(LN("Preparing shaders")), g_prep_skip_ask = true;
         if (pg && !strncmp(pg + 1, "fail", 4)) page = SETUP, set_failure(atoi(pg + 5));  // (the failure messages)
-        if (pg && !strncmp(pg + 1, "settings", 8) && pg[9] == ':') g_tab_request_ext = atoi(pg + 10);  // settings:<tab>
+        if (pg && !strncmp(pg + 1, "settings", 8) && pg[9] == ':')  // settings:<tab> (the cursor on it, not System's)
+            g_tab_request_ext = atoi(pg + 10), menu_tabs_focus(false);
         if (pg && !strcmp(pg + 1, "delete")) page = SETUP, g_confirm_delete = true;
         if (pg && !strcmp(pg + 1, "tip")) g_settings.menu_tip_seen = false, g_tip_test = true;
         if (pg && !strcmp(pg + 1, "recompiling")) page = SETUP, g_build_frac = 0.42f, set_job(LN("Recompiling the game"));
@@ -3714,6 +3715,10 @@ extern "C" void launcher_run(const char *root) {
             menu_sfx_frame(frame_page != MAIN);
 
             ImGui::Render();
+            // (test) LARECOMP_PREVIEW=<row label> with :settings:<tab>: that row's live preview, as in game (menu.mm),
+            // halfway to the shot (once the tab is up: the preview runs the page shown)
+            if (shot_at && frame == shot_at / 2 && page == SETTINGS && getenv("LARECOMP_PREVIEW") && !preview_active())
+                preview_open(getenv("LARECOMP_PREVIEW"), -1);
 #if PLAT_TOUCH
             {   // (after Render: its EndFrame starts the keyboard through the backend; the start screen draws in points)
                 ImVec2 mn, mx;
