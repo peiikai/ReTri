@@ -61,7 +61,7 @@ Ubuntu / Debian packages (other distributions: the same libraries under their na
 3.4 from source first - `tools/linux/build_deps.sh` builds the pinned version the AppImage uses (into
 `build/linux/<arch>/deps`).
 
-    sudo apt install clang lld make pkg-config python3-venv libsdl3-dev libavformat-dev libavcodec-dev \
+    sudo apt install clang lld make pkg-config python3 libsdl3-dev libavformat-dev libavcodec-dev \
         libavutil-dev libswscale-dev libvulkan-dev libshaderc-dev libvulkan-memory-allocator-dev glslc vulkan-tools
 
 For Chinese or Korean menus, also install a font for them (`fonts-noto-cjk`). ReTri bundles fonts for Russian
@@ -72,10 +72,13 @@ yourself: `make SHADERC=-lshaderc_shared` (or `-lshaderc`).
 
 Then from the repo root:
 
-    python3 -m venv tools/venv && tools/venv/bin/pip install lz4 capstone unicorn
-    make -j         # the start screen only (no game code yet): set up the game files there, or put extracted/ here
-    make gen        # once: recompile the game from your own game files
+    make -j         # the app (no game code yet)
+    make gen        # once, with your game files in extracted/ (exefs/, romfs/): recompile the game's code
     make -j         # -> build/eowrecomp and the game code library build/eowgame.so
+
+Without `extracted/` here, run `tools/fetch_zig.sh` once and set up your game files on the start screen: it builds the
+game code itself, as the AppImage does. The generator is part of the app (`runtime/gen/`; `make lasgen` builds it as a
+command-line tool). Python 3 is only needed for the tests.
 
 Run `./build/eowrecomp` from the repo root: with `extracted/` in the starting folder it uses that folder for
 everything (dev mode) instead of `~/.local/share/eowrecomp`.
@@ -99,10 +102,7 @@ SDL3, an LGPL-only FFmpeg (only the movie codecs, as on Windows / macOS), and sh
 (`tools/linux/build_deps.sh`), then the game against them (`tools/linux/package.sh`). This machine's arch is built
 natively in one container of that arch (the release does both archs that way, on an arm64 runner for aarch64).
 aarch64 on an x86-64 machine is cross-compiled in the amd64 container against the arm64 image's root filesystem
-(`build/linux/aarch64/sysroot`), with only the game code generator helper (`tools/linux/gen_helper.sh`, PyInstaller
-builds for the machine it runs on) frozen in the arm64 container under QEMU. The
-generated game code comes from the host (`generated/`, `generated-aarch64/`; `make appimage` runs `make gen` for it
-when missing).
+(`build/linux/aarch64/sysroot`). The AppImage holds no game code: the start screen builds it on the player's machine.
 
 Release check of the x86-64 AppImage (`make smoketest`, tools/linux/smoketest.sh; `tools/linux/smoketest.sh <AppImage>`
 for another one): the start screen's Set up from `extracted/` in the checkout (game files copied into
@@ -112,7 +112,7 @@ READY FOR RELEASE or NOT READY; `build/smoke/sheet.png` shows every screenshot. 
 holds a copy of the game files. It needs Python's Pillow; on a slow machine raise the setup's limit with
 `SMOKE_SETUP_SECONDS` (default 3600) and the game's with `SMOKE_GAME_SECONDS` (default 600).
 
-The AppImage holds `eowrecomp`, `lasgen/`, the start screen font and the bundled libraries (SDL3,
+The AppImage holds `eowrecomp`, `zig/`, the start screen font and the bundled libraries (SDL3,
 FFmpeg, shaderc). Not bundled: glibc, libstdc++, the Vulkan loader and the GPU drivers (always the system's). No game
 files or fonts.
 

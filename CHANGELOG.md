@@ -33,6 +33,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Phones and tablets, EoW: a drag on the game's screen moves the camera, as the right stick.
 
 ### Changed
+- The game code generator is part of the app (C++, from LAS Recomp): no release ships Python any more, and setup
+  generates the game code in seconds instead of a minute or more.
+- Setup no longer spends 10 minutes or more compiling one large function the game runs once at start: it is built
+  without optimisation (every platform).
 - Menus (from LAS Recomp): the left stick steps one row per push, and a held direction scrolls slower. In Configure
   inputs, the right column is empty while Device is selected, and the Open menu shortcuts are under ReTri Menu.
 - With Dynamic resolution on, the FPS target sets EoW's frame rate (60, 30, or 30 outdoors and 60 indoors) and the

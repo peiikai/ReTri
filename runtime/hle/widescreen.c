@@ -1,4 +1,4 @@
-// Widescreen: the camera code's 16:9 aspect literal loads are patched (tools/patches.py) to call
+// Widescreen: the camera code's 16:9 aspect literal loads are patched (runtime/gen/patches.cpp) to call
 // rt_aspect_site(); the renderer sets the wide factor (output aspect / 16:9) each frame.
 #include "../game_addresses.h"
 #include <string.h>
@@ -97,7 +97,7 @@ static struct { float x, y; uint64_t frame; } g_spot[NSPOT];  // spots placed by
 static volatile unsigned g_nspot;
 static float g_cam_shape = 1.0f;  // (another game) the shape the camera's projection was last built with (site 2)
 
-// Another game (tools/gen.py eow_aspect): the places its code builds 16:9 get the output's aspect instead.
+// Another game (runtime/gen/patches.cpp eow_aspect): the places its code builds 16:9 get the output's aspect instead.
 // Only site 2 is the camera's projection (EoW, 2026-11-05: each site alone at 32:9 in the town; site 3, also every
 // frame, stretches the picture, the rest run once at a level load). LARECOMP_ASPECT_OTHER=mask picks other sites;
 // LARECOMP_LOG_ASPECT counts each site's uses.
@@ -127,7 +127,7 @@ uint32_t rt_aspect_other(int site) {
     return b;
 }
 
-// Another game (tools/gen.py eow_spot): layouts the game places at a spot on screen - the lock-on reticle
+// Another game (runtime/gen/patches.cpp eow_spot): layouts the game places at a spot on screen - the lock-on reticle
 // (L_LockOn_00) and the other sites there - get their root pane's translation (layout units from the centre, y up)
 // here. The game works the spot out with the camera's projection, widened to the window's shape, and turns it into
 // the 16:9 layout's units, which are drawn in the centred 16:9 box: at 32:9 the reticle sat halfway between its
@@ -189,7 +189,7 @@ float rt_cull_aspect(float orig) {
     return rt_aspect_site(6) * (orig > 0.1f && orig < 10.0f ? orig / (16.0f / 9.0f) : 1.0f);
 }
 
-// Sky and sea pieces past the north edge (tools/patches.py SKYSEA_BOX_SITES): a piece shows while Link is within
+// Sky and sea pieces past the north edge (runtime/gen/patches.cpp SKYSEA_BOX_SITES): a piece shows while Link is within
 // its reach plus half a 16:9 view (7.5). A wider view reaches further: half its extra width, doubled for the far
 // (top) edge of the perspective view, where the sky is.
 float rt_skysea_margin(void) {
@@ -208,7 +208,7 @@ float rt_fovy(float orig) {
     return degrees ? wide * 180.0f / (float)M_PI : wide;
 }
 
-// Interiors: the indoor shadow setup runs while an interior is rendered (tools/patches.py).
+// Interiors: the indoor shadow setup runs while an interior is rendered (runtime/gen/patches.cpp).
 static uint64_t g_indoor_frame;
 float rt_indoor_aspect(void) {
     extern uint64_t renderer_present_count(void);

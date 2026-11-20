@@ -4,7 +4,7 @@
 // its parameters), as the map screen does; the event's GameControl.RequestLevelJump fills the level's jump request
 // and the event system performs it when the event ends. Writing the request alone does nothing: the game reads it only
 // when an event ends (its processor, main+0x160f7e0, runs then). The request has LA's layout at another offset: level
-// at R+0x218 (length +0x258), locator at +0x260 (length +0x2a0), offset +0x2b0; tools/gen.py hooks the processor to
+// at R+0x218 (length +0x258), locator at +0x260 (length +0x2a0), offset +0x2b0; runtime/gen/patches.cpp hooks the processor to
 // tell us where it is (rt_other_request_holder). The places come from the game's level files (warp_other_places).
 #include <pthread.h>
 #include <stdbool.h>
@@ -33,7 +33,7 @@ void rt_other_request_obj(uint64_t r) {
     g_req = r;
 }
 
-// Generated code (tools/gen.py): the request processor is running with its object P; the request is at P+0x10.
+// Generated code (runtime/gen/patches.cpp eow_request): the request processor is running with its object P; the request is at P+0x10.
 void rt_other_request_holder(uint64_t p) {
     uint64_t r = *(const uint64_t *)(uintptr_t)(p + 0x10);
     g_proc_runs++;

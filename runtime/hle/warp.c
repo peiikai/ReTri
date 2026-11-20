@@ -6,7 +6,7 @@
 // performs the transition when it sees the pending request.
 //
 // R registers itself with its parent while a level loads (`str xR, [x8, #0x1c0]` at main+0x80c464 /
-// main+0x80d718); tools/patches.py hooks those stores to tell us where R is. A warp then writes the same
+// main+0x80d718); runtime/gen/patches.cpp hooks those stores to tell us where R is. A warp then writes the same
 // fields main+0x81b950 writes, from the presenter's per-frame callback.
 #include "../game_addresses.h"
 #include <math.h>
@@ -891,7 +891,7 @@ void rt_log_resname(uint64_t p) {
     if (s) LOG("[resname] %.120s\n", s);
 }
 
-// (debug, tools/gen.py GEN_TRACE_STORE_OFF) every traced `str xT, [xN, #off]`: the values stored, with their site;
+// (debug, runtime/gen/patches.cpp GEN_TRACE_STORE_OFF) every traced `str xT, [xN, #off]`: the values stored, with their site;
 // rt_trace_dump shows which hold a level-jump request's strings (level at +0x218, length at +0x258)
 static struct { uint64_t pc, val; } g_tr[8192];
 static int g_ntr;

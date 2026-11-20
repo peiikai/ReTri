@@ -69,3 +69,11 @@ To bootstrap a release branch, the maintainer can allow a single push with `EOW_
 ## Building
 
 See `CLAUDE.md` for the build and run commands.
+
+## The game code generator
+
+`runtime/gen/` turns the game's executables into C. The app runs it during setup, and `make lasgen` builds it as a
+command-line tool (`make gen GEN=generated-eow` uses it). `tools/gen.py` and its modules are the Python reference it
+was ported from, kept until the port has shipped: a generator, patch or chunk-cut change goes into both, and
+`tools/test_gen_cpp.py build/lasgen <extracted folder> --game eow` must report the C identical (gen.py needs a Python
+with unicorn, capstone and lz4).

@@ -1,5 +1,8 @@
 """Generate C for a whole NSO module.
 
+The reference for the C++ generator the app runs (runtime/gen/): tools/test_gen_cpp.py checks that both write the same
+C. Not shipped; it stays until the C++ port has been released.
+
 Usage: gen.py <name> <nso> <base> <outdir> [--hle hle_symbols.txt] [--simd asm|c] [--dyn-base] [--new-chunk-bounds]
 
 --simd: FP/SIMD/CRC32 as AArch64 inline asm (default on arm64 hosts) or portable C (default elsewhere).
@@ -89,6 +92,7 @@ class Module:
 
     def emu(self):
         if self.mu is None:
+            print(f'{self.name}: starting the jump table emulator', file=sys.stderr, flush=True)
             mu = uc.Uc(uc.UC_ARCH_ARM64, uc.UC_MODE_ARM)
             n = self.nso
             mu.mem_map(self.base, len(n.image))
@@ -547,6 +551,8 @@ def main():
                     help='Android: guest addresses relative to the window the runtime picks (lifter.gaddr)')
     args = ap.parse_args()
     lifter.DYN_BASE = args.dyn_base
+    # (first: a generator that ends early still shows it started)
+    print(f'{args.name}: started', file=sys.stderr, flush=True)
 
     global HOOKS, PATCHES
     t0 = time.time()
@@ -562,6 +568,9 @@ def main():
             # (OPTNONE) a 25 500-line function behind a data table at main+0x3d85e90, never entered in 4 200 frames of
             # start, file load and play (LARECOMP_FNPROF); at -O1 it took 30+ minutes to compile
             OPTNONE[0x7001390b70] = 0xa9ba7bfd  # stp x29, x30, [sp, #-0x60]!
+            # a 27 300-line function called once while the game starts (LARECOMP_FNPROF: once in boot to the overworld);
+            # at -O2 it took 8 minutes on a Mac and 30+ on a Snapdragon 865 (Android builds it on the phone)
+            OPTNONE[0x70020e7fa0] = 0xa9ba7bfd  # stp x29, x30, [sp, #-0x60]!
             for _a, _w in OPTNONE.items():
                 _got = struct.unpack_from('<I', m.nso.image, _a - m.base)[0]
                 assert _got == _w, f'OPTNONE {_a:#x}: {_got:#x}, not {_w:#x}'

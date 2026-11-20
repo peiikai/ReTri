@@ -27,7 +27,7 @@
 // 16.2 ms or, in gameplay, shown a vsync late - see pace_frame -, and the median frame within ~3 ms of that: a few
 // hitches or spikes in frames that otherwise fit don't count), the game is held in its 30 fps mode: its least extra
 // vsyncs becomes 1, and the counters report a frame of at least PACE_SLOW_NS as before (its own dynamic resolution,
-// which read them too, is off: tools/patches.py GAME_DYNRES_SITE).
+// which read them too, is off: runtime/gen/patches.cpp GAME_DYNRES_SITE).
 // Its 30 fps mode is two world steps a frame (+0x4e0 counts the extra one down) and a present interval of 2 (+0x4e1 + 1,
 // to nvnWindowSetPresentInterval). On the Switch the display waits out that interval; here nothing did, so a held
 // frame that fit in one vsync was still shown after one: the game asked for interval 2 the whole hold, yet a Steam
@@ -595,7 +595,7 @@ void pace_frame(void) {
 // scene reads longer, and its own frame time waits on that GPU too: an iPad Pro M4 in the overworld took 14.8 ms a
 // frame at 60, then read 20-23 ms at 30 and stayed there for the rest of a 16-minute session (one heavy moment took it
 // there). Paced at 60 regardless (LARECOMP_KEEP_60), the same place kept 14.8 ms. So at the end of each such window
-// (tools/gen.py: its read of the window's slow-frame count, main+0x347370) the count reads 0 once it has held 30 for
+// (runtime/gen/patches.cpp: its read of the window's slow-frame count, main+0x347370) the count reads 0 once it has held 30 for
 // OTHER_TRY_S: the game takes its own way back to 60, and for OTHER_TRY_GRACE_S its frames there that miss 1/60 s don't
 // send it straight back (rt_other_slow60) while the clock comes back up (10 s was a long stretch at 30 for
 // a dip; frames already missing 60 before the drop - a scene too heavy for it - start at OTHER_TRY_HEAVY_S, so a
@@ -629,7 +629,7 @@ static bool other_try_on(void) {
     return on && !g_settings.dyn_res;  // (Dynamic resolution: the FPS target holds it, rt_other_fps_limit)
 }
 
-// The frame time the frame controller calls slow (tools/gen.py: its 1/60 s, in its 30 and its 60 fps branch), as float
+// The frame time the frame controller calls slow (runtime/gen/patches.cpp: its 1/60 s, in its 30 and its 60 fps branch), as float
 // bits. With Dynamic resolution the game's own 60 / 30 choice is out of it: the FPS target holds its mode and the
 // resolution does the rest, as in LAS - target 60: no frame is slow (1 s), it stays at 60 or goes straight back;
 // target 30 (pace_target_30): every frame is, its 30 fps mode (two world steps a frame) for good. Without it: 1/60 s.
@@ -649,7 +649,7 @@ uint32_t rt_other_fps_window(uint32_t slow) {
     return 0;
 }
 
-// The frame controller at 60 reads how many frames in a row took over 1/60 s (tools/gen.py, main+0x347668): at 1 or 2
+// The frame controller at 60 reads how many frames in a row took over 1/60 s (runtime/gen/patches.cpp, main+0x347668): at 1 or 2
 // it goes to 30. Within OTHER_TRY_GRACE_S of a try it reads 0.
 uint32_t rt_other_slow60(uint32_t slow) {
     if (!slow || !ot_try_at || !other_try_on()) return slow;
