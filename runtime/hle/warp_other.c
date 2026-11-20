@@ -20,6 +20,7 @@
 static volatile uint64_t g_loads;   // level files read (warp_other_file_read)
 static volatile uint64_t g_proc_runs;  // the request processor's runs (one per level change)
 static char g_loaded[64];           // the last level read
+static char g_current[64];          // the level the last level jump went to (the request at its processor's run)
 static volatile uint64_t g_req;     // the current level's request object
 static volatile uint64_t g_holder;  // the request processor's object (the request at +0x10)
 static volatile uint64_t g_owner, g_ctx;  // (its owner - the job queue - and context, at the last run)
@@ -48,6 +49,13 @@ void rt_other_request_holder(uint64_t p) {
             (unsigned long long)*(const uint64_t *)(uintptr_t)(p + 0x18), (unsigned long long)*(const uint64_t *)(uintptr_t)(p + 0x20),
             (unsigned long long)*(const uint64_t *)(uintptr_t)(p + 0x28), (unsigned long long)*(const uint64_t *)(uintptr_t)(o + 0x200),
             (unsigned long long)*(const uint64_t *)(uintptr_t)(o + 0x218), (unsigned long long)*(const uint64_t *)(uintptr_t)(o + 0x220));
+    }
+    // (the request's level is where this jump goes - also back to a level still loaded, which no file read shows:
+    // the overworld after a cave)
+    if (r >= GUEST_LO && r < GUEST_HI) {
+        uint64_t ll = *(const uint64_t *)(uintptr_t)(r + 0x258);
+        const char *lv = (const char *)(uintptr_t)(r + 0x218);
+        if (ll > 0 && ll < 0x40 && strnlen(lv, 0x40) == ll) memcpy(g_current, lv, ll + 1);
     }
     if (r >= GUEST_LO && r < GUEST_HI) { g_holder = p; g_owner = *(const uint64_t *)(uintptr_t)(p + 8); g_ctx = *(const uint64_t *)(uintptr_t)(p + 0x20); rt_other_request_obj(r); }
 }
@@ -432,7 +440,10 @@ const char *warp_other_place_level(int i) { return i >= 0 && i < g_nplaces ? g_p
 const char *warp_other_place_locator(int i) { return i >= 0 && i < g_nplaces ? g_places[i].locator : ""; }
 
 // ---- level loads (fs.c: the first read of each romfs file)
-const char *warp_other_current_level(void) { return g_loaded; }
+// in play: a level registered its jump request (none on the title and the file select; --load-save, load_save.c)
+int warp_other_in_play(void) { return g_req != 0; }
+// The current level: where the last level jump went, else the last level file read
+const char *warp_other_current_level(void) { return g_current[0] ? g_current : g_loaded; }
 void warp_other_file_read(const char *path) {
     const char *p = strstr(path, "region_common/level/");
     if (!p) return;

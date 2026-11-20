@@ -637,14 +637,16 @@ static void wav_header(FILE *f, uint32_t bytes, int ch) {
 
 static void renderer_open_stream(Renderer *r);
 
-// Queued audio to keep ahead of the device, in bytes: >= 2 device periods.
-static int queue_target(Renderer *r, uint32_t N) {
+// Queued audio to keep ahead of the device, in bytes: >= 2 device periods. *period: one device period, in bytes.
+static int queue_target(Renderer *r, uint32_t N, int *period) {
     int fb = (int)(N * r->out_ch * sizeof(float)), target = 4 * fb;
+    *period = fb;
     SDL_AudioSpec dev;
     int dev_frames = 0;
     if (r->stream && SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(r->stream), &dev, &dev_frames) && dev_frames > 0) {
         int t = (2 * dev_frames * (int)r->sample_rate / (dev.freq ? dev.freq : 48000) + (int)N) * r->out_ch * (int)sizeof(float);
         if (t > target) target = t;
+        *period = dev_frames * (int)r->sample_rate / (dev.freq ? dev.freq : 48000) * r->out_ch * (int)sizeof(float);
         LOG("[audren] device %d Hz, %d ch, %d frames/period; %d ch out, queue target %d samples\n", dev.freq,
             dev.channels, dev_frames, r->out_ch, target / (r->out_ch * (int)sizeof(float)));
     }
@@ -657,7 +659,7 @@ static void *renderer_tick(void *arg) {
     uint32_t N = r->sample_count > 4096 ? 4096 : r->sample_count;
     uint64_t next = 0;
     struct timespec now;
-    int target = queue_target(r, N);
+    int period = 0, target = queue_target(r, N, &period);
     while (!r->quit) {
         // Audio > Output changed: reopen the stream with the new channel count (what is queued is dropped)
         if (r->out_ch != (g_settings.audio_out == AUDIO_OUT_51 ? 6 : 2)) {
@@ -665,14 +667,30 @@ static void *renderer_tick(void *arg) {
             if (r->stream) SDL_DestroyAudioStream(r->stream), r->stream = NULL;
             renderer_open_stream(r);
             audio_track_lock(false);
-            target = queue_target(r, N);
+            target = queue_target(r, N, &period);
         }
         int frame_bytes = (int)(N * r->out_ch * sizeof(float));
+        // The game's audio thread runs one update per event (RequestUpdate), as on the Switch's 200 Hz. Rendered only
+        // when the queue had room, frames came in bursts of a device period (macOS: 1024 samples, 4 of EoW's 240-sample
+        // frames in a row every 21 ms) and the game updated every 21 ms: a memory pool detach (EoW polls its state every
+        // 5 ms on the game's thread, waiting for the next update) took 20-40 ms - a 30-47 ms frame every few seconds
+        // in play at 5120x1440, game and GPU idle. So the frames keep their own clock (one per N samples), the queue
+        // a guard: a period under the target renders at once (catching up), a period over it waits for the device.
         if (r->stream) {
-            while (SDL_GetAudioStreamQueued(r->stream) >= target && !r->quit) {
-                struct timespec ts = {0, 1000000};
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            uint64_t t = now.tv_sec * 1000000000ull + now.tv_nsec;
+            int q = SDL_GetAudioStreamQueued(r->stream);
+            if (!next || q < target - period) next = t;  // (behind: now)
+            else if (next > t) {
+                struct timespec ts = {0, (long)(next - t)};
                 nanosleep(&ts, NULL);
             }
+            while (SDL_GetAudioStreamQueued(r->stream) >= target + period && !r->quit) {  // (ahead of the device's clock)
+                struct timespec ts = {0, 1000000};
+                nanosleep(&ts, NULL);
+                next = 0;
+            }
+            if (next) next += (uint64_t)N * 1000000000ull / r->sample_rate;
         } else {
             clock_gettime(CLOCK_MONOTONIC, &now);
             uint64_t t = now.tv_sec * 1000000000ull + now.tv_nsec;

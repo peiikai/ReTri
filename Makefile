@@ -12,6 +12,15 @@ PLATFORM := linux
 else
 PLATFORM ?= macos
 endif
+# (Windows) Started from a shell that doesn't pass them on, MSYS2's make runs recipes with TMP, TEMP and USERPROFILE
+# empty: clang couldn't write the response file it gives lld ("unable to make temporary file"), dlltool fell back to
+# C:\WINDOWS (FFmpeg's import libraries came out empty) and make dist's home-path check was skipped. Set when empty.
+ifeq ($(PLATFORM),windows)
+export TMP := $(or $(TMP),$(shell cygpath -w /tmp))
+export TEMP := $(or $(TEMP),$(TMP))
+# (CSIDL_PROFILE: C:\Users\<name>; ~ is MSYS2's own home. No comment after a value: make keeps the spaces before it)
+export USERPROFILE := $(or $(USERPROFILE),$(shell cygpath -w -F 40))
+endif
 
 # iOS: the same generated code with the moving guest window (DYN_BASE=1 below: an iOS process has 58 GB of address
 # space, but the kernel's reserves cut it into a few free gaps that move with every launch - runtime/rt.h packs the
@@ -267,12 +276,13 @@ $(B)/inc/shader_variants.inc: runtime/nvn/shader_variants.txt
 	@mkdir -p $(dir $@)
 	(LC_ALL=C tr -d '\r' < $< | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$$/\\n"/'; echo '""') > $@
 $(B)/rt/nvn/shader_prep.o: $(B)/inc/shader_variants.inc
-# EoW's own list, from the shader tours (tools/shader_list_merge.py). Every build has it: a release (make app, make dist)
-# holds no game code, so GEN doesn't say which game it is for.
+# EoW's own list, from the shader tours (tools/shader_list_merge.py), in every build: a release (make app, make dist)
+# holds no game code and the iOS and Android builds' is generated-dyn, so it can't go by GEN or the folder's name
+# (EOW_SHADER_LIST= builds without it)
 EOW_SHADER_LIST ?= runtime/nvn/shader_variants_eow.txt
 $(B)/inc/shader_variants_other.inc: $(wildcard $(EOW_SHADER_LIST))
 	@mkdir -p $(dir $@)
-	(if [ -n "$(EOW_SHADER_LIST)" ] && [ -f "$(EOW_SHADER_LIST)" ]; then LC_ALL=C tr -d '\r' < $(EOW_SHADER_LIST) | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$$/\\n"/'; fi; echo '""') > $@
+	(if [ -n "$(EOW_SHADER_LIST)" ] && [ -f "$(EOW_SHADER_LIST)" ]; then LC_ALL=C tr -d '\r' < "$(EOW_SHADER_LIST)" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$$/\\n"/'; fi; echo '""') > $@
 $(B)/rt/nvn/shader_prep.o: $(B)/inc/shader_variants_other.inc
 $(B)/rt/nvn/shader_prep.o: RTFLAGS += -I$(B)/inc
 # the shader translator's id: part of the shader caches' tag (shader_cache_tag), so a changed translator rebuilds them
@@ -401,7 +411,7 @@ ios-sim:
 dmg: app
 	tools/make_dmg.sh
 
-# Windows: build/dist/ReTri-<version>-windows.zip, top folder "ReTri/": the exe, what the start screen
+# Windows: build/dist/ReTri-<version>-windows-x64.zip, top folder "ReTri/": the exe, what the start screen
 # builds the game code with on the player's machine (make gen-helper,
 # tools/fetch_zig.sh slimmed by tools/zig_slim.sh: its runtime built ahead of time, gamelib-src/, the exe's import library)
 # and the DLLs they load (runs without MSYS2). No game code. The exe is a release build in $(WIN_B):
@@ -416,8 +426,9 @@ dmg: app
 # under emulation, everything else is ARM64.
 DIST     := build/dist/ReTri
 WIN_B    := build/win-release
-# the zip's platform name, as the update check names it (runtime/ui/launcher.mm LARECOMP_PLATFORM)
-WINZIP   := windows$(if $(filter aarch64,$(WINARCH)),-arm64)
+# the zip's platform name, as the update check names it (runtime/ui/launcher.mm LARECOMP_PLATFORM). x64 or arm64 in
+# every release file name: launchers pick the file for the player's OS and CPU by those words
+WINZIP   := windows-$(if $(filter aarch64,$(WINARCH)),arm64,x64)
 deps-windows:
 	tools/build_deps_windows.sh
 dist:
@@ -441,6 +452,7 @@ dist:
 	cp third_party/fonts/DejaVu/DejaVuSans.ttf third_party/fonts/DejaVu/DejaVuSans-Bold.ttf "$(DIST)/"  # (last-resort fonts, free license)
 	cp third_party/fonts/DejaVu/LICENSE "$(DIST)/DejaVu-LICENSE.txt"
 	cp README.md LICENSE "$(DIST)/"  # (licenses and source links of the bundled components: README "License")
+	cp tools/recomplauncher.json "$(DIST)/"  # (launchers read it next to the program: docs/debug-hooks.md "Command line")
 	PATH="$(CURDIR)/build/deps-win/bin:$$PATH" ldd $(WIN_B)/eowrecomp.exe | awk '(/ucrt64/ || /clangarm64/ || /deps-win/) && !/vulkan-1/ {print $$3}' | sort -u | \
 	    xargs -I{} cp -u {} "$(DIST)/"
 	! ls "$(DIST)" | grep -iE 'x264|x265|xvid|postproc'  # (no GPL codec libraries in the release)
@@ -489,11 +501,14 @@ appimage:
 appimages:
 	tools/linux/appimage.sh x86_64
 	tools/linux/appimage.sh aarch64
+# `make tarball` (after make appimage): the same files in a .tar.gz, for places without FUSE (docs/linux.md)
+tarball:
+	tools/linux/tarball.sh $(ARCH)
 # release check of the x86-64 AppImage: start screen, into the game, warps to the overworld and every dungeon
 smoketest:
 	tools/linux/smoketest.sh
 
-.PHONY: dmg all gen gen-helper gen-objs runtime-objs deps deps-windows app dist appimage appimages smoketest
+.PHONY: dmg all gen gen-helper gen-objs runtime-objs deps deps-windows app dist appimage appimages tarball smoketest
 
 build/test_shaders: tools/test_shaders.m runtime/nvn/maxwell/translate.c runtime/nvn/maxwell/shader.h
 	clang -O1 -fobjc-arc -framework Metal -framework Foundation -o $@ tools/test_shaders.m runtime/nvn/maxwell/translate.c

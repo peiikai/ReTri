@@ -29,6 +29,7 @@ bool maxwell_gmem_fs_miss;
 bool maxwell_glsl_stack_vars = true;
 bool maxwell_glsl_structured;  // static stacks + structured control flow by default (exec.c: Mali, Adreno)
 bool maxwell_glsl_fast_minmax;  // the GPU's min / max / clamp for fmin / fmax / saturate (exec.c: Android)
+bool maxwell_glsl_image_stores;  // compute SUST.B as storage image stores (exec.c: shaderStorageImageWriteWithoutFormat)
 bool maxwell_glsl_push;  // c1 inlined + push constants by default (exec.c: Mali, Adreno)
 bool maxwell_glsl_tint_branch;  // the recolour code behind a specialization constant (exec.c: Adreno, Mali)
 bool maxwell_glsl_quad_deriv;  // fragment quad xor shuffles through derivatives (exec.c: no subgroups in fragment shaders)
@@ -676,6 +677,7 @@ static const char *uv2(Ctx *c, int slot, const char *x, const char *y, char *buf
 // reference or NULL, lod_kind 0 implicit / 1 level / 2 bias (lod), off: ivec2 texel offset or NULL.
 // GLSL offsets must be constants, so register offsets move the coordinates by offset / size of the level
 // (level 0 for implicit-LOD lookups). Non-fragment stages have no implicit LOD: level 0 (+ bias).
+static bool tex_is_stencil(const Ctx *c, int slot);
 static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, const char *layer, const char *dref,
                         int lod_kind, const char *lod, const char *off) {
     if (c->fail) { strcpy(out, "vec4(0.0f)"); return; }  // e.g. a type conflict: tex[slot] is not this lookup's type
@@ -719,6 +721,11 @@ static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, cons
         snprintf(P, sizeof P, "vec%d(%s, float(%s), %s)", n + 2, xs, layer, dref);
     } else {
         snprintf(P, sizeof P, "vec%d(%s, %s)", n + 1, xs, dref);
+    }
+    if (tex_is_stencil(c, slot) && n == 2 && !layer && !dref) {  // (as the MSL in emit_tex: the texel under the coordinate, its integer as is)
+        snprintf(out, 4096, "uintBitsToFloat(texelFetch(t%d, ivec2(clamp(%s, vec2(0.0f), vec2(0.99999f)) * vec2(textureSize(t%d, 0))), 0))",
+                 slot, xs, slot);
+        return;
     }
     char e[2000], ex[300] = "";
     if (extra) snprintf(ex, sizeof ex, ", %s", extra);
@@ -880,7 +887,7 @@ static void emit_texs(Ctx *c, uint64_t w, bool fetch) {
 // A texture the key names as a stencil read (ShaderKey.stencil_slots, by its handle's slot): a plain 2D texture of
 // integers - the depth / stencil buffer's stencil through a view (EoW's rifts read the bits the scene marks there)
 static bool tex_is_stencil(const Ctx *c, int slot) {
-    if (!c->key || c->glsl || !c->key->stencil_slots || slot < 0 || slot >= c->info->ntex) return false;
+    if (!c->key || !c->key->stencil_slots || slot < 0 || slot >= c->info->ntex) return false;
     const ShaderTexture *t = &c->info->tex[slot];
     int h = ((int)t->handle_offset - 0x20) / 8;
     return t->type == TEXTYPE_2D && !t->shadow && h >= 0 && h < 16 && (c->key->stencil_slots >> h & 1);
@@ -2151,6 +2158,26 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
             sp(&c->body, " if (h_ == imgh[%d]) { if (xy_.x < img%d.get_width() && xy_.y < img%d.get_height() && "
                          "l_ < img%d.get_array_size()) img%d.write(v_, xy_, l_); } else", i, i, i, i, i);
         sp(&c->body, " {}\n    }\n");
+    } else if (c->glsl && c->stage == STAGE_COMPUTE && maxwell_glsl_image_stores && OPM(0xeb20000000000000ull, 0xfff8000000000000ull)) {
+        // SUST.B (GLSL, as the Metal one above): EoW's environment-map pass (72a4723000) blends its probe cubes into
+        // each face and level with these. Skipped, the map stayed black and metal (a chest's gold trim) went dull brown
+        // in shadow.
+        int rgba = (int)bits(w, 20, 4), dim = (int)bits(w, 33, 3), hc = (int)bits(w, 39, 8);
+        c->info->uses_images = true;
+        sp(&c->body, "    { uint h_ = %s; uvec2 xy_ = uvec2(%s, %s); uint l_ = %s;\n", R(hc), R(a),
+           dim >= 2 ? R(a + 1) : "0u", dim == 2 ? R(a + 1) : dim >= 4 ? R(a + 2) : "0u");
+        if (dim == 2) sp(&c->body, "      xy_.y = 0u;\n");  // (1D array: x, layer)
+        int k = 0;
+        char comp[4][64];
+        for (int ch = 0; ch < 4; ch++) {
+            if (rgba & (1 << ch)) sprintf(comp[ch], "uintBitsToFloat(%s)", R(d == RZ ? RZ : d + k++));
+            else strcpy(comp[ch], ch == 3 ? "1.0f" : "0.0f");
+        }
+        sp(&c->body, "      vec4 v_ = vec4(%s, %s, %s, %s);\n     ", comp[0], comp[1], comp[2], comp[3]);
+        for (int i = 0; i < IMG_SLOTS; i++)  // (bounds-checked: Maxwell drops stores outside the image)
+            sp(&c->body, " if (h_ == imgh[%d][%d]) { ivec3 s_ = imageSize(img%d); if (xy_.x < uint(s_.x) && xy_.y < uint(s_.y) && "
+                         "l_ < uint(s_.z)) imageStore(img%d, ivec3(xy_, l_), v_); } else", i / 4, i % 4, i, i);
+        sp(&c->body, " {}\n    }\n");
     } else if (!c->glsl && OPM(0xed00000000000000ull, 0xff00000000000000ull) && bits(w, 49, 3) < 2) {
         // ATOM (Metal; Ryujinx InstAtom): R[d] = old value; atomic op of R[b] into global memory at R[a](:R[a+1] with
         // .E) + imm20, 32-bit: add / min / max / inc / dec / and / or / xor / exch (safeadd as add)
@@ -2675,9 +2702,14 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         if (maxwell_glsl_tint_branch) sp(&s, "layout(constant_id = %d) const bool RECOLOUR = false;\n", RECOLOUR_SPEC_ID);
         info->uses_tint = true;
     }
+    if (info->uses_images) {  // (SUST.B, compute) the bound images and their handles
+        sp(&s, "layout(std140, set = %d, binding = %d) uniform ImgH { uvec4 imgh[%d]; };\n", set, IMG_GLSL_HANDLE_BINDING, IMG_SLOTS / 4);
+        for (int i = 0; i < IMG_SLOTS; i++)
+            sp(&s, "layout(set = %d, binding = %d) uniform writeonly image2DArray img%d;\n", set, IMG_GLSL_BINDING + i, i);
+    }
     for (int i = 0; i < info->ntex; i++) {
         ShaderTexture *t = &info->tex[i];
-        sp(&s, "layout(set = %d, binding = %d) uniform %s t%d;\n", set, 32 + i, glsl_sampler_type(t), i);
+        sp(&s, "layout(set = %d, binding = %d) uniform %s t%d;\n", set, 32 + i, tex_is_stencil(c, i) ? "usampler2D" : glsl_sampler_type(t), i);
         // size of level l as (width, height, depth or layers)
         switch (t->type) {
         case TEXTYPE_1D: sp(&s, "ivec3 tsize%d(int l) { return ivec3(textureSize(t%d, l), 1, 1); }\n", i, i); break;

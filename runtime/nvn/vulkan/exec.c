@@ -1472,6 +1472,12 @@ void vk_exec_init(void) {
     maxwell_glsl_fast_minmax = fm && atoi(fm) != 0;
 #endif
     LOG("[vk] fast min / max %s (%s)\n", maxwell_glsl_fast_minmax ? "on" : "off", fm ? "LARECOMP_VK_FAST_MINMAX" : "default here");
+    // Compute image stores (SUST.B; shader.h maxwell_glsl_image_stores): EoW blends its environment map with them. The
+    // images are declared without a format, so the device must be able to write those. LARECOMP_SUST=0: skipped.
+    const char *su = getenv("LARECOMP_SUST");
+    maxwell_glsl_image_stores = g_vk.storage_write_no_format && !(su && !atoi(su));
+    LOG("[vk] compute image stores %s (%s)\n", maxwell_glsl_image_stores ? "on" : "off",
+        su ? "LARECOMP_SUST" : g_vk.storage_write_no_format ? "default" : "no shaderStorageImageWriteWithoutFormat");
     // The command buffers of every slot, from the pool, before the recorder thread exists: from then on the pool and
     // the buffers are the recorder's (begun, recorded, ended and submitted in packet order)
     for (int i = 0; i < SUBS; i++) {
@@ -2229,6 +2235,7 @@ static uint64_t prog_content_key(uint64_t vh, uint64_t fh, const ShaderKey *vkey
     b = (const uint8_t *)vkey;
     for (size_t i = 0; i < sizeof *vkey; i++) { h ^= b[i]; h *= 0x100000001B3ull; }
     for (int i = 0; i < 8; i++) { h ^= fkey->rt_kind[i]; h *= 0x100000001B3ull; }
+    if (fkey->stencil_slots) { h ^= fkey->stencil_slots; h *= 0x100000001B3ull; }  // (only then: other keys as before)
     return h;
 }
 
@@ -2254,10 +2261,10 @@ static bool key_memo_on(void) {
 
 static Prog *get_program_(NvnProgram *np, ShaderKey *vkey, ShaderKey *fkey);
 static Prog *get_program(NvnProgram *np, ShaderKey *vkey, ShaderKey *fkey) {
-    static struct { uint64_t code[2]; ShaderKey vkey; uint8_t rt[8]; uint32_t gen; Prog *prog; } m;
+    static struct { uint64_t code[2]; ShaderKey vkey; uint8_t rt[8]; uint16_t stencil; uint32_t gen; Prog *prog; } m;
     bool on = key_memo_on();
     if (on && m.prog && m.gen == key_gen && (np->stage_mask & 3) == 3 && m.code[0] == np->stages[0].code_addr &&
-        m.code[1] == np->stages[1].code_addr && !memcmp(&m.vkey, vkey, sizeof *vkey) && !memcmp(m.rt, fkey->rt_kind, 8)) {
+        m.code[1] == np->stages[1].code_addr && !memcmp(&m.vkey, vkey, sizeof *vkey) && !memcmp(m.rt, fkey->rt_kind, 8) && m.stencil == fkey->stencil_slots) {
         prof_prog_memo++;
         prog_fp_check(m.prog, np);  // (as a table hit)
         return m.prog;
@@ -2265,7 +2272,7 @@ static Prog *get_program(NvnProgram *np, ShaderKey *vkey, ShaderKey *fkey) {
     Prog *p = get_program_(np, vkey, fkey);
     if (on && p) {
         m.code[0] = np->stages[0].code_addr; m.code[1] = np->stages[1].code_addr;
-        m.vkey = *vkey; memcpy(m.rt, fkey->rt_kind, 8); m.gen = key_gen; m.prog = p;
+        m.vkey = *vkey; memcpy(m.rt, fkey->rt_kind, 8); m.stencil = fkey->stencil_slots; m.gen = key_gen; m.prog = p;
     }
     return p;
 }
@@ -2277,6 +2284,7 @@ static Prog *get_program_(NvnProgram *np, ShaderKey *vkey, ShaderKey *fkey) {
     const uint8_t *vb = (const uint8_t *)vkey;
     for (size_t i = 0; i < sizeof *vkey; i++) { h ^= vb[i]; h *= 0x100000001B3ull; }
     for (int i = 0; i < 8; i++) { h ^= fkey->rt_kind[i]; h *= 0x100000001B3ull; }
+    if (fkey->stencil_slots) { h ^= fkey->stencil_slots; h *= 0x100000001B3ull; }
     if (!h) h = 1;
     uint32_t slot = (uint32_t)(h ^ (h >> 31)) & (PROG_TAB - 1);
     while (prog_tab[slot].key && prog_tab[slot].key != h) slot = (slot + 1) & (PROG_TAB - 1);
@@ -2756,6 +2764,8 @@ static void set_vertex_input(VkCommandBuffer cb, const VtxLayout *l) {
 // ================================================================== feedback snapshots (renderer.m resolve_feedback)
 static NvnTexture *feedback_tex[4];
 static VkImageView feedback_view[4];
+static TexBackend *feedback_snap[4];  // (the copy itself: a stencil read gets its stencil, texture_info)
+static uint16_t g_stencil_slots;      // the current draw's fragment slots read as stencil (draw_, stencil_slots_of)
 static int nfeedback;
 static uint64_t g_cur_fs_hash;
 static NvnTexture *snap_tex[8];
@@ -3055,6 +3065,7 @@ static void resolve_feedback(Prog *pr) {
             static const VkComponentMapping id = {0};
             if (!nosnap && si >= 0 && (snap_ok[si] || self_write) && existing) {
                 feedback_tex[nfeedback] = t;
+                feedback_snap[nfeedback] = &existing->copy;
                 feedback_view[nfeedback++] = vk_image_view(&existing->copy, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, sa);
                 continue;
             }
@@ -3078,6 +3089,7 @@ static void resolve_feedback(Prog *pr) {
                 cb = vk_cmd();
             }
             feedback_tex[nfeedback] = t;
+            feedback_snap[nfeedback] = dst;
             feedback_view[nfeedback++] = vk_image_view(dst, VK_IMAGE_VIEW_TYPE_2D, src->format, 0, 1, 0, 1, id, sa);
             if (si < 0) { static int rr; si = rr++ & 7; snap_tex[si] = t; }
             snap_ok[si] = true;
@@ -3800,6 +3812,28 @@ static VkSpan drv_dedupe(int stage, uint64_t size) {
 }
 
 // Constant buffer k of a stage (renderer.m bind_cbufs), copied into transient memory.
+// EoW's rift: the map's draw (its vertex cb4 rows 0-1) and the mask's (fragment cb4 rows 33-34): see cbuf_info.
+// LARECOMP_RIFT_ROWS_OFF=1: the game's rows as they are.
+// (debug) LARECOMP_LOG_GW=1: the [gw] lines, 100 each from the start; LARECOMP_LOG_GW_FROM=<frame>: up to 600 from that
+// frame on, each with its frame and fragment shader (the frames that went wrong, not the first second)
+uint64_t renderer_exec_frame(void);
+static bool gw_log(int *n) {
+    static int on = -1;
+    static long from = -1;
+    if (on < 0) { on = getenv("LARECOMP_LOG_GW") != NULL; from = getenv("LARECOMP_LOG_GW_FROM") ? atol(getenv("LARECOMP_LOG_GW_FROM")) : -1; }
+    if (!on) return false;
+    if (from < 0) return (*n)++ < 100;
+    static int total;
+    return (long)renderer_exec_frame() >= from && total++ < 600;
+}
+#define GW_AT() (unsigned long long)renderer_exec_frame(), (unsigned long long)g_cur_fs_hash
+#define RIFT_MAP_FS 0xd6c58a42e55a9f9eull
+#define RIFT_MASK_FS 0x44b584f0d922d49dull
+static bool rift_rows_on(void) {
+    static int on = -1;
+    if (on < 0) on = game_other() && !getenv("LARECOMP_RIFT_ROWS_OFF");
+    return on;
+}
 static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32_t gx, uint32_t gy, uint32_t gz) {
     static const uint8_t zeros[0x10000];
     if (k == 0) {
@@ -3836,6 +3870,21 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
         if (size < si->cbuf_size[1]) size = si->cbuf_size[1];
         return ubo_span(guest_copy(ss->code_addr + ss->const_offset, size), size);  // (constant: shared per submission)
     }
+    if (k == 2 && stage == 5) {
+        // c2: the bound texture and image handles, as NVN lays them out (textures from 0x20, images from 0x120, 8 bytes
+        // each: handle_at), as renderer.m. A shader that loads a handle itself reads them here: EoW's environment-map
+        // pass (72a4723000) takes each face's image handle from c2[0x120 + 8 * slot] for its stores (SUST.B). Zeros
+        // matched no bound image and the map stayed black: metal (a chest's gold trim) went dull brown in shadow.
+        uint64_t size = si->cbuf_size[2] ? si->cbuf_size[2] : 256;
+        if (size > sizeof zeros) size = sizeof zeros;
+        uint64_t tbl[0x160 / 8] = {0};
+        for (int s = 0; s < 40; s++) tbl[(0x20 + 8 * s) / 8] = handle_at(5, s);
+        static uint8_t buf[0x10000];
+        uint64_t n = size > sizeof tbl ? size : sizeof tbl;
+        memset(buf, 0, n);
+        memcpy(buf, tbl, sizeof tbl);
+        return ubo_span(vk_transient_copy(buf, n, 256), n);
+    }
     int idx = k - 3;  // cbuf_base
     Range r = (idx >= 0 && idx < 18) ? st.ubuf[stage][idx] : (Range){0, 0};
     uint64_t size = si->cbuf_size[k] ? si->cbuf_size[k] : 256;
@@ -3850,6 +3899,54 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     // at every draw, as before)
     static int scan_once = -1;
     if (scan_once < 0) scan_once = getenv("LARECOMP_VK_NO_SCAN_ONCE") == NULL;
+    {   // EoW's rift (the dark void over a building), as renderer.m: a top-down map of the rift meshes drawn with the map
+        // view's projection (vertex cb4 rows 0-1), and a mask pass reading the map back with rows 33-34 of the scene
+        // view's constants (the same projection halved into texture space). The game rewrites both, rotated to its final
+        // map view, a few ms after submitting the frame; copied at record time, the two could come from either side of
+        // that. So the map and the mask's rows are made from one projection: the map and its lookup agree.
+        // That projection is the game's final one from the frame before (read back from the last mask draw's rows once
+        // the game has written them), not the first one: the final view fits the rift about 3x tighter, so the map's
+        // texels are 3x finer and the rift's edges are clean lines instead of steps (the first view only until a final
+        // one is known, and when the rift's map is not drawn for 4 frames). LARECOMP_RIFT_FIRST_ROWS=1: the first rows.
+        // Both read cb4 from a CPU copy, never the GPU's copy of a dispatch's results: draw_ waits for those first.
+        // The map's depth row (row 2; the mask's row 35) goes with them, as renderer.m (talking next to a rift).
+        static float map_rows[12], final_rows[12];
+        static uint64_t map_frame = ~0ull, final_frame, mask_addr;
+        static int first = -1;
+        if (first < 0) first = getenv("LARECOMP_RIFT_FIRST_ROWS") != NULL;
+        static uint8_t buf[0x10000];
+        extern uint64_t renderer_exec_frame(void);
+        if (rift_rows_on() && stage == 0 && k == 4 && g_cur_fs_hash == RIFT_MAP_FS && r.size >= 32) {
+            uint64_t fr = renderer_exec_frame();
+            if (mask_addr && map_frame != fr) {  // (a new frame: the last mask's rows, final if the game has written them)
+                const float *g = (const float *)(uintptr_t)mask_addr + 33 * 4;
+                bool identity = g[0] == 1 && g[1] == 0 && g[2] == 0 && g[3] == 0 && g[4] == 0 && g[5] == 1 && g[6] == 0 && g[7] == 0;
+                if (!identity) {
+                    for (int i = 0; i < 8; i++) final_rows[i] = (g[i] - ((i & 3) == 3 ? 0.5f : 0.0f)) * 2.0f;
+                    memcpy(final_rows + 8, g + 8, 16);
+                    final_frame = fr;
+                }
+                mask_addr = 0;
+            }
+            bool use_final = !first && final_frame && fr - final_frame <= 4;
+            if (map_frame != fr) memcpy(map_rows, use_final ? final_rows : (const float *)(uintptr_t)r.addr, r.size >= 48 ? 48 : 32);
+            map_frame = fr;
+            { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: rift map cb4 %llx+%llu (%s rows, pending dispatches %d, copies %d)\n", GW_AT(), (unsigned long long)r.addr, (unsigned long long)size, use_final ? "final" : "first", ngwp, ngwc); }
+            memcpy(buf, (const void *)(uintptr_t)r.addr, size);  // (a CPU copy, not a GPU copy)
+            memcpy(buf, map_rows, size >= 48 ? 48 : 32);
+            return ubo_span(vk_transient_copy(buf, size, 256), size);
+        }
+        if (rift_rows_on() && stage == 1 && k == 4 && g_cur_fs_hash == RIFT_MASK_FS && size >= 36 * 16 &&
+            map_frame == renderer_exec_frame()) {
+            mask_addr = r.addr;
+            memcpy(buf, (const void *)(uintptr_t)r.addr, size);
+            float *row = (float *)buf + 33 * 4;
+            { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: rift mask cb4 %llx+%llu rows 33-35 from the map (pending dispatches %d, copies %d)\n", GW_AT(), (unsigned long long)r.addr, (unsigned long long)size, ngwp, ngwc); }
+            for (int i = 0; i < 8; i++) row[i] = map_rows[i] * 0.5f + ((i & 3) == 3 ? 0.5f : 0.0f);
+            memcpy(row + 8, map_rows + 8, 16);
+            return ubo_span(vk_transient_copy(buf, size, 256), size);
+        }
+    }
     if (g_interp_log && stage < 2) {  // (frame interpolation: logged / blended copy; compared over the bytes the shader reads)
         uint64_t used = si->cbuf_used[k] && si->cbuf_used[k] < size ? si->cbuf_used[k] : size;
         const void *src = interp_cbuf(stage, k, idx, (const void *)(uintptr_t)r.addr, size, used);
@@ -3857,11 +3954,8 @@ static VkDescriptorBufferInfo cbuf_info(int stage, ShaderInfo *si, int k, uint32
     }
     VkDescriptorBufferInfo gb;
     if (ngwc && gwc_find(r.addr, size, &gb)) {  // (a storing dispatch's results this submission: the GPU's copy)
-        if (getenv("LARECOMP_LOG_GW")) {
-            static int n;
-            if (n++ < 100) LOG("[gw] stage %d cb%d %llx+%llu: the GPU's copy of a dispatch's results\n", stage, k,
-                               (unsigned long long)r.addr, (unsigned long long)size);
-        }
+        { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: stage %d cb%d %llx+%llu: the GPU's copy of a dispatch's results\n", GW_AT(), stage, k,
+                                             (unsigned long long)r.addr, (unsigned long long)size); }
         return gb;
     }
     if (gc_lazy && si->uses_gmem && scan_once) return ubo_span(guest_copy_ex(r.addr, size, true), size);
@@ -5898,6 +5992,15 @@ static void texture_info(int stage, ShaderInfo *si, int i, VkDescriptorImageInfo
             for (int k = 0; k < nfeedback; k++)
                 if (e->tex == feedback_tex[k] && (st_->type == TEXTYPE_2D || st_->type == TEXTYPE_2D_ARRAY)) {
                     view = feedback_view[k];
+                    // A stencil read of the snapshot gets the copy's stencil, as vk_view gives the texture's own: through
+                    // the depth view the shader's integer reads got the depth's bits. EoW's rift mask reads the depth /
+                    // stencil it is drawn against; its whole area was striped in most runs on an RTX 3080 Ti (renderer.m
+                    // binds a stencil view of its copy too).
+                    static const VkComponentMapping idm = {0};
+                    if (stage == 1 && slot >= 0 && slot < 16 && (g_stencil_slots >> slot & 1) && st_->type == TEXTYPE_2D &&
+                        (feedback_snap[k]->aspect & VK_IMAGE_ASPECT_STENCIL_BIT))
+                        view = vk_image_view(feedback_snap[k], VK_IMAGE_VIEW_TYPE_2D, feedback_snap[k]->format, 0, 1, 0, 1, idm,
+                                             VK_IMAGE_ASPECT_STENCIL_BIT);
                     if (st_->type == TEXTYPE_2D_ARRAY) view = vk_dummy_view(TEXTYPE_2D_ARRAY);  // (2D snapshot as array: rare)
                 }
         } else if (e->dead_format) {
@@ -5924,6 +6027,42 @@ typedef struct SetCache { uint64_t seq; uint32_t view_gen, ds_gen; int n; VkDesc
 
 // dyn / ndyn: the set's dynamic offsets are appended at dyn[*ndyn] (binding order, as vkCmdBindDescriptorSets takes
 // them); NULL for programs without dynamic buffers (compute).
+// (compute SUST.B, as renderer.m) the bound images as 2D-array storage views of their registration's level and layers
+// (EoW binds each cube face as an image), and their handles for the shader's match; a slot with nothing writable gets
+// a dummy and a handle no store matches
+static void cs_images(VkImageView views[IMG_SLOTS], uint32_t hs[IMG_SLOTS]) {
+    static const VkComponentMapping idm = {0};
+    for (int k = 0; k < IMG_SLOTS; k++) {
+        uint64_t h = st.img[5][k];
+        uint32_t tic = h & 0xFFFFF;
+        VkImageView view = VK_NULL_HANDLE;
+        if (h && st.tpool && tic < (uint32_t)st.tpool->count) {
+            NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
+            // (as renderer.m) bound as an image: writable from now on - tex_backend makes it again with storage usage.
+            // EoW's environment-map faces are registered before nvnTexturePoolRegisterImage marks them (image_use 0 here)
+            if (e->tex && !e->tex->image_use && maxwell_glsl_image_stores) e->tex->image_use = true;
+            TexBackend *b = e->tex ? vk_tex(e->tex, true) : NULL;
+            if (b && (b->usage & VK_IMAGE_USAGE_STORAGE_BIT) && b->base_type != VK_IMAGE_VIEW_TYPE_3D &&
+                b->base_type != VK_IMAGE_VIEW_TYPE_1D && b->base_type != VK_IMAGE_VIEW_TYPE_1D_ARRAY) {
+                uint32_t lv = e->has_view && (e->view.setmask & 1) ? e->view.base_level : 0;
+                uint32_t ly0 = e->has_view && (e->view.setmask & 2) ? e->view.min_layer : 0;
+                uint32_t nly = e->has_view && (e->view.setmask & 2) && e->view.num_layers ? e->view.num_layers : b->layers - ly0;
+                if (ly0 >= b->layers) ly0 = 0, nly = b->layers;
+                if (ly0 + nly > b->layers) nly = b->layers - ly0;
+                if (lv < b->levels) view = vk_image_view(b, VK_IMAGE_VIEW_TYPE_2D_ARRAY, b->format, lv, 1, ly0, nly, idm, VK_IMAGE_ASPECT_COLOR_BIT);
+            }
+            if (!view) {
+                static int nlog;
+                if (nlog++ < 8) LOG("[images] slot %d handle %#llx: no writable image (%s, usage %#x, fmt %d, image_use %d)\n", k,
+                                    (unsigned long long)h, !e->tex ? "none" : "not writable / type", b ? b->usage : 0u,
+                                    b ? (int)b->format : 0, e->tex ? e->tex->image_use : -1);
+            }
+        }
+        hs[k] = view ? (uint32_t)h : 0xFFFFFFFFu;
+        views[k] = view ? view : vk_dummy_storage_view();
+    }
+}
+
 static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t set, int stage, ShaderInfo *si, const float *rscale_row0,
                                  const float tint[RECOLOUR_TINT_FLOATS], uint32_t gx, uint32_t gy, uint32_t gz, const VkDescriptorImageInfo *pre_ii,
                                  uint32_t *dyn, uint32_t *ndyn) {
@@ -5939,6 +6078,9 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
     rs[0][0] = rs[0][1] = 1; rs[0][2] = rs[0][3] = 0;
     if (rscale_row0) memcpy(rs[0], rscale_row0, 16);
     rs[65][0] = g_mirror_w; rs[65][1] = g_ao_taps; rs[65][2] = g_settings.ao_quality == AO_OFF; rs[65][3] = 0;  // ([65].z: AO Off)
+    VkImageView img_view[IMG_SLOTS];
+    uint32_t img_h[IMG_SLOTS];
+    if (si->uses_images) cs_images(img_view, img_h);
     for (int i = 0; i < p->nbinds; i++) {
         VkBindingInfo *b = &p->binds[i];
         if (b->set != set) continue;
@@ -5966,6 +6108,10 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
             bi[n] = b->binding != GFAST_BUFFER_INDEX ? gmem_info()
                     : gmir_on() ? (gmir_init(), (VkDescriptorBufferInfo){gmir_buf, 0, GMIR_SIZE}) : gfast_info();
             w[n].pBufferInfo = &bi[n];
+        } else if (b->type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE && si->uses_images && b->binding >= IMG_GLSL_BINDING &&
+                   b->binding < IMG_GLSL_BINDING + IMG_SLOTS) {
+            ii[n] = (VkDescriptorImageInfo){VK_NULL_HANDLE, img_view[b->binding - IMG_GLSL_BINDING], VK_IMAGE_LAYOUT_GENERAL};
+            w[n].pImageInfo = &ii[n];
         } else {
             continue;  // rscale / tint: written below, once the textures (and their scales) are known
         }
@@ -5973,10 +6119,13 @@ static VkDescriptorSet stage_set(Prog *p, VkDescriptorSetLayout layout, uint32_t
     }
     for (int i = 0; i < p->nbinds; i++) {
         VkBindingInfo *b = &p->binds[i];
-        if (b->set != set || !is_ubo(b->type) || (b->binding != 18 && b->binding != 19 && b->binding != GMAP_BUFFER_INDEX)) continue;
+        if (b->set != set || !is_ubo(b->type) || (b->binding != 18 && b->binding != 19 && b->binding != GMAP_BUFFER_INDEX &&
+                                                   !(b->binding == IMG_GLSL_HANDLE_BINDING && si->uses_images))) continue;
         w[n] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = b->binding,
                                       .descriptorCount = 1, .descriptorType = b->type};
-        if (b->binding == GMAP_BUFFER_INDEX) {  // (compute) this dispatch's fast-copy table: gfast_prepare
+        if (b->binding == IMG_GLSL_HANDLE_BINDING) {  // (compute SUST.B) the bound images' handles: cs_images
+            bi[n] = ubo_span(vk_transient_copy(img_h, sizeof img_h, 256), sizeof img_h);
+        } else if (b->binding == GMAP_BUFFER_INDEX) {  // (compute) this dispatch's fast-copy table: gfast_prepare
             uint32_t mt[(GMAP_MAX + 1) * 4];      // (copies: every stage; a dispatch's was made before, gmir_table)
             if (gmir_on() && stage != 5) gmir_table(stage, false, NULL, mt);
             bi[n] = ubo_span(vk_transient_copy(gmir_on() && stage != 5 ? mt : gmap_tab, sizeof gmap_tab, 256), sizeof gmap_tab);
@@ -6500,6 +6649,8 @@ static void gwc_note(VkCommandBuffer cb, uint64_t a, uint64_t n, uint64_t slot_s
     VkBufferCopy c = {so, d.off + (a & 255), m};
     rec_CmdCopyBuffer(cb, sb, d.buf, 1, &c);
     gwc[ngwc].addr = a, gwc[ngwc].size = m, gwc[ngwc].seq = vk_pending_seq(), gwc[ngwc].buf = d.buf, gwc[ngwc++].off = c.dstOffset;
+    { static int nl; if (gw_log(&nl)) LOG("[gw] frame %llu: dispatch cs %llx stored to %llx+%llu: GPU copy %d\n", (unsigned long long)renderer_exec_frame(),
+                                         (unsigned long long)st.program->stages[5].code_addr, (unsigned long long)a, (unsigned long long)m, ngwc); }
 }
 // (gwc, shader global memory copies) Does any slot hold part of [addr, addr + size)? The GPU writes only there: a range
 // outside every slot (past a slot, in GWP_MIN's margin) can't hold a dispatch's results, and needs no wait
@@ -6544,30 +6695,29 @@ static void gwp_note_dispatch(VkCommandBuffer cb) {
 }
 // (gwp) Before a draw or dispatch is recorded: a uniform buffer a stage reads that a pending dispatch may have written
 // waits for the GPU (renderer_flush: the GPU's writes in guest memory), so cbuf_info's copy has the results
-static void gwp_wait(int stage, const ShaderInfo *si) {
+// kmask: the uniform slots to check; no_copy: slots whose CPU copy is used even when a GPU copy exists (the rift rows)
+static void gwp_wait_k(int stage, const ShaderInfo *si, uint32_t kmask, bool no_copy) {
     if ((!ngwp && !gwp_full) || g_interp_replaying) return;  // (a replay: no waits, as the indirect draws)
     for (int k = 3; k < 18; k++) {
-        if (!(si->cbuf_mask & (1u << k))) continue;
+        if (!(si->cbuf_mask & kmask & (1u << k))) continue;
         Range r = st.ubuf[stage][k - 3];
         if (!r.addr) continue;
         uint64_t size = r.size ? r.size : si->cbuf_size[k];
         VkDescriptorBufferInfo b;
-        if (gwc_find(r.addr, size, &b)) continue;  // (bound to the GPU's copy: cbuf_info)
+        if (!no_copy && gwc_find(r.addr, size, &b)) continue;  // (bound to the GPU's copy: cbuf_info)
         if (gwc_on() && gmir_on() && !gmir_overlaps(r.addr, size)) continue;  // (the GPU can't have written it)
         bool hit = gwp_full;
         for (int j = 0; j < ngwp && !hit; j++) hit = r.addr < gwp[j].addr + gwp[j].size && gwp[j].addr < r.addr + size;
         if (!hit) continue;
-        if (getenv("LARECOMP_LOG_GW")) {
-            static int n;
-            if (n++ < 100) LOG("[gw] stage %d cb%d %llx+%llu: written by a dispatch not run yet - waiting\n", stage, k,
-                               (unsigned long long)r.addr, (unsigned long long)size);
-        }
+        { static int n; if (gw_log(&n)) LOG("[gw] frame %llu fs %016llx: stage %d cb%d %llx+%llu: written by a dispatch not run yet - waiting\n", GW_AT(), stage, k,
+                                             (unsigned long long)r.addr, (unsigned long long)size); }
         wait_why = "uniforms a dispatch writes";
         renderer_flush();
         gw_inval_done(vk_completed_seq());  // (non-coherent heap: the dispatches' writes, seen by the CPU)
         return;
     }
 }
+static void gwp_wait(int stage, const ShaderInfo *si) { gwp_wait_k(stage, si, ~0u, false); }
 
 static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     snap_reason = "compute"; snapshots_invalidate(NULL);
@@ -6629,6 +6779,7 @@ static void dispatch_compute(uint32_t gx, uint32_t gy, uint32_t gz) {
     if (gc_shift && cp->si->uses_gmem) gmem_chunk_bind(cb, VK_PIPELINE_BIND_POINT_COMPUTE, cp->p.layout, GMEM_CHUNK_SET(STAGE_COMPUTE), 1u << STAGE_COMPUTE);
     if (fold) rec_CmdDispatch(cb, (gx * gy * gz + CS_FOLD_LOCAL - 1) / CS_FOLD_LOCAL, 1, 1);
     else rec_CmdDispatch(cb, gx, gy, gz);
+    if (cp->si->uses_images) vk_full_barrier(cb);  // (its image stores, before the draws that sample them)
     if (cp->si->uses_gmem_map && cp->si->uses_gmem_store) {
         if (gmir_on()) gmir_after_dispatch(cb);  // (its slots: readbacks; what follows reads the slots)
         else gfast_finish(cb);
@@ -7075,6 +7226,26 @@ static void draw(CmdRec *r, bool indexed) {
     PROF_ADD(prof_draw);
 }
 static uint64_t prof_tp_;
+// Fragment texture slots (0-15) bound to a depth / stencil texture in stencil mode (the texture's own mode, or its
+// view's): the shader reads the stencil's integers (ShaderKey.stencil_slots) from a stencil view (textures.c vk_view).
+// EoW's rifts test bits the scene marks in the stencil; read as depth, the rift's dark void was missing. As renderer.m.
+static uint16_t stencil_slots_of(const ShaderInfo *fi) {
+    uint16_t m = 0;
+    if (!fi || !game_other()) return 0;
+    for (int i = 0; i < fi->ntex; i++) {
+        const ShaderTexture *t = &fi->tex[i];
+        int slot = ((int)t->handle_offset - 0x20) / 8;
+        if (slot < 0 || slot >= 16 || t->type != TEXTYPE_2D || t->shadow || t->bindless) continue;
+        uint64_t h = st.tex[1][slot];
+        uint32_t tic = h & 0xFFFFF;
+        if (!h || !st.tpool || tic >= (uint32_t)st.tpool->count) continue;
+        const NvnTexEntry *e = &((NvnTexEntry *)st.tpool->entries)[tic];
+        if (!e->tex) continue;
+        uint32_t mode = e->has_view && (e->view.setmask & 16) ? e->view.ds_mode : e->tex->ds_mode;
+        if (mode == 1) m |= (uint16_t)(1u << slot);
+    }
+    return m;
+}
 static void draw_(CmdRec *r, bool indexed) {
     if (prof) prof_tp_ = SDL_GetTicksNS();
     if (!st.program) { SKIP(SK_NO_PROGRAM); return; }
@@ -7086,6 +7257,11 @@ static void draw_(CmdRec *r, bool indexed) {
     for (int i = 0; i < st.rt.ncolor; i++) if (st.rt.color[i]) fkey.rt_kind[i] = (uint8_t)rt_kind(st.rt.color[i]->format);
     Prog *pr = get_program(st.program, &vkey, &fkey);
     if (!pr || atomic_load(&pr->state) != 1) { SKIP(!pr ? SK_NO_STAGES : atomic_load(&pr->state) == 2 ? SK_PROG_FAILED : SK_PROG_BUILDING); return; }
+    g_stencil_slots = fkey.stencil_slots = stencil_slots_of(pr->fi);
+    if (fkey.stencil_slots) {  // (a texture read as its stencil: another program)
+        pr = get_program(st.program, &vkey, &fkey);
+        if (!pr || atomic_load(&pr->state) != 1) { SKIP(!pr ? SK_NO_STAGES : atomic_load(&pr->state) == 2 ? SK_PROG_FAILED : SK_PROG_BUILDING); return; }
+    }
     gwp_wait(0, pr->vi), gwp_wait(1, pr->fi);  // (before anything of this draw is recorded: the wait submits)
     g_mirror_w = 0;
     extern float renderer_ao_blur_scale(NvnTexture *t);
@@ -7164,6 +7340,11 @@ static void draw_(CmdRec *r, bool indexed) {
         for (int i = 0; i < nskip; i++) if (last_hash == skip[i]) { SKIP(SK_DEBUG_SKIP); return; }
         if (g_debug_frame && getenv("LARECOMP_LOG_FSHASH")) LOG("[fshash] fs=%llx hash %016llx\n", (unsigned long long)fs, (unsigned long long)last_hash);
         g_cur_fs_hash = last_hash;
+        // (the rift's map and mask make their cb4 from a CPU copy, cbuf_info: a dispatch's results in it, GPU-copied
+        // for other draws, are waited for here - with the GPU's copy left aside the mask read stale rows and the
+        // opening dungeon went black, frames ~1650-1860 on an RTX 3080 Ti)
+        if (rift_rows_on() && (last_hash == RIFT_MAP_FS || last_hash == RIFT_MASK_FS))
+            gwp_wait_k(last_hash == RIFT_MAP_FS ? 0 : 1, last_hash == RIFT_MAP_FS ? pr->vi : pr->fi, 1u << 4, true);
         extern void widescreen_backdrop_seen(uint64_t hash);
         if (last_hash) widescreen_backdrop_seen(last_hash);
         extern void widescreen_scene_ubo(const float *u, uint64_t size);  // (the camera's view-projection)
@@ -7379,11 +7560,11 @@ static void draw_(CmdRec *r, bool indexed) {
 #define FTEX(i) (hook_pass ? ftex[i] : shader_texture_object(1, &pr->fi->tex[i]))
 #if PLAT_TOUCH
     if (fknown) {  // (the title and the file select, seen from their draws: what a tap does there, touch_controls.mm)
-        extern void texpatch_note_draw(int id);
+        extern void texpatch_note_draw_at(int id, const float *ui, uint64_t size);
         for (int i = 0; i < pr->fi->ntex; i++) {
             NvnTexture *t = FTEX(i);
             const TexBackend *b = t ? (const TexBackend *)t->backend : NULL;
-            if (b && b->tp > 0) texpatch_note_draw(b->tp - 1);
+            if (b && b->tp > 0) texpatch_note_draw_at(b->tp - 1, (const float *)(uintptr_t)st.ubuf[0][0].addr, st.ubuf[0][0].size);
         }
     }
 #endif

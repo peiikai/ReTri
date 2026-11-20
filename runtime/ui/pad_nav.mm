@@ -8,35 +8,49 @@
 
 static std::atomic<SDL_JoystickID> g_last_pad{0};
 
-// Does the bottom button confirm for a pad of layout family `fam`? Button layout "Switch" (the default): never - the
-// right one confirms, as in the game. "Xbox / PlayStation": always (#172), as the game's A then is - a Nintendo-style
-// pad too (a Retroid Pocket's built-in one: the player picks the layout they want, not the one printed)
-static bool south_confirms(int fam) { (void)fam; return g_settings.face_by_label; }
+// Menu action -> the ImGui key the menus read (BIND_UI_* order)
+static const ImGuiKey k_act_key[BIND_UI_COUNT] = {ImGuiKey_GamepadFaceDown, ImGuiKey_GamepadFaceRight,
+                                                   ImGuiKey_GamepadFaceUp, ImGuiKey_GamepadStart};
 
-ImGuiKey ui_pad_key(SDL_JoystickID which, Uint8 button, bool down) {
-    static ImGuiKey held[SDL_GAMEPAD_BUTTON_COUNT];  // (the layout can change while a button is held: its release)
-    if (button >= SDL_GAMEPAD_BUTTON_COUNT) return ImGuiKey_None;
+ImGuiKey ui_pad_key(SDL_JoystickID which, int button, bool down) {
+    static ImGuiKey held[PADB_HOST_COUNT];  // (the layout can change while a button is held: its release)
+    if (button < 0 || button >= PADB_HOST_COUNT) return ImGuiKey_None;
     if (!down) { ImGuiKey k = held[button]; held[button] = ImGuiKey_None; if (k != ImGuiKey_None) return k; }
     if (down) g_last_pad = which;
-    bool sc = south_confirms(input_menu_family(which));
-    ImGuiKey k;
-    switch (button) {
-    case SDL_GAMEPAD_BUTTON_SOUTH: k = sc ? ImGuiKey_GamepadFaceDown : ImGuiKey_GamepadFaceRight; break;
-    case SDL_GAMEPAD_BUTTON_EAST: k = sc ? ImGuiKey_GamepadFaceRight : ImGuiKey_GamepadFaceDown; break;
-    case SDL_GAMEPAD_BUTTON_NORTH: k = ImGuiKey_GamepadFaceUp; break;
-    case SDL_GAMEPAD_BUTTON_WEST: k = ImGuiKey_GamepadFaceLeft; break;
+    ImGuiKey k = ImGuiKey_None;
+    switch (button) {  // tabs and moving: always L / R and the D-pad (never rebound: bind_ui_fixed)
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: k = ImGuiKey_GamepadL1; break;
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: k = ImGuiKey_GamepadR1; break;
     case SDL_GAMEPAD_BUTTON_DPAD_UP: k = ImGuiKey_GamepadDpadUp; break;
     case SDL_GAMEPAD_BUTTON_DPAD_DOWN: k = ImGuiKey_GamepadDpadDown; break;
     case SDL_GAMEPAD_BUTTON_DPAD_LEFT: k = ImGuiKey_GamepadDpadLeft; break;
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: k = ImGuiKey_GamepadDpadRight; break;
-    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: k = ImGuiKey_GamepadL1; break;
-    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: k = ImGuiKey_GamepadR1; break;
-    case SDL_GAMEPAD_BUTTON_START: k = ImGuiKey_GamepadStart; break;
-    case SDL_GAMEPAD_BUTTON_BACK: k = ImGuiKey_GamepadBack; break;
-    default: k = ImGuiKey_None; break;
+    default: break;
+    }
+    if (k != ImGuiKey_None) {  // (fixed)
+    } else if (g_bind_ui_custom) {  // ReTri Menu: the player's buttons only (Controls > Configure inputs)
+        int a = bind_ui_action(button, 0);
+        if (a >= 0) k = k_act_key[a - BIND_UI_CONFIRM];
+    } else {
+        int a = bind_ui_action(button, input_menu_family(which));
+        if (a >= 0) k = k_act_key[a - BIND_UI_CONFIRM];
+        else if (button == SDL_GAMEPAD_BUTTON_WEST) k = ImGuiKey_GamepadFaceLeft;
+        else if (button == SDL_GAMEPAD_BUTTON_BACK) k = ImGuiKey_GamepadBack;
     }
     if (down) held[button] = k;
     return k;
+}
+
+bool ui_pad_trigger(SDL_JoystickID which, int axis, int value, ImGuiKey *key, bool *down) {
+    static bool on[2];
+    if (axis != SDL_GAMEPAD_AXIS_LEFT_TRIGGER && axis != SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) return false;
+    int t = axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
+    bool now = on[t] ? value > 8000 : value > 16000;  // (as the game's: runtime/hle/input.c)
+    if (now == on[t]) return false;
+    on[t] = now;
+    *key = ui_pad_key(which, t ? PADB_RTRIGGER : PADB_LTRIGGER, now);
+    *down = now;
+    return *key != ImGuiKey_None;
 }
 
 void ui_pad_release_all(ImGuiIO &io) {
@@ -46,12 +60,10 @@ void ui_pad_release_all(ImGuiIO &io) {
 }
 
 int ui_pad_family(void) { return input_menu_family(g_last_pad.load()) % 3; }
-const char *ui_pad_confirm_label(void) {
+const char *ui_pad_action_label(int act) {
     int f = ui_pad_family();
-    return L(bind_pad_label(south_confirms(f) ? SDL_GAMEPAD_BUTTON_SOUTH : SDL_GAMEPAD_BUTTON_EAST, f));
+    return L(bind_pad_label(bind_ui_host(act, input_menu_family(g_last_pad.load())), f));
 }
-const char *ui_pad_back_label(void) {
-    int f = ui_pad_family();
-    return L(bind_pad_label(south_confirms(f) ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH, f));
-}
-const char *ui_pad_start_label(void) { return L(bind_pad_label(SDL_GAMEPAD_BUTTON_START, ui_pad_family())); }
+const char *ui_pad_confirm_label(void) { return ui_pad_action_label(BIND_UI_CONFIRM); }
+const char *ui_pad_back_label(void) { return ui_pad_action_label(BIND_UI_BACK); }
+const char *ui_pad_start_label(void) { return ui_pad_action_label(BIND_UI_OK); }

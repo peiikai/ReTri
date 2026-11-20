@@ -59,6 +59,9 @@ static void load_nso(Module *m, const char *path, uint64_t base) {
     for (int i = 0; i < 3; i++) memcpy(seg[i], raw + 0x10 + i * 0x10, 12);
     uint32_t bss = *(uint32_t *)(raw + 0x3C);
     uint64_t size = (seg[2][1] + seg[2][2] + bss + 0x3FFF) & ~0x3FFFull;
+    // (iOS packs the regions right after the modules - rt.h: a bigger module would overwrite HLE memory silently)
+    if (base < HLE_BASE && base + size > HLE_BASE) FATAL("%s (%llx bytes at %llx) runs into the HLE region\n", path,
+                                                        (unsigned long long)size, (unsigned long long)base);
     plat_commit(base, size);  // inside the guest window: zero-filled, read/write
     for (int i = 0; i < 3; i++) {
         uint32_t csize = *(uint32_t *)(raw + 0x60 + i * 4);

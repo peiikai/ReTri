@@ -1,7 +1,8 @@
 // Control remapping (runtime/hle/bindings.c): which controller button / key drives each Switch input. Edited from
 // the in-game menu's Controls tab and the start screen (runtime/ui/controls_ui.mm), saved in larecomp.ini.
-// Menus (the overlay, the start screen) never use these, so no binding can lock the player out: they follow the
-// game's layout, or the controller's own (Button layout; runtime/ui/pad_nav.h). The controller's shortcuts that open
+// Menus (the overlay, the start screen) never use these: they follow the controller conventions (Button layout;
+// runtime/ui/pad_nav.h), or the player's own ReTri Menu buttons (BIND_UI_*), which can't lock the player out: every
+// menu action always has one button of its own, and none is a button that opens the menu. The controller's shortcuts that open
 // the overlay are bindings too (BIND_MENU_*, #591: Home also opens Steam's and other launchers' overlays); F1 and Esc
 // always open it, and the last controller shortcut can't be cleared.
 #pragma once
@@ -24,8 +25,13 @@ enum {
     BIND_RS_UP, BIND_RS_DOWN, BIND_RS_LEFT, BIND_RS_RIGHT,
     BIND_KEY_COUNT,                                      // keyboard: buttons + both sticks
     BIND_MENU_1 = BIND_KEY_COUNT, BIND_MENU_2,           // controller only: the shortcuts that open the menu
-    BIND_SLOT_COUNT
+    BIND_SLOT_COUNT,
+    // controller only: ReTri Menu, the buttons our menus use (runtime/ui/pad_nav.mm)
+    // (tabs: L / R, moving: the D-pad - fixed, never on these: bind_ui_fixed)
+    BIND_UI_CONFIRM = BIND_SLOT_COUNT, BIND_UI_BACK, BIND_UI_OPTION, BIND_UI_OK,
+    BIND_UI_END
 };
+#define BIND_UI_COUNT (BIND_UI_END - BIND_UI_CONFIRM)
 #define BIND_MENU_COUNT 2
 enum { BIND_DEV_PAD, BIND_DEV_KEY };
 // Controller binding values: an SDL_GamepadButton, or the analog triggers as buttons
@@ -33,7 +39,7 @@ enum { PADB_LTRIGGER = 26 /* SDL_GAMEPAD_BUTTON_COUNT */, PADB_RTRIGGER, PADB_HO
 
 extern int16_t g_bind_pad[BIND_PAD_COUNT];  // PADB value per Switch button, by position (as on a Nintendo pad)
 // The button that drives Switch input `slot` now: g_bind_pad[slot], with the bottom and right buttons swapped (south <->
-// east: A on the bottom) when Button layout is "Xbox / PlayStation"
+// east: A on the bottom) when Confirm button is "Bottom", on every pad
 int bind_pad_host(int slot);
 extern int16_t g_bind_key[BIND_KEY_COUNT];  // SDL_Scancode per input (0 = none)
 // The menu's controller shortcuts: one SDL_GamepadButton, or two held together ([1] -1: one; [0] -1: none). Defaults:
@@ -46,12 +52,28 @@ bool bind_menu_clear(int i);
 // `host` alone opens the menu (the Controls tab marks a game button on it in red)
 bool bind_menu_single(int host);
 
-const char *bind_input_name(int slot);         // "A", "D-pad Up", "Left stick Up"
+// ReTri Menu. Off (the default): the controller conventions - Confirm / Back on the right / bottom buttons by Confirm
+// button (fam: unused), the top button Option, Start OK. Tabs (L / R) and moving (the D-pad) are fixed: no action
+// can take them (bind_ui_fixed).
+// The first change copies those into g_bind_ui (custom: the same physical buttons on every controller, Button layout
+// no longer applies to our menus); bind_ui_reset goes back to the conventions.
+extern bool g_bind_ui_custom;
+extern int8_t g_bind_ui[BIND_UI_COUNT];         // PADB value per action (BIND_UI_* - BIND_UI_CONFIRM)
+int bind_ui_convention(int act, int fam);       // act: BIND_UI_*
+bool bind_ui_fixed(int host);                   // L / R or the D-pad: our menus' tabs and moving, never rebound
+int bind_ui_host(int act, int fam);             // the button driving menu action `act` now
+int bind_ui_action(int host, int fam);          // the action on controller button `host` (custom only; -1 none)
+bool bind_ui_uses(int host);                    // custom ReTri Menu has an action on `host`
+void bind_ui_reset(void);
+// Start a ReTri Menu capture; fam: the shown controller's layout family (the conventions copied on the first change)
+void bind_ui_capture_begin(int act, int fam);
+
+const char *bind_input_name(int slot);         // "A", "D-pad Up", "Left stick Up", "Confirm" (ReTri Menu)
 const char *bind_pad_label(int host, int fam); // controller button in the pad family's own words (fam: input_pad_family)
 const char *bind_key_label(int scancode);
 int bind_label_family(void);                   // the connected controller's family (also on the start screen)
 int input_family_of_type(int sdl_gamepad_type); // runtime/hle/input.c: 0 Nintendo, 1 Xbox (or labelled like one), 2 PS
-int input_menu_family(uint32_t sdl_joystick_id); // runtime/hle/input.c: our menus' layout for that pad (0: any)
+int input_menu_family(uint32_t sdl_joystick_id); // runtime/hle/input.c: our menus' button words for that pad (0: any)
 void bind_reset(int dev);
 bool bind_is_default(int dev);
 bool bind_is_default_slot(int dev, int slot);
@@ -67,11 +89,12 @@ bool bind_capture_active(int *dev, int *slot, int *ms_left);
 // Main thread, before anything else sees the event: true = consumed by a capture
 bool bind_capture_event(const SDL_Event *e);
 // Last change for the UI: 0 none, 1 set, 2 swapped (with *other), 3 cancelled, 4 timed out, 5 reset, 6 refused (a menu
-// shortcut on one game button), 7 kept (the last menu shortcut), 8 cleared; *serial bumps
+// shortcut on one game button), 7 kept (the last menu shortcut), 8 cleared, 9 refused (a menu shortcut on one ReTri Menu
+// button), 10 refused (a ReTri Menu action on a button that opens the menu); *serial bumps
 int bind_last_result(int *dev, int *slot, int *other, int *serial);
 
 // larecomp.ini: bind_pad_<input> / bind_key_<input> (only the ones that differ from the defaults are written);
-// bind_pad_menu1 / bind_pad_menu2 = guide, back+start or none
+// bind_pad_menu1 / bind_pad_menu2 = guide, back+start or none; bind_ui_<action> = south... (all of them when custom)
 bool bind_settings_load(const char *key, const char *val);
 void bind_settings_save(FILE *f);
 

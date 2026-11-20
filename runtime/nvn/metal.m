@@ -182,6 +182,7 @@ typedef struct {
     bool scalable;       // screen-shaped render target: allocated at the output resolution
     bool shadow;         // (scalable) the game's shadow map: at its own scale (tex_shadow)
     bool ao;             // (scalable) the game's ambient occlusion: at its own scale (tex_ao)
+    bool two_d;          // (scalable) another game's 1080-line 2D: the frame's scale times output_scale_2d (tex_2d)
     float ax, ay;        // allocation scale (the Metal texture's size); sx, sy below: the scale its contents were drawn at
     bool presented;      // has been shown by backend_present (a swapchain image)
     uint64_t touched_frame;  // last frame it was written (cleared at the first write of a frame when reshaped)
@@ -282,10 +283,14 @@ static bool tex_scalable(const NvnTexture *t) {
     if (game_other() && t->width < 128) return false;
     return true;
 }
+// EoW's 2D: the 1920x1080 targets its frame is composed and presented in (output_scale_2d).
+static bool tex_2d(const NvnTexture *t) { return game_other() && t->width == 1920 && t->height == 1080; }
 // The scale a scalable texture is allocated and drawn at: the ambient occlusion's own, else the frame's
-// (the AO: uniform, by the height's)
-static float tex_alloc_x(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : g_al_x; }
-static float tex_alloc_y(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : g_al_y; }
+// (the AO: uniform, by the height's; EoW's 2D: a part of the frame's)
+static float tex_alloc_x(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : b->two_d ? g_al_x * output_scale_2d() : g_al_x; }
+static float tex_alloc_y(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : b->two_d ? g_al_y * output_scale_2d() : g_al_y; }
+static float tex_draw_x(const TexBackend *b) { return b->two_d ? g_rs_x * output_scale_2d() : g_rs_x; }
+static float tex_draw_y(const TexBackend *b) { return b->two_d ? g_rs_y * output_scale_2d() : g_rs_y; }
 
 // First write this frame to a presented image while the output is reshaped: returns true once per frame.
 bool renderer_texture_first_write(NvnTexture *t) {
@@ -393,6 +398,7 @@ static TexBackend *tex_backend(NvnTexture *t) {
     b->scalable = tex_scalable(t);
     b->shadow = tex_shadow(t);
     b->ao = b->scalable && !b->shadow && tex_ao(t);
+    b->two_d = b->scalable && !b->shadow && !b->ao && tex_2d(t);
     if (t->width == 1920 && t->height == 1080 && getenv("LARECOMP_LOG_SCALABLE"))
         LOG("[scale] 1920x1080 tex %p f%#x flags %#x target %u samples %u levels %u -> scalable %d (%s)\n", (void *)t, t->format,
             t->flags, t->target, t->samples, t->levels, b->scalable, t->label);
@@ -463,8 +469,8 @@ static void create_backend_texture(NvnTexture *t, TexBackend *b) {
     d.pixelFormat = mf.pf;
     b->ax = b->scalable ? tex_alloc_x(b) : 1;
     b->ay = b->scalable ? tex_alloc_y(b) : 1;
-    b->sx = b->scalable ? (b->ao || b->shadow ? b->ax : g_rs_x) : 1;
-    b->sy = b->scalable ? (b->ao || b->shadow ? b->ay : g_rs_y) : 1;
+    b->sx = b->scalable ? (b->ao || b->shadow ? b->ax : tex_draw_x(b)) : 1;
+    b->sy = b->scalable ? (b->ao || b->shadow ? b->ay : tex_draw_y(b)) : 1;
     uint32_t tw = t->width ? t->width : 1, th = t->height ? t->height : 1;
     if (b->scalable) {
         tw = (uint32_t)lroundf(tw * b->ax); th = (uint32_t)lroundf(th * b->ay);
@@ -710,7 +716,7 @@ id<MTLTexture> renderer_texture(NvnTexture *t, id<MTLBlitCommandEncoder> blit, b
 void renderer_mark_gpu_owned(NvnTexture *t) {
     TexBackend *b = tex_backend(t);
     b->gpu_owned = true;
-    if (b->scalable && !b->ao && !b->shadow) { b->sx = g_rs_x; b->sy = g_rs_y; }
+    if (b->scalable && !b->ao && !b->shadow) { b->sx = tex_draw_x(b); b->sy = tex_draw_y(b); }
 }
 // The tap scale of the ambient occlusion's own blurs (translate.c ao_grid_fix): the AO's scale for a draw into one of
 // its 480x270 targets (the two blurs after the AO pass), 0 for any other target.
@@ -1000,6 +1006,12 @@ static id<MTLTexture> metalfx_upscale(id<MTLCommandBuffer> cb, id<MTLTexture> in
         LOG("[metalfx] spatial scaler %s\n", supported ? "available" : "not supported on this GPU");
     }
     if (!supported) return nil;
+    // (a crop of zero or a window between sizes gives no real output size: plain sampling - MetalFX aborts on a zero size)
+    if (!isfinite(ow_d) || !isfinite(oh_d) || ow_d < 1 || oh_d < 1 || ow_d > 16384 || oh_d > 16384 || !in.width || !in.height) {
+        static int warned;
+        if (warned++ < 5) LOG("[metalfx] skipped: output %.1fx%.1f from %lux%lu\n", ow_d, oh_d, (unsigned long)in.width, (unsigned long)in.height);
+        return nil;
+    }
     NSUInteger ow = (NSUInteger)lround(ow_d), oh = (NSUInteger)lround(oh_d);
     if (ow <= in.width * fx + 1 && oh <= in.height * fy + 1) return nil;  // not an upscale: plain sampling is right
     if (ow > 16384) ow = 16384;
