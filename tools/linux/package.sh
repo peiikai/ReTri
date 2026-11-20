@@ -2,8 +2,8 @@
 # tools/linux/package.sh <x86_64|aarch64> (inside a build container, tools/linux/appimage.sh: the AppImage's own arch
 # when the host has it, else amd64 cross-compiling): the game built
 # against build/linux/<arch>/deps put together as an AppDir and packed by appimagetool:
-# build/dist/ReTri-<version>-linux-<arch>.AppImage
-# (named like the macOS / Windows releases; GitHub shows it as LAS.Recomp-<version>-linux-<arch>.AppImage).
+# build/dist/ReTri-<version>-linux-<x64|arm64>.AppImage
+# (x64 / arm64 in every release name: the launchers that install it pick files by those words).
 # Shipped next to the executable (usr/bin, where runtime/paths.c rt_resource looks): what the start screen
 # builds the game code with on the player's machine (runtime/gamebuild.c: zig/ from tools/fetch_zig.sh,
 # gamelib-src/), the window icon, the start screen font. No game code: that's built from the player's own files. usr/lib: the libraries from deps/ only - glibc, libstdc++, the Vulkan loader and the
@@ -16,7 +16,8 @@ P=$L/deps
 B=$L/game
 APPDIR=$L/AppDir
 VERSION=$(sed -n 's/^#define LARECOMP_VERSION "\(.*\)"/\1/p' runtime/ui/launcher.mm)
-OUT="build/dist/ReTri-$VERSION-linux-$ARCH.AppImage"
+case $ARCH in x86_64) NAMEARCH=x64 ;; aarch64) NAMEARCH=arm64 ;; esac
+OUT="build/dist/ReTri-$VERSION-linux-$NAMEARCH.AppImage"
 JOBS=$(nproc)
 
 tools/linux/build_deps.sh "$ARCH"

@@ -92,6 +92,11 @@ float rt_aspect_site(int site) {
     return base * g_wide;  // the output's aspect (wider or narrower than 16:9)
 }
 
+#define NSPOT 32
+static struct { float x, y; uint64_t frame; } g_spot[NSPOT];  // spots placed by rt_screen_spot (moved: k != 1)
+static volatile unsigned g_nspot;
+static float g_cam_shape = 1.0f;  // (another game) the shape the camera's projection was last built with (site 2)
+
 // Another game (runtime/gen/patches.cpp eow_aspect): the places its code builds 16:9 get the output's aspect instead.
 // Only site 2 is the camera's projection (EoW, 2026-11-05: each site alone at 32:9 in the town; site 3, also every
 // frame, stretches the picture, the rest run once at a level load). LARECOMP_ASPECT_OTHER=mask picks other sites;
@@ -103,7 +108,7 @@ uint32_t rt_aspect_other(int site) {
     float f = 16.0f / 9.0f;
     if (mask & (1LL << site)) f *= g_wide;
     // (the camera ran this frame: frames without it - title, file select, loading - are boxed, as LA's site 0)
-    if (site == 2) { extern uint64_t renderer_present_count(void); g_site0_frame = renderer_present_count(); }
+    if (site == 2) { extern uint64_t renderer_present_count(void); g_site0_frame = renderer_present_count(); g_cam_shape = f / (16.0f / 9.0f); }
     static uint64_t n[32], last;
     if (ENV("LARECOMP_LOG_ASPECT")) {
         n[site & 31]++;
@@ -120,6 +125,61 @@ uint32_t rt_aspect_other(int site) {
     uint32_t b;
     memcpy(&b, &f, 4);
     return b;
+}
+
+// Another game (runtime/gen/patches.cpp eow_spot): layouts the game places at a spot on screen - the lock-on reticle
+// (L_LockOn_00) and the other sites there - get their root pane's translation (layout units from the centre, y up)
+// here. The game works the spot out with the camera's projection, widened to the window's shape, and turns it into
+// the 16:9 layout's units, which are drawn in the centred 16:9 box: at 32:9 the reticle sat halfway between its
+// target and the centre (user report 2026-11-16). Scaled back out to the window's shape: x by the shape on a wide
+// window, y by 1 / shape on a tall one (the camera keeps the 16:9 view's width there and shows more above and below).
+// Only while the camera runs widened (site 2 this frame or the last two: interiors keep a 16:9 camera).
+// LARECOMP_LOG_SPOTS: each site's pane name and spot, once a second.
+void rt_screen_spot(int site, uint64_t pane, float *xy) {
+    extern uint64_t renderer_present_count(void);
+    uint64_t now = renderer_present_count();
+    int64_t ago = (int64_t)(now - g_site0_frame);
+    float k = ago >= -2 && ago <= 2 ? g_cam_shape : 1.0f;
+    if (ENV("LARECOMP_LOG_SPOTS")) {
+        static uint64_t last[8];
+        if (site >= 0 && site < 8 && now >= last[site] + 60) {
+            last[site] = now;
+            LOG("[spot] site %d %s (%.1f, %.1f) shape %.3f\n", site, (const char *)(uintptr_t)(pane + 0xB0), xy[0], xy[1], k);
+        }
+    }
+    if (k > 1.0f) xy[0] *= k;
+    else if (k > 0.1f && k < 1.0f) xy[1] /= k;
+    if (k != 1.0f) {  // (for widescreen_spot_ubo: the render thread draws these past the 16:9 box)
+        unsigned i = g_nspot++ % NSPOT;
+        g_spot[i].x = xy[0], g_spot[i].y = xy[1], g_spot[i].frame = now;
+    }
+}
+
+// Render thread: layout draws go into the centred 16:9 box (renderer.m / vulkan/exec.c), which cuts off a layout
+// placed past its sides above. A draw whose pane sits near a spot placed in the last few frames gets the window-wide
+// viewport and a copy of its uniforms with the projection divided by the stretch (k, ky), as the phones' HUD corners
+// do (runtime/hle/hud_corners.c): the same pixels inside the box, and no longer cut off at its edge. NULL otherwise.
+// (vertex uniforms: projection in floats 0-15, the pane's model-view rows in 16-27; 560 bytes: panes, 128: text)
+const void *widescreen_spot_ubo(const float *u, uint64_t size, float k, float ky) {
+    if (!u || (size != 560 && size != 128) || (k <= 1.001f && ky <= 1.001f) || !g_nspot) return NULL;
+    if (u[15] != 1 || u[12] != 0 || u[13] != 0 || !(u[0] > 0) || u[5] == 0) return NULL;  // (orthographic projection)
+    extern uint64_t renderer_exec_frame(void);
+    uint64_t fr = renderer_exec_frame();
+    float px = u[0] * u[19] + u[1] * u[23] + u[2] * u[27] + u[3], py = u[4] * u[19] + u[5] * u[23] + u[6] * u[27] + u[7];
+    bool near = false;
+    for (unsigned i = 0; i < NSPOT && !near; i++) {
+        int64_t d = (int64_t)(fr - g_spot[i].frame);
+        if (d < -3 || d > 3) continue;
+        float sx = u[0] * g_spot[i].x + u[1] * g_spot[i].y + u[3], sy = u[4] * g_spot[i].x + u[5] * g_spot[i].y + u[7];
+        near = fabsf(px - sx) < 0.35f && fabsf(py - sy) < 0.5f;  // (a reticle, a prompt with its text box)
+    }
+    if (!near) return NULL;
+    static float ring[1024][140];
+    static unsigned at;
+    float *c = ring[at++ & 1023];
+    memcpy(c, u, size);
+    for (int i = 0; i < 4; i++) c[i] /= k, c[4 + i] /= ky;
+    return c;
 }
 
 // Culling aspect: the game's own value (camera field), widened like the camera.
@@ -340,7 +400,10 @@ static int room_crop(uint64_t frame, double shape, float *u0, float *u1) {
 // Presented part of the image (crop: uv origin and size) and its place in the window: interiors and dungeons show
 // their 16:9 centre (taller outputs: the 16:9 band), rooms wider than one screen what 16:9 shows of them (room_crop).
 void widescreen_present_crop(uint64_t frame, double shape, float crop[4], double *vx, double *vy, double *vw, double *vh) {
-    static uint64_t last;  // (last wide boxed frame: room changes slide the edges instead of jumping)
+    // (last wide boxed frame: room changes slide the edges instead of jumping; none yet at start: the first one
+    // starts at its target - sliding from the empty 0..0 moved both edges together, a zero-width crop for frames)
+    static uint64_t last;
+    static bool have_last;
     static float cu0, cu1;
     crop[0] = crop[1] = 0, crop[2] = crop[3] = 1;
     g_room_wide = false;
@@ -370,14 +433,14 @@ void widescreen_present_crop(uint64_t frame, double shape, float crop[4], double
     if (m == ROOM_FULL) u0 = 0, u1 = 1;
     mode = m, k0 = u0, k1 = u1;
     g_room_wide = m != ROOM_BOX;
-    if (frame <= last + 2 && frame > last) {
+    if (have_last && frame <= last + 2 && frame > last) {
         const float step = 0.03f;  // of the image width per frame
         cu0 += fmaxf(-step, fminf(step, u0 - cu0));
         cu1 += fmaxf(-step, fminf(step, u1 - cu1));
     } else {
         cu0 = u0, cu1 = u1;
     }
-    last = frame;
+    last = frame, have_last = true;
     // (phones: the HUD at the screen corners, in the bars: the bars were cleared after the scene, runtime/hle/hud_corners.c)
     hud_corners_note_crop(frame, cu0, cu1, 0, 1);
     crop[0] = cu0, crop[2] = cu1 - cu0;

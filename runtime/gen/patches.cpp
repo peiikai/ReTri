@@ -504,6 +504,22 @@ std::string eow_aspect(Module &m, uint64_t a) {
                ": movk w", d, ", #0x3fe3, lsl #16 (16:9) */");
 }
 
+// (widescreen, runtime/hle/widescreen.c rt_screen_spot) layouts placed at a target's spot on screen (the lock-on
+// reticle L_LockOn_00 and the others below): the code works the spot out with the widened camera and turns it into the
+// 16:9 layout's units (x 960, y 540 from the centre), then stores it as the root pane's translation,
+// `stp sA, sB, [xN, #0x30]` = x, y. The runtime rescales them to the window's shape.
+const uint64_t EOW_SPOT[] = {0x700249be34, 0x70024b7ae4, 0x70024b7db4, 0x70024d4408, 0x70025532fc, 0x70025efc48};
+std::string eow_spot(Module &m, uint64_t a) {
+    uint32_t w = m.image_word(a);
+    check((w & 0xFFFF8000) == 0x2D060000, a, w);  // stp sA, sB, [xN, #0x30]
+    int ra = (int)(w & 31), rn = (int)((w >> 5) & 31), rb = (int)((w >> 10) & 31), idx = 0;
+    while (EOW_SPOT[idx] != a) idx++;
+    return cat("{ extern void rt_screen_spot(int site, uint64_t pane, float *xy); float xy_[2]; ",
+               "memcpy(&xy_[0], &c->v[", ra, "], 4); memcpy(&xy_[1], &c->v[", rb, "], 4); ",
+               "rt_screen_spot(", idx, ", c->x[", rn, "], xy_); memcpy((void *)(uintptr_t)(c->x[", rn, "] + 0x30), xy_, 8); }",
+               "  /* ", ax(a), ": stp s", ra, ", s", rb, ", [x", rn, ", #0x30] (a layout at a spot on screen: widescreen) */");
+}
+
 // (debug, GEN_TRACE_STORE_OFF) every `str xT, [xN, #off]` and `stp` whose either slot is at one of these offsets: the
 // runtime hears of it (rt_trace_store: site, base, value) - finding where an object is registered
 thread_local std::set<int64_t> trace_offs;
@@ -671,6 +687,7 @@ void build_other_patches(const std::string &game, Module &m, PatchSet &ps, std::
         P[EOW_FPS_LIMIT_30] = eow_fps_limit;
         P[EOW_FPS_LIMIT_60] = eow_fps_limit;
         for (uint64_t a : EOW_ASPECT) P[a] = eow_aspect;
+        for (uint64_t a : EOW_SPOT) P[a] = eow_spot;
     }
 }
 

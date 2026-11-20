@@ -477,7 +477,7 @@ $(LASGEN): $(wildcard runtime/gen/*.cpp runtime/gen/*.hpp runtime/gen/*.h runtim
 	@mkdir -p $(dir $@)
 	$(HOSTCXX) -std=c++17 -O2 $(filter %.cpp,$^) -o $@
 
-# Linux: build/dist/ReTri-<version>-linux-<arch>.AppImage, built in Ubuntu 22.04 containers (podman) with SDL3, LGPL
+# Linux: build/dist/ReTri-<version>-linux-<x64|arm64>.AppImage, built in Ubuntu 22.04 containers (podman) with SDL3, LGPL
 # FFmpeg and shaderc inside; the Vulkan loader and GPU drivers are the system's.
 # `make appimage` (ARCH: this machine's, or aarch64 cross-compiled), `make appimages` both. See docs/linux.md.
 appimage:
@@ -488,7 +488,7 @@ appimages:
 # `make tarball` (after make appimage): the same files in a .tar.gz, for places without FUSE (docs/linux.md)
 tarball:
 	tools/linux/tarball.sh $(ARCH)
-# release check of the x86-64 AppImage: start screen, into the game, warps to the overworld and every dungeon
+# release check of the x86-64 AppImage: setup, start screen, a new game into the first room
 smoketest:
 	tools/linux/smoketest.sh
 
