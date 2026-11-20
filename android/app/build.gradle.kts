@@ -104,6 +104,8 @@ val prepareLasRecomp by tasks.registering {
     outputs.dir(gen)
     doLast {
         val out = gen.get().asFile
+        // (cleared first: a checkout built before kept the Python generator's libraries here, and they shipped)
+        out.resolve("jniLibs").deleteRecursively()
         for (lib in libs) lib.copyTo(out.resolve("jniLibs/arm64-v8a/${lib.name}"), overwrite = true)
         for ((name, f) in res) f.copyTo(out.resolve("assets/res/$name"), overwrite = true)
     }
