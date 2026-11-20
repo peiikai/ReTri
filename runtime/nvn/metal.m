@@ -1698,10 +1698,19 @@ static bool present_direct(NvnTexture *t, uint64_t frame) {
         // fits again and the game returns to 60. presentDrawable:afterMinimumDuration: and showing the image a second
         // time at 60 Hz in the 30 mode did not move the clock. LARECOMP_PRESENT_DEADLINE=0: a plain present (as before).
         // (Frame interpolation's presenter presents each image for its own vsync: a deadline every display frame.)
+        // The deadline follows the 60 fps schedule, not the moment of the present: one frame after the previous
+        // deadline (never before now, never more than a frame ahead). One frame after "now" was always met once the
+        // CPU waited for the GPU: EoW at 5120x1440 (M3 Max), after a 1 s nextDrawable block at a focus loss, the
+        // game's frame fence waits came back each frame, the frame's GPU work was done before its present was
+        // committed, so the present met its deadline at any clock; the clock slid down over 3 minutes (the same
+        // frame 8 -> 24 ms of GPU time, game and GPU taking turns) and the game went 60 -> 26 fps without recovering.
+        // A late frame now presents with its deadline already due, which tells the system the clock is too low.
+        // LARECOMP_PRESENT_DEADLINE=2: one frame after the present (as before).
         static int deadline = -1;
         if (deadline < 0) {
-            deadline = !getenv("LARECOMP_PRESENT_DEADLINE") || atoi(getenv("LARECOMP_PRESENT_DEADLINE"));
-            LOG("[metal] presents %s\n", deadline ? "carry a one-frame deadline (GPU clock)" : "without a deadline");
+            deadline = !getenv("LARECOMP_PRESENT_DEADLINE") ? 1 : atoi(getenv("LARECOMP_PRESENT_DEADLINE"));
+            LOG("[metal] presents %s\n", deadline == 1 ? "carry the 60 fps schedule's deadline (GPU clock)" :
+                deadline ? "carry a one-frame deadline (GPU clock)" : "without a deadline");
         }
         // (debug) LARECOMP_ASYNC_SHOTS=<from>,<every>,<count>: the window image of those frames -> build/aframes/, copied
         // on the GPU inside this command buffer and encoded to PNG on a background thread once it has completed: no CPU
@@ -1791,7 +1800,12 @@ static bool present_direct(NvnTexture *t, uint64_t frame) {
             }
         }
         [cb addCompletedHandler:^(id<MTLCommandBuffer> done) { (void)done; __atomic_sub_fetch(&g_presents_inflight, 1, __ATOMIC_RELAXED); }];
-        if (deadline) [cb presentDrawable:drawable atTime:CACurrentMediaTime() + 1.0 / 60.0];
+        if (deadline == 1) {
+            static double due;  // (s, CACurrentMediaTime) the previous present's deadline
+            double now = CACurrentMediaTime();
+            due = fmin(fmax(due + 1.0 / 60.0, now), now + 1.0 / 60.0);
+            [cb presentDrawable:drawable atTime:due];
+        } else if (deadline) [cb presentDrawable:drawable atTime:CACurrentMediaTime() + 1.0 / 60.0];
         else [cb presentDrawable:drawable];
         [cb commit];
         if (shot_tex) {
