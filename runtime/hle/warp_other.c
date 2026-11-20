@@ -3,9 +3,9 @@
 // A warp starts the game's own fast-travel event (start_map_warp: event/MapWarp.bfevfl with our level and locator as
 // its parameters), as the map screen does; the event's GameControl.RequestLevelJump fills the level's jump request
 // and the event system performs it when the event ends. Writing the request alone does nothing: the game reads it only
-// when an event ends (its processor, main+0x160f7e0, runs then). The request has LA's layout at another offset: level
-// at R+0x218 (length +0x258), locator at +0x260 (length +0x2a0), offset +0x2b0; runtime/gen/patches.cpp hooks the processor to
-// tell us where it is (rt_other_request_holder). The places come from the game's level files (warp_other_places).
+// when an event ends (its processor, OTHER(WARP_REQUEST_PROC), runs then). The request has LA's layout at another
+// offset: level at R+0x218 (length +0x258), locator at +0x260 (length +0x2a0), offset +0x2b0; runtime/gen/patches.cpp
+// hooks the processor to tell us where it is (rt_other_request_holder). The places come from the game's level files (warp_other_places).
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "../hle.h"
+#include "../game_addresses.h"
 
 static volatile uint64_t g_loads;   // level files read (warp_other_file_read)
 static volatile uint64_t g_proc_runs;  // the request processor's runs (one per level change)
@@ -84,7 +85,8 @@ void warp_other_frame(uint64_t frame) {
 }
 
 // Game main thread, once per frame (input.c, the controller read): a queued warp is written into the request and
-// the game's request processor (main+0x160f7e0, its object: the request at +0x10) is run on it, as LA's warp does.
+// the game's request processor (OTHER(WARP_REQUEST_PROC), its object: the request at +0x10) is run on it, as LA's warp
+// does.
 // The request the processor ran with at the last load is that load's own (consumed); the level since registered a
 // new one of the same class. Found by its vtable: an object with the old request's, empty, at another address.
 static uint64_t find_current_request(uint64_t old) {
@@ -120,7 +122,8 @@ static int request_shaped(uint64_t r) {
 }
 static void scan_globals(void) {
     int hits = 0;
-    for (uint64_t g = 0x7003d00000ull; g < 0x7004400000ull && hits < 40; g += 8) {
+    // (main's data: from around the request processor's vtable up to the sdk)
+    for (uint64_t g = OTHER(WARP_REQUEST_PROC_VTABLE) & ~0xfffffull; g < game_sdk_base() && hits < 40; g += 8) {
         uint64_t v = ld(g);
         if (!in_heap(v, 0x80)) continue;
         uint64_t ss[2] = {v, in_heap(v, 0x30) ? ld(v + 0x28) : 0};
@@ -141,15 +144,16 @@ static void scan_globals(void) {
 }
 
 // Start the game's own fast-travel event (event/MapWarp.bfevfl, entry LevelWarpStartMenu) with our level and locator
-// as its parameters - the sequence main+0x256f0c0 (the map screen's warp) runs: load the flow file through the resource
-// manager ([main+0x40311d0]), the entry, the event's flags, a two-entry parameter list, then hand the event to the
-// event system (main+0x160c640 with [main+0x401a250]). The event's RequestLevelJump does the rest.
+// as its parameters - the sequence the map screen's warp runs (1.0.2: main+0x256f0c0): load the flow file through the
+// resource manager ([WARP_RES_MGR]), the entry, the event's flags, a two-entry parameter list, then hand the event to
+// the event system (WARP_EVENT_START with [WARP_EVENT_SYS]). The event's RequestLevelJump does the rest. The addresses
+// are the build's own (OTHER: game_addresses/eow_<version>.h).
 static void call(Cpu *c, uint64_t fn, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
     c->x[0] = a0, c->x[1] = a1, c->x[2] = a2, c->x[3] = a3;
     guest_call(c, fn);
 }
 // Drop one strong reference through a shared-pointer control block, as the game's code does: the use count at +8;
-// at zero its vtable's +0x10 (dispose) and then main+0x27deed0 (the weak release).
+// at zero its vtable's +0x10 (dispose) and then SPTR_WEAK_RELEASE.
 static void sptr_release(Cpu *c, uint64_t ctrl) {
     if (!ctrl) return;
     uint64_t old = __atomic_fetch_sub((uint64_t *)(uintptr_t)(ctrl + 8), 1, __ATOMIC_ACQ_REL);
@@ -158,7 +162,7 @@ static void sptr_release(Cpu *c, uint64_t ctrl) {
     c->x[0] = ctrl;
     guest_call(c, *(uint64_t *)(uintptr_t)(vt + 0x10));
     c->x[0] = ctrl;
-    guest_call(c, 0x70027deed0ull);
+    guest_call(c, OTHER(SPTR_WEAK_RELEASE));
 }
 
 static bool g_kept_flow;
@@ -191,11 +195,11 @@ static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
     uint64_t saved[31], sp = c->sp, pc = c->pc;
     memcpy(saved, c->x, sizeof saved);
     bool ok = false;
-    call(c, 0x70026e7560ull, m + 0x140, *(uint64_t *)(uintptr_t)0x70040311d0ull, m + 0x100, 0);  // the flow file
+    call(c, OTHER(WARP_RES_LOAD), m + 0x140, *(uint64_t *)(uintptr_t)OTHER(WARP_RES_MGR), m + 0x100, 0);  // the flow file
     uint64_t res = q[0x140 / 8];
     static int nlog;
     if (res || nlog++ % 60 == 0) {
-        uint64_t mgr = *(uint64_t *)(uintptr_t)0x70040311d0ull;
+        uint64_t mgr = *(uint64_t *)(uintptr_t)OTHER(WARP_RES_MGR);
         LOG("[warp] event file %s: %llx (manager %llx, its +0x110 %llx / %llx)\n", path, (unsigned long long)res, (unsigned long long)mgr,
             mgr ? (unsigned long long)*(uint64_t *)(uintptr_t)(mgr + 0x110) : 0ull, mgr ? (unsigned long long)*(uint64_t *)(uintptr_t)(mgr + 0x118) : 0ull);
     }
@@ -209,23 +213,23 @@ static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
     }
     if (res || (q[0x150 / 8] && !alt)) {
         if (res) {
-            call(c, 0x700038eba0ull, res, 0, 0, 0);
-            call(c, 0x70006692e0ull, m + 0x150, m + 0x140, 0, 0);       // the flow
+            call(c, OTHER(WARP_RES_READY), res, 0, 0, 0);
+            call(c, OTHER(WARP_FLOW_OF_RES), m + 0x150, m + 0x140, 0, 0);       // the flow
             if (!alt && !kept_flow[0]) kept_flow[0] = q[0x150 / 8], kept_flow[1] = q[0x158 / 8], g_kept_flow = true;
         }
-        call(c, 0x700159f940ull, m + 0x160, m + 0x150, m + 0x110, 0);  // its entry: the event
+        call(c, OTHER(WARP_FLOW_ENTRY), m + 0x160, m + 0x150, m + 0x110, 0);  // its entry: the event
         uint64_t ev = q[0x160 / 8];
         LOG("[warp] flow %llx event %llx\n", (unsigned long long)q[0x150 / 8], (unsigned long long)ev);
         if (ev) {
-            call(c, 0x70015aa740ull, ev, 1, 0, 0);
-            call(c, 0x70015ad340ull, ev, 0, 0, 0);
+            call(c, OTHER(WARP_EVENT_FLAG_A), ev, 1, 0, 0);
+            call(c, OTHER(WARP_EVENT_FLAG_B), ev, 0, 0, 0);
             *(uint64_t *)(uintptr_t)(ev + 0x2f0) = 0xffffffffffffbffeull;
             *(uint32_t *)(uintptr_t)(ev + 0x2f8) = 0x40;
-            call(c, 0x70027adab0ull, m + 0x170, 2, 0, 0);  // the parameters
+            call(c, OTHER(WARP_PARAMS_NEW), m + 0x170, 2, 0, 0);  // the parameters
             uint64_t prm = q[0x170 / 8];
-            call(c, 0x70027ae400ull, prm, 0x70032e917eull, 5, m + 0x120);  // "level"
-            call(c, 0x70027ae400ull, prm, 0x70032d5c42ull, 7, m + 0x130);  // "locator"
-            call(c, 0x700160c640ull, m + 0x180, *(uint64_t *)(uintptr_t)0x700401a250ull, m + 0x160, m + 0x170);
+            call(c, OTHER(WARP_PARAMS_SET), prm, OTHER(WARP_STR_LEVEL), 5, m + 0x120);  // "level"
+            call(c, OTHER(WARP_PARAMS_SET), prm, OTHER(WARP_STR_LOCATOR), 7, m + 0x130);  // "locator"
+            call(c, OTHER(WARP_EVENT_START), m + 0x180, *(uint64_t *)(uintptr_t)OTHER(WARP_EVENT_SYS), m + 0x160, m + 0x170);
             LOG("[warp] map-warp event started (%llx)\n", (unsigned long long)q[0x180 / 8]);
             ok = true;
         }
@@ -321,7 +325,7 @@ void warp_other_game_tick(Cpu *c) {
         memset((void *)(uintptr_t)R2, 0, 0x400);
         memcpy((void *)(uintptr_t)(R2 + 0x200), (void *)(uintptr_t)(r + 0x200), 0xc0);
         memset((void *)(uintptr_t)P, 0, 0x200);
-        *(uint64_t *)(uintptr_t)P = 0x7003dc6f98ull;
+        *(uint64_t *)(uintptr_t)P = OTHER(WARP_REQUEST_PROC_VTABLE);
         *(uint64_t *)(uintptr_t)(P + 8) = O;
         *(uint64_t *)(uintptr_t)(P + 0x10) = R2;
         *(uint64_t *)(uintptr_t)(P + 0x20) = g_ctx;
@@ -330,7 +334,7 @@ void warp_other_game_tick(Cpu *c) {
         c->x[0] = P;
         LOG("[warp] calling the request processor on job %llx (owner %llx, context %llx)\n", (unsigned long long)P,
             (unsigned long long)O, (unsigned long long)g_ctx);
-        guest_call(c, 0x700160f7e0ull);
+        guest_call(c, OTHER(WARP_REQUEST_PROC));
         memcpy(c->x, saved, sizeof saved);
         c->sp = sp, c->pc = pc;
         LOG("[warp] processor returned; owner queue index %llu count %llu\n", (unsigned long long)*(uint64_t *)(uintptr_t)(O + 0x218),

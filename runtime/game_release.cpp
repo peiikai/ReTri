@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #include "cache_sha256.h"
 
@@ -38,7 +39,15 @@ extern "C" const char *game_release_label(const char *exefs_dir, char *buf, size
     char path[1100];
     snprintf(path, sizeof path, "%s/main", exefs_dir);
     const GameVersion *v = game_version_of_main(path);
-    if (!v) return nullptr;
+    if (!v) {  // (another game: its build's own release, games.h)
+        std::string dir(exefs_dir);
+        size_t slash = dir.find_last_of("/\\");
+        std::string parent = slash == std::string::npos ? "." : dir.substr(0, slash);
+        const char *r = game_other_release_of(game_other_of(parent.c_str()));
+        if (!r) return nullptr;
+        snprintf(buf, size, "%s", r);
+        return buf;
+    }
     snprintf(buf, size, "%s", v->label);
     bool shared = false;
     for (const Release &r : releases) shared |= !strcmp(r.key, v->key);

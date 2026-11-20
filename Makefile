@@ -217,6 +217,7 @@ endif
 # GAMELIB_ID: what the game code library is built from (the generator, the headers it is compiled against, the
 # flags). A library with another id is rebuilt by the start screen, never loaded.
 GAMELIB_SRCS := runtime/game_addresses/versions.h runtime/game_addresses/games.h $(wildcard runtime/game_addresses/patches_v*.h) \
+                $(wildcard runtime/game_addresses/eow_v*.h) \
                 $(sort $(wildcard runtime/gen/*.cpp runtime/gen/*.hpp runtime/gen/*.h runtime/gen/*.inc)) \
                 tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
                 runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h

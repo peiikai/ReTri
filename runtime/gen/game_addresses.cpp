@@ -59,10 +59,31 @@ std::string version_for_build_id(const std::string &build_id) {
 }
 
 static const OtherGame OTHER_GAMES[] = {
-#define GA_GAME(key, label, build_id, sdk_base) {#key, label, build_id, UINT64_C(sdk_base)},
+#define GA_GAME(key, table, label, release, build_id, sdk_base) {#key, #table, label, release, build_id, UINT64_C(sdk_base)},
 #include "../game_addresses/games.h"
 #undef GA_GAME
 };
+
+#define OTHER_ADDR(name, value) {#name, UINT64_C(value)},
+static const std::pair<const char *, uint64_t> eow_v1_0_0[] = {
+#include "../game_addresses/eow_v1_0_0.h"
+};
+static const std::pair<const char *, uint64_t> eow_v1_0_1[] = {
+#include "../game_addresses/eow_v1_0_1.h"
+};
+static const std::pair<const char *, uint64_t> eow_v1_0_2[] = {
+#include "../game_addresses/eow_v1_0_2.h"
+};
+#undef OTHER_ADDR
+
+const AddressTable &other_table(const OtherGame &g) {
+    static const AddressTable t0 = make_table(eow_v1_0_0), t1 = make_table(eow_v1_0_1), t2 = make_table(eow_v1_0_2);
+    std::string k = std::string(g.key) + "_" + g.table;
+    if (k == "eow_v1_0_0") return t0;
+    if (k == "eow_v1_0_1") return t1;
+    if (k == "eow_v1_0_2") return t2;
+    throw GenError("No address table " + k);
+}
 
 const OtherGame *other_game(const std::string &key) {
     for (auto &g : OTHER_GAMES)
@@ -70,14 +91,19 @@ const OtherGame *other_game(const std::string &key) {
     return nullptr;
 }
 
-std::string game_for_build_id(const std::string &build_id) {
+const OtherGame *other_build(const std::string &build_id) {
     std::string padded = build_id;
     for (auto &ch : padded) ch = (char)toupper((unsigned char)ch);
     if (padded.size() < 64) padded.append(64 - padded.size(), '0');
     bool tail_zero = padded.find_first_not_of('0', 40) == std::string::npos;
     for (auto &g : OTHER_GAMES)
-        if (padded.compare(0, 40, g.build_id) == 0 && tail_zero) return g.key;
-    return "";
+        if (padded.compare(0, 40, g.build_id) == 0 && tail_zero) return &g;
+    return nullptr;
+}
+
+std::string game_for_build_id(const std::string &build_id) {
+    const OtherGame *g = other_build(build_id);
+    return g ? g->key : "";
 }
 
 // Expand @NAME@ as hex digits inside generated-C addresses, symbols or labels.

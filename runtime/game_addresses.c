@@ -26,14 +26,27 @@ static const GameVersion versions[] = {
 #undef GA_RELEASE
 };
 
-// Other games on the same engine (experimental, game_addresses/games.h): no address table (all zero: nothing of LA's
-// may run), their own sdk load address.
+// Other games on the same engine (game_addresses/games.h): no LA address table (all zero: nothing of LA's may run),
+// their own sdk load address and address table per build.
+#define OTHER_ADDR(name, value) .name = UINT64_C(value),
+static const OtherAddrs eow_v1_0_0 = {
+#include "game_addresses/eow_v1_0_0.h"
+};
+static const OtherAddrs eow_v1_0_1 = {
+#include "game_addresses/eow_v1_0_1.h"
+};
+static const OtherAddrs eow_v1_0_2 = {
+#include "game_addresses/eow_v1_0_2.h"
+};
+#undef OTHER_ADDR
 static const GameAddrs ga_none;
-static const struct { GameVersion v; uint64_t sdk_base; } games[] = {
-#define GA_GAME(key, label, build_id, sdk_base) {{#key, label, build_id, &ga_none}, sdk_base},
+static const struct { GameVersion v; const char *release; const OtherAddrs *addrs; uint64_t sdk_base; } games[] = {
+#define GA_GAME(key, table, label, release, build_id, sdk_base) \
+    {{#key, label, build_id, &ga_none}, release, &key##_##table, sdk_base},
 #include "game_addresses/games.h"
 #undef GA_GAME
 };
+const OtherAddrs *g_other_ga;
 
 const GameAddrs *g_ga;
 static const GameVersion *g_version;
@@ -58,6 +71,8 @@ const GameVersion *game_version_by_build_prefix(const char *hex) {
     if (n < 16 || n > 40) return NULL;
     for (size_t i = 0; i < sizeof versions / sizeof versions[0]; i++)
         if (!strncmp(versions[i].build_id, hex, n)) return &versions[i];
+    for (size_t i = 0; i < sizeof games / sizeof *games; i++)
+        if (!strncmp(games[i].v.build_id, hex, n)) return &games[i].v;
     return NULL;
 }
 
@@ -113,6 +128,12 @@ uint64_t game_other_sdk_base_of(const GameVersion *v) {
     return SDK_BASE;
 }
 
+const char *game_other_release_of(const GameVersion *v) {
+    for (size_t i = 0; v && i < sizeof games / sizeof *games; i++)
+        if (&games[i].v == v) return games[i].release;
+    return NULL;
+}
+
 bool game_version_select(const char *game_dir, char *why, size_t why_size) {
     uint8_t id[20];
     char exefs[1100], path[1100];
@@ -133,12 +154,21 @@ bool game_version_select(const char *game_dir, char *why, size_t why_size) {
         v = &games[i].v;
         g_other_game = v->key;
         g_sdk_off = games[i].sdk_base - GUEST_CANON;
-        LOG("[game] %s (main build ID %.16s): experimental, LA features off, sdk at %llx\n", v->label, v->build_id,
-            (unsigned long long)game_sdk_base());
+        g_other_ga = games[i].addrs;
+#ifdef LARECOMP_DYN_BASE
+        static OtherAddrs moved_other;  // (as LA's table below)
+        moved_other = *games[i].addrs;
+        uint64_t *p = (uint64_t *)&moved_other;
+        for (size_t j = 0; j < sizeof moved_other / sizeof *p; j++)
+            if (p[j] >= GUEST_CANON && p[j] < GUEST_CANON + GUEST_SIZE) p[j] = p[j] - GUEST_CANON + GUEST_LO;
+        g_other_ga = &moved_other;
+#endif
+        LOG("[game] %s %s (main build ID %.16s): LA features off, sdk at %llx\n", v->label, games[i].release,
+            v->build_id, (unsigned long long)game_sdk_base());
     }
     if (!v) {
         snprintf(why, why_size, "these game files are an unsupported version of the game (main build ID "
-                 "%02X%02X%02X%02X%02X%02X%02X%02X): ReTri needs version 1.0.0, 1.0.1 or 1.1.0",
+                 "%02X%02X%02X%02X%02X%02X%02X%02X): ReTri needs version 1.0.0, 1.0.1 or 1.0.2",
                  id[0], id[1], id[2], id[3], id[4], id[5], id[6], id[7]);
         return false;
     }
