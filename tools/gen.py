@@ -1,5 +1,8 @@
 """Generate C for a whole NSO module.
 
+The reference for the C++ generator the app runs (runtime/gen/): tools/test_gen_cpp.py checks that both write the same
+C. Not shipped; it stays until the C++ port has been released.
+
 Usage: gen.py <name> <nso> <base> <outdir> [--hle hle_symbols.txt] [--simd asm|c] [--dyn-base] [--new-chunk-bounds]
 
 --simd: FP/SIMD/CRC32 as AArch64 inline asm (default on arm64 hosts) or portable C (default elsewhere).
@@ -89,6 +92,7 @@ class Module:
 
     def emu(self):
         if self.mu is None:
+            print(f'{self.name}: starting the jump table emulator', file=sys.stderr, flush=True)
             mu = uc.Uc(uc.UC_ARCH_ARM64, uc.UC_MODE_ARM)
             n = self.nso
             mu.mem_map(self.base, len(n.image))
@@ -547,6 +551,8 @@ def main():
                     help='Android: guest addresses relative to the window the runtime picks (lifter.gaddr)')
     args = ap.parse_args()
     lifter.DYN_BASE = args.dyn_base
+    # (first: a generator that ends early still shows it started)
+    print(f'{args.name}: started', file=sys.stderr, flush=True)
 
     global HOOKS, PATCHES
     t0 = time.time()
