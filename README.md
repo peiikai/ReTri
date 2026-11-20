@@ -1,4 +1,4 @@
-# ReTri
+<h1><img src="docs/title.svg" alt="ReTri" height="96"></h1>
 
 > [!IMPORTANT]
 > **This project was made almost exclusively with AI.** Nearly all of the code, tooling, reverse engineering and
@@ -8,9 +8,8 @@
 > in the controversy in relation to this project. You may simply ignore this project and its code.
 > As with anything on the internet, you run the code at your own discretion.
 
-**ReTri** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch) into a native
-macOS application (Apple Silicon, Metal). It is built on the LAS Recomp runtime, which still supports *Link's
-Awakening*; much of the text below is that runtime's and describes Link's Awakening.
+**ReTri** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch, 2024) into a
+native Windows, macOS, Linux, Android and iOS application.
 
 > [!NOTE]
 > Currently supported platforms:
@@ -19,8 +18,8 @@ Awakening*; much of the text below is that runtime's and describes Link's Awaken
 > - Linux - x86-64, Vulkan graphics backend (AppImage)
 > - Android - arm64, Vulkan graphics backend
 > - iPhone and iPad - arm64, Metal graphics backend (sideloaded: see [iPhone and iPad](#iphone-and-ipad))
-> - Linux aarch64 (ARM) - **experimental**: the latest build is on the [Experimental builds](https://github.com/peiikai/LASRecomp/releases/tag/experimental) page; reports welcome
->   ([docs/linux.md](docs/linux.md) lists what to include)
+> - Windows on ARM (arm64) and Linux aarch64 (ARM) - **experimental**: on the [releases](https://github.com/peiikai/ReTri/releases)
+>   page; reports welcome ([docs/linux.md](docs/linux.md) lists what to include)
 
 ## System requirements
 
@@ -52,6 +51,10 @@ These are the minimums during the beta and may change as development continues.
 > We recommend turning on Dynamic resolution and choosing an FPS target. The resolution then adjusts to what your device
 > can handle, and drops when the chip heats up and slows down, which most phones and tablets do over longer play.
 
+> [!NOTE]
+> Some Qualcomm (Adreno) GPU drivers have many bugs, even on newer phones. If you see graphical issues, try a Turnip
+> driver (Settings > System, see the GPU driver row above) before you open an issue report.
+
 **iPhone and iPad:**
 
 | | Minimum |
@@ -64,27 +67,24 @@ These are the minimums during the beta and may change as development continues.
 > We recommend turning on Dynamic resolution and choosing an FPS target. The resolution then adjusts to what your device
 > can handle, and drops when the chip heats up and slows down, which most phones and tablets do over longer play.
 
-![Mabe Village in a 21:9 window: the unlocked aspect ratio shows more of the island](docs/ultrawide.jpg)
+![Echoes of Wisdom in a 21:9 window: with Aspect ratio Unlocked the camera fills the whole width](docs/ultrawide.jpg)
 
 > [!NOTE]
 > **No game files are included.** ReTri needs your own legally obtained copy of the extracted game files of
-> *Link's Awakening* **v1.0.0, v1.0.1 or v1.1.0**. When setting up, choose a folder that contains the `exefs`
+> *Echoes of Wisdom* **v1.0.0, v1.0.1 or v1.0.2**. When setting up, choose a folder that contains the `exefs`
 > and `romfs` folders, or their contents. Instructions on how to obtain these files will **NOT** be provided.
 > On first launch the app sets up what it needs, including the actual recompilation locally. No game files, assets or fonts are included.
 > The screenshot shows the start screen after setup; no Nintendo artwork is included until provided by the user.
 
-![The start screen: play, set up your game files, settings](docs/start_screen.jpg)
-
-## Project Discord
-https://discord.gg/DhrgdYqdcY
+![The start screen: play, settings and quit over the game's title movie](docs/start_screen.jpg)
 
 ## Status
 
-This is a beta release. That means bugs are likely, crashes could occur and some graphics issues remain (especially in wide and ultrawide aspect ratios). This is a work in progress, hence the beta designation. To report a bug, open a [GitHub issue](https://github.com/peiikai/LASRecomp/issues) - see [CONTRIBUTING.md](CONTRIBUTING.md#reporting-bugs) for what to include.
+This is a beta release. That means bugs are likely, crashes could occur and some graphics issues remain (especially in wide and ultrawide aspect ratios). This is a work in progress, hence the beta designation. To report a bug, open a [GitHub issue](https://github.com/peiikai/ReTri/issues) - see [CONTRIBUTING.md](CONTRIBUTING.md#reporting-bugs) for what to include.
 
 ### Known issues
 
-Known issues and their status are on the [GitHub issues page](https://github.com/peiikai/LASRecomp/issues).
+Known issues and their status are on the [GitHub issues page](https://github.com/peiikai/ReTri/issues).
 
 ## Steam Deck
 
@@ -140,29 +140,24 @@ GetMoreRam. More on the iOS app is there too.
 ## Features
 
 - **This is not emulation.** It runs natively on Windows, macOS, Linux, Android, iPhone and iPad.
-- Works with game versions 1.0.0, 1.0.1 and 1.1.0.
-- Wider screens show more of the island, up to ultrawide. You can switch back to the original 16:9.
+- Works with game versions 1.0.0, 1.0.1 and 1.0.2.
+- Wider screens show more of the world, up to ultrawide: the camera, the echo list and the pause screen fill the
+  window. You can switch back to the original 16:9.
 - Higher resolutions, a "match your display" option and dynamic resolution with an FPS target, with MetalFX (Mac)
   or FSR 1 (Windows, Linux and Android) upscaling and SMAA anti-aliasing.
-- Sharper shadows, ambient occlusion and Frame Generation, each optional.
+- Sharper shadows, and an option to remove the tilt-shift blur.
 - Shaders are prepared ahead of time, so new areas don't stutter.
 - In-game menu: F1, or Home or Minus + Plus on a controller.
-- Keyboard, controller and touch controls, with every button remappable and a touch layout editor. Button prompts
+- Keyboard, controller and touch controls, with every button remappable and a touch layout editor. Button icons
   match your controller (Xbox, PlayStation or Nintendo).
-- Controller rumble, and the light bar on PlayStation controllers shows Link's health.
 - Stereo or 5.1 surround sound.
-- Play in English, Japanese, Spanish, French, German, Italian, Dutch, Russian, Korean or Chinese (Simplified or
-  Traditional), with menus also in Portuguese (Brazil). Auto follows your system language.
-- Optional extras: 360-degree movement, a hookshot that snaps to 8 directions, faster or instant text, blur removal,
-  mirror mode and faster walking.
-- Cosmetics: colours for Link, the grass, water, walls and more, weather (looks only), and Game Boy style filters.
-- Optional run timer, with LiveSplit support.
+- Can be started from game launchers, with a profile for RecompLauncher (see [Launchers](#launchers)).
 
 ## Building from source
 
-Every platform needs your own game files (v1.0.0, v1.0.1 or v1.1.0): build first, then use the start screen's game-file setup.
-`make gen` then recompiles the game code from your own game files into `generated/` (the generator, `build/lasgen`, is
-built first), and `make` builds it into its own library next to the app (`build/eowgame.*`); without it the start
+Every platform needs your own game files (v1.0.0, v1.0.1 or v1.0.2): build first, then use the start screen's game-file setup.
+`make gen GEN=generated-eow` then recompiles the game code from your own game files into `generated-eow/`
+(the generator, `build/lasgen`, is built first), and `make` builds it into its own library next to the app (`build/eowgame.*`); without it the start
 screen builds that library itself, as it does for players. Release builds hold none of the game's code: the start
 screen builds it on each player's machine from their own game files, with the generator built into the app and the
 bundled compiler (`tools/fetch_zig.sh`). The generator needs no Python; Python 3 is still used by some dependency and
@@ -172,7 +167,8 @@ packaging scripts and by the tests.
 
 Requirements: Apple Silicon, Xcode command line tools (clang), [Homebrew](https://brew.sh) `sdl3` and `ffmpeg`.
 
-1. Build: `make -j10` -> `build/eowrecomp`. Set up your game files (above), then `make gen` and `make -j10` again.
+1. Build: `make -j10 GEN=generated-eow` -> `build/eowrecomp`. Set up your game files (above), then
+   `make gen GEN=generated-eow` and `make -j10 GEN=generated-eow` again.
 2. Run: `./build/eowrecomp extracted` (start screen) or `./build/eowrecomp extracted --play` (straight into the game).
 3. Package: `make deps` (once: SDL3 and FFmpeg from pinned sources, built for macOS 15) and `tools/fetch_zig.sh`
    (what the start screen builds the game code with), then `make app` -> `build/ReTri.app` (macOS 15+, Apple Silicon)
@@ -188,7 +184,8 @@ that page.
    It installs MSYS2 (UCRT64: clang, make, SDL3, FFmpeg, Vulkan, shaderc), Python 3.12 for the tests and switches the
    clone to LF line endings.
 2. Build, from an MSYS2 UCRT64 shell (or Git Bash with `export PATH="/c/msys64/ucrt64/bin:/c/msys64/usr/bin:$PATH"`):
-   `make -j` -> `build/eowrecomp.exe`. Set up your game files (above), then `make gen` and `make -j` again.
+   `make -j GEN=generated-eow` -> `build/eowrecomp.exe`. Set up your game files (above), then
+   `make gen GEN=generated-eow` and `make -j GEN=generated-eow` again.
 3. Run: `./build/eowrecomp.exe extracted`, from a shell with `C:\msys64\ucrt64\bin` on PATH (for the DLLs).
 4. Package: `make deps-windows` (once: LGPL FFmpeg) and `tools/fetch_zig.sh`, then `make dist` ->
    `build/dist/ReTri-<version>-windows-x64.zip`.
@@ -199,7 +196,8 @@ Requirements: x86-64 with AVX2 (or aarch64, experimental), a GPU with Vulkan 1.3
 shaderc and Vulkan Memory Allocator from your distribution. Packages, cross builds and details in
 [docs/linux.md](docs/linux.md).
 
-1. Build: `make -j` -> `build/eowrecomp`. Set up your game files (above), then `make gen` and `make -j` again.
+1. Build: `make -j GEN=generated-eow` -> `build/eowrecomp`. Set up your game files (above), then
+   `make gen GEN=generated-eow` and `make -j GEN=generated-eow` again.
 2. Run: `./build/eowrecomp extracted`.
 3. Package: `make appimage` (this machine's arch; `ARCH=aarch64` cross-compiles) or `make appimages` (both) ->
    `build/dist/ReTri-<version>-linux-<arch>.AppImage`, built in Ubuntu 22.04 containers (podman). `make smoketest`
@@ -215,6 +213,15 @@ Where files live (game files, saves, settings and logs):
 - `--data-dir <dir>` (or `LARECOMP_DATA_ROOT=<dir>`) overrides all of these.
 - For a bug report, attach `eowrecomp.log` from that folder.
 
+### Android
+
+Requirements: the Android SDK with NDK 30.0.16248370, CMake 3.30.4 and platform 36, JDK 17 or newer, bash, curl and
+Python 3 (for the dependency script). Details in [docs/android.md](docs/android.md).
+
+1. Dependencies (once): `bash android/deps/build_deps.sh` and `bash android/deps/build_gen_deps.sh`.
+2. Build: `cd android && ./gradlew assembleDebug` -> `android/app/build/outputs/apk/debug/app-debug.apk`.
+3. Install it on the phone and set up your game files from the start screen. The game code is built on the phone.
+
 ### Resuming game-code builds
 
 If the game-code build is cancelled or interrupted, **Resume game code** continues where it stopped. It also resumes
@@ -223,62 +230,23 @@ without touching the installed game, your game files or your saves.
 
 ## Credits
 
-**Contributors** - thank you to everyone who has sent code (GitHub handles, in order of first contribution):
-- **[@dvilelaf](https://github.com/dvilelaf)** - the System language setting (#15), a packaging fix (#10) and the
-  level-transition crash fix (#34)
-- **[@Tensorlong](https://github.com/Tensorlong)** - the fix for the white Link on M1 Macs (#18)
-- **[@mansarip](https://github.com/mansarip)** - support for unrecognised controllers (#26)
-- **[@we11adam](https://github.com/we11adam)** - the right font for each language (#27) and the Chinese language
-  codes (#25)
-- **[@Maganra](https://github.com/Maganra)** - faster graphics checks on Linux (#42)
-- **[@hjqcan](https://github.com/hjqcan)** - game addresses in one place (#57), settings and Traditional Chinese fixes
-  (#53), much less memory used on Windows (#107), Vulkan fixes (#108, #127, #128), an x86 rounding fix (#115), movie
-  memory fixes (#112), Windows logs (#114), resumable game-code builds (#56), and save fixes (#169, #170, #182)
-- **[@gitarre1234rr5](https://github.com/gitarre1234rr5)** - controller rumble (#104) and a regression test (#88)
-- **[@rkammoun](https://github.com/rkammoun)** - the fix for the black walls in the Ukuku Prairie cave on Mac (#215, #216)
-- **[@NevesHenry](https://github.com/NevesHenry)** - a clear message on Linux when no file window can open (#298),
-  the rumble test running in CI (#299), Linux builds finding their own SDL3 (#437), font re-imports that no longer
-  empty the font (#490), a message box on Linux for a CPU without AVX2 (#491), the build and system in the log bot's
-  summary (#582), an FFmpeg licence check that really checks (#583), the GPU driver in the log bot's summary (#588),
-  each attached log counted once (#589), the game files check in the log bot's summary (#600), summaries for
-  logs attached by editing a comment (#601), a Linux AppImage build that stops when its container fails (#653), and
-  a zig download that starts over after being cut off (#667)
-- **[@ky1vstar](https://github.com/ky1vstar)** - a much faster Linux ARM release build (#319), touch menus and on-screen controls for phones (#634), the frame interpolation presenter on CADisplayLink (#649), one shared macOS and iOS host layer (#685), the iOS cleanup after #238 (#697), iOS fixes for saves, errors and Files (#690), a safer, simpler iOS kit export (#704), seed generation on iOS that shows its progress and handles room shuffle re-runs (#735), a clear message on iPhones and iPads that can't run the game (#761), checksums for every iOS download (#762), and a leaner iOS CI job (#763)
-- **[@theb0rg](https://github.com/theb0rg)** - the fix for AMD integrated graphics on Windows (#335)
-- **[@gtf-dot](https://github.com/gtf-dot)** - the game-text font on Linux (#330)
-- **[@cfcosta](https://github.com/cfcosta)** - full speed on Linux AMD handhelds like the Steam Deck and ROG Ally (#392)
-- **[@gsel001](https://github.com/gsel001)** - a check in CI that the Mac app starts (#420), and rupees up to 9,999 in the
-  cheats and save editor (#453)
-- **[@wimw85](https://github.com/wimw85)** - much faster game code setup on the Steam Deck and other PCs (#434)
-- **[@missionfloyd](https://github.com/missionfloyd)** - a much smaller game code build, without debug info (#487)
-- **[@wolfchimneyrock](https://github.com/wolfchimneyrock)** - full speed on ARM Mali graphics (#527), the CPU and GPU working in parallel on Mali (#529), and faster render passes on Mali (#528, #534), a cheaper FSR upscale (#532), the game on the big cores of ARM and Intel hybrid CPUs on Linux (#533), no more flickering grass and shadows on Mali (#546), the game starting on Snapdragon (Adreno) devices (#561), much faster shaders on Mali and Adreno (#562, #563, #579), faster graphics memory on Mali with Mesa (#564), GPU tuning tools for Vulkan (#565), no more memory leak on Arm's Mali driver (#607), smaller shader stacks that keep 4 GB Mali boards from running out of memory (#645), and less shader scratch memory on PanVK (#646)
-- **[@bgevko](https://github.com/bgevko)** - an option to keep the area's music during Guardian Acorns and Pieces of Power (#642)
+**Contributors** - ReTri shares its code base with [LAS Recomp](https://github.com/peiikai/LASRecomp). Thank you to
+everyone who has contributed to it; they're listed in its README.
 
-**Mobile ports** - special thanks to the people who brought the game to phones and tablets:
-- Android: **[@Nycolazs](https://github.com/Nycolazs)** ([LASRecomp-Android-Plus](https://github.com/Nycolazs/LASRecomp-Android-Plus))
-  and **[@mamcjr](https://github.com/mamcjr)** ([LASRecompAndroid](https://github.com/mamcjr/LASRecompAndroid)), the
-  Android ports our Android app is built from
-- iOS: **[@ky1vstar](https://github.com/ky1vstar)** - the game on iPhone and iPad (#238)
+**Mobile ports** - the Android, iPhone and iPad apps come from LAS Recomp's. Thank you to the people who brought it to
+phones and tablets; they're credited in its README.
 
 Thanks also to everyone who reports issues and tests builds. Your logs and screenshots find most of the bugs.
 
-**Community mods** - some options re-implement ideas from these GameBanana mods (re-implemented in the recomp;
-none of their files are used):
-- **360 Controls (And More!)** by Owen_Splat - 360-degree movement, blur removal (blur removal patch by theboy181)
-  (https://gamebanana.com/mods/659802)
-- **XBOX UI** by fellow_demo - Xbox button prompts (https://gamebanana.com/mods/540069)
-- **PS4 UI Buttons** by messiahgov - PlayStation button prompts (https://gamebanana.com/mods/324458)
-- **No Hero Mode Indicator** by Boo/Calla - hide the Hero Mode icon (https://gamebanana.com/mods/441172)
-
 **Art**
-- **[Kenney](https://kenney.nl)** - the D-pad on the HUD for D-pad items, from the Input Prompts pack (CC0,
+- **[Kenney](https://kenney.nl)** - the D-pad art, from the Input Prompts pack (CC0,
   `third_party/kenney`)
 
 **Libraries and tools**
 - [SDL 3](https://libsdl.org) - windowing, input, audio (zlib license)
 - [FFmpeg](https://ffmpeg.org) - movie playback (LGPL)
 - [Dear ImGui](https://github.com/ocornut/imgui) - overlay menu and start screen (MIT)
-- [Hylia Serif](https://artsyomni.com/hyliaserif) by Omni Jacala - the start screen's title (free, not for profit; `third_party/fonts/HyliaSerif/README.md`)
+- [Hylia Serif](https://artsyomni.com/hyliaserif) by Omni Jacala - the start screen's title and this page's header (free, not for profit; `third_party/fonts/HyliaSerif/README.md`)
 - [Baloo 2](https://github.com/EkType/Baloo2) by Ek Type - the start screen's font (SIL Open Font License 1.1, `third_party/fonts/Baloo2/OFL.txt`)
 - [BIZ UDPGothic](https://github.com/googlefonts/morisawa-biz-ud-gothic) by Morisawa - the game's text on Linux when you haven't imported the Switch fonts: a free font from the same universal-design gothic family as the Switch's UD Shin Go (SIL Open Font License 1.1, `third_party/fonts/BIZUDPGothic/OFL.txt`)
 - [DejaVu Sans](https://dejavu-fonts.github.io) - the in-game menu and button letters when no system font fits, and the game text's last resort (Bitstream Vera / DejaVu license, `third_party/fonts/DejaVu/LICENSE`)
@@ -313,7 +281,7 @@ none of their files are used):
 ## Legal
 
 ReTri is a fan project. It is not affiliated with, endorsed by or sponsored by Nintendo. *The Legend of Zelda*
-and *Link's Awakening* are trademarks of Nintendo. No game files, game code, assets or fonts are included - not in
+and *Echoes of Wisdom* are trademarks of Nintendo. No game files, game code, assets or fonts are included - not in
 this repository and not in release builds. You must provide your own legally obtained copy of the game files to play.
 
 ## License
