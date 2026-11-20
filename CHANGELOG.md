@@ -33,6 +33,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Phones and tablets, EoW: the hearts go to the screen's upper left corner, the mini map to the upper right with the
   Y / X buttons beside it. "Hide X/Y item HUD" works for EoW, and the touch X shows the HUD's X item.
 - Phones and tablets, EoW: a drag on the game's screen moves the camera, as the right stick.
+- Game versions 1.0.0 and 1.0.1 work too, besides 1.0.2. The start screen shows which version the game files are.
 
 ### Changed
 - The game code generator is part of the app (C++, from LAS Recomp): no release ships Python any more, and setup

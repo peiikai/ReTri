@@ -561,27 +561,31 @@ def main():
     if args.game != 'la':
         if args.game not in game_addresses.GAMES:
             sys.exit(f'{args.name}: unknown game {args.game}')
-        if args.name == 'main' and game_addresses.game_for_build_id(m.nso.build_id) != args.game:
+        build = game_addresses.game_build(m.nso.build_id) if args.name == 'main' else None
+        if args.name == 'main' and (not build or build['key'] != args.game):
             sys.exit(f'{args.name}: main build ID {m.nso.build_id[:16].upper()} is not {args.game}')
-        print(f'{args.name}: game {game_addresses.GAMES[args.game][0]} (no LA patches)', file=sys.stderr)
+        print(f'{args.name}: game {game_addresses.GAMES[args.game]}' + (f" {build['release']}" if build else '') +
+              ' (no LA patches)', file=sys.stderr)
         if args.name == 'main' and args.game == 'eow':
-            # (OPTNONE) a 25 500-line function behind a data table at main+0x3d85e90, never entered in 4 200 frames of
-            # start, file load and play (LARECOMP_FNPROF); at -O1 it took 30+ minutes to compile
-            OPTNONE[0x7001390b70] = 0xa9ba7bfd  # stp x29, x30, [sp, #-0x60]!
+            # the build's own addresses (runtime/game_addresses/eow_<table>.h); each site asserts its instruction
+            T = game_addresses.other_table(build)
+            # (OPTNONE) a 25 500-line function behind a data table (1.0.2: main+0x3d85e90), never entered in 4 200 frames
+            # of start, file load and play (LARECOMP_FNPROF); at -O1 it took 30+ minutes to compile
+            OPTNONE[T['OPTNONE_TABLE_FN']] = 0xa9ba7bfd  # stp x29, x30, [sp, #-0x60]!
             # a 27 300-line function called once while the game starts (LARECOMP_FNPROF: once in boot to the overworld);
             # at -O2 it took 8 minutes on a Mac and 30+ on a Snapdragon 865 (Android builds it on the phone)
-            OPTNONE[0x70020e7fa0] = 0xa9ba7bfd  # stp x29, x30, [sp, #-0x60]!
+            OPTNONE[T['OPTNONE_SLOW_FN']] = 0xa9ba7bfd  # stp x29, x30, [sp, #-0x60]!
             for _a, _w in OPTNONE.items():
                 _got = struct.unpack_from('<I', m.nso.image, _a - m.base)[0]
                 assert _got == _w, f'OPTNONE {_a:#x}: {_got:#x}, not {_w:#x}'
-            # (warp, runtime/hle/warp_other.c) the level-jump request processor (main+0x160f7e0, x0 = its object,
+            # (warp, runtime/hle/warp_other.c) the level-jump request processor (REQUEST_PROC, x0 = its object,
             # the request at +0x10): its `mov x20, x0` tells us where the request is
             def _eow_request(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
                 assert w == 0xaa0003f4, hex(w)  # mov x20, x0
                 return ('{ extern void rt_other_request_holder(uint64_t); rt_other_request_holder(c->x[0]); c->x[20] = c->x[0]; }'
                         f'  /* {a:#x}: mov x20, x0 (level-jump request processor) */')
-            PATCHES[0x700160f804] = _eow_request
+            PATCHES[T['REQUEST_SITE']] = _eow_request
             # (blur removal, runtime/hle/qol.c) the renderer's per-frame set-up makes the tilt-shift object
             # (renderer +0x600) once, the first time it's reached, as LA's main+0x1071220 does: name copy at +0x58,
             # uniform buffer at +0x50. Its `add x19, x23, #0x600` hands qol.c the object.
@@ -590,11 +594,11 @@ def main():
                 assert w == 0x911802f3, hex(w)  # add x19, x23, #0x600
                 return ('{ extern void rt_tilt_obj(uint64_t); c->x[19] = c->x[23] + 0x600; rt_tilt_obj(c->x[19]); }'
                         f'  /* {a:#x}: add x19, x23, #0x600 (tilt-shift set-up: blur removal) */')
-            PATCHES[0x70027802e8] = _eow_tilt
+            PATCHES[T['TILT_SITE']] = _eow_tilt
             # (resolution, runtime/nvn/output_scale.c) the game's own dynamic resolution, off - as LA's
-            # GAME_DYNRES_SITE. Its frame controller (main+0x346530) reads the scaler's enabled byte (+0x480 of its
+            # GAME_DYNRES_SITE. Its frame controller (1.0.2: main+0x346530) reads the scaler's enabled byte (+0x480 of its
             # object); on, it turns the GPU timing counters into a load figure and steps its 3D a level (1080 - 36 x
-            # level lines) after 6 samples over 90% / under 70% (main+0x3468c0). It started at 1408x792 and climbed
+            # level lines) after 6 samples over 90% / under 70%. It started at 1408x792 and climbed
             # to 1920x1080 on a fast GPU: our scale (Match display maps 792 lines to the window) then drew the 3D at
             # up to 1.9x the window's pixels (6982x1964 for 5120x1440), new targets at each step, and frames over
             # 16.7 ms once our own window step (SMAA, upscale) came on top. Read as 0: it stays at 1408x792.
@@ -605,44 +609,44 @@ def main():
                 return ('{ extern int rt_game_dynres(void); '
                         'c->x[8] = rt_game_dynres() ? LD8(c->x[26] + 0x480) : 0; }'
                         f'  /* {a:#x}: ldrb w8, [x26, #0x480] (the game\'s dynamic resolution: off) */')
-            PATCHES[0x7000346580] = _eow_dynres
+            PATCHES[T['DYNRES_SITE']] = _eow_dynres
             # (frame pacing, runtime/nvn/pace.c rt_other_fps_window) the frame controller at 30 fps, at the end of a
             # 12-frame window, reads how many of its frames took over 1/60 s; 0 takes it back to 60. On phone and tablet
             # GPUs its frames read slow at 30 by the lowered clock alone: the runtime may answer 0 to try 60
+            # (1.0.2: `ldr w9, [x26, #0x4fc]`; 1.0.0 keeps its counters 8 bytes lower: the offset is the instruction's)
             def _eow_fps_window(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-                assert w == 0xb944ff49, hex(w)  # ldr w9, [x26, #0x4fc]
+                assert (w & 0xFFC003FF) == 0xB9400349, hex(w)  # ldr w9, [x26, #off]
+                off = ((w >> 10) & 0xFFF) * 4
                 return ('{ extern uint32_t rt_other_fps_window(uint32_t); '
-                        'c->x[9] = rt_other_fps_window(LD32(c->x[26] + 0x4fc)); }'
-                        f'  /* {a:#x}: ldr w9, [x26, #0x4fc] (30 fps window: its slow frames) */')
-            PATCHES[0x7000347370] = _eow_fps_window
+                        f'c->x[9] = rt_other_fps_window(LD32(c->x[26] + {off:#x})); }}'
+                        f'  /* {a:#x}: ldr w9, [x26, #{off:#x}] (30 fps window: its slow frames) */')
+            PATCHES[T['FPS_WINDOW_SITE']] = _eow_fps_window
             # ... and at 60, its count of frames in a row over 1/60 s (at 1 or 2 it goes to 30): 0 for a moment
-            # after a try, while the clock comes up
+            # after a try, while the clock comes up. 1.0.0 has no such count (one slow frame takes it to 30: the
+            # runtime's 60 fps limit gives the same grace there, rt_other_fps_limit)
             def _eow_slow60(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
                 assert w == 0xb945034a, hex(w)  # ldr w10, [x26, #0x500]
                 return ('{ extern uint32_t rt_other_slow60(uint32_t); '
                         'c->x[10] = rt_other_slow60(LD32(c->x[26] + 0x500)); }'
                         f'  /* {a:#x}: ldr w10, [x26, #0x500] (60 fps: frames over 1/60 s in a row) */')
-            PATCHES[0x7000347668] = _eow_slow60
+            if T['SLOW60_SITE']:
+                PATCHES[T['SLOW60_SITE']] = _eow_slow60
             # ... and the frame time it calls slow, 1/60 s (`movk w9, #0x3c88, lsl #16` after `mov w9, #0x8889`), in its 30
             # and its 60 fps branch: with Dynamic resolution the FPS target decides instead (rt_other_fps_limit)
             def _eow_fps_limit(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
                 assert w == 0x72a79109, hex(w)  # movk w9, #0x3c88, lsl #16
-                at30 = 1 if a == 0x7000347340 else 0
+                at30 = 1 if a == T['FPS_LIMIT_30_SITE'] else 0
                 return ('{ extern uint32_t rt_other_fps_limit(int); '
                         f'c->x[9] = rt_other_fps_limit({at30}); }}'
                         f'  /* {a:#x}: movk w9, #0x3c88, lsl #16 (1/60 s: a slow frame, {"30" if at30 else "60"} fps branch) */')
-            for a in (0x7000347340, 0x700034756c):
+            for a in (T['FPS_LIMIT_30_SITE'], T['FPS_LIMIT_60_SITE']):
                 PATCHES[a] = _eow_fps_limit
             # (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
             # `movz wD, #0x8e39; movk wD, #0x3fe3, lsl #16`: the movk gets the runtime's aspect instead
-            eow_aspect = [0x700033d32c, 0x700033e6f8, 0x7000348b70, 0x7000351e20, 0x7000c2bd3c, 0x7000c2c8b4,
-                          0x7000c3268c, 0x7000c409bc, 0x7000c41084, 0x7000c42784, 0x7000c4597c, 0x7000c46da8,
-                          0x7001583b40, 0x7001584390, 0x70015866d0, 0x70015879dc, 0x70015ec260, 0x7001628908,
-                          0x7001645218, 0x7001646d58, 0x70020ebc34, 0x700231dfe8, 0x700231e050, 0x7002703a30,
-                          0x7002722884, 0x700279adcc]
+            eow_aspect = [v for k, v in sorted(T.items()) if k.startswith('ASPECT_SITE_')]
             def _eow_aspect(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
                 assert (w & 0xFFFFFFE0) == 0x72A7FC60, hex(w)  # movk wD, #0x3fe3, lsl #16
@@ -655,7 +659,7 @@ def main():
             # lock-on reticle L_LockOn_00 and the others below): the code works the spot out with the widened camera
             # and turns it into the 16:9 layout's units (x 960, y 540 from the centre), then stores it as the root
             # pane's translation, `stp sA, sB, [xN, #0x30]` = x, y. The runtime rescales them to the window's shape.
-            eow_spot = [0x700249be34, 0x70024b7ae4, 0x70024b7db4, 0x70024d4408, 0x70025532fc, 0x70025efc48]
+            eow_spot = [v for k, v in sorted(T.items()) if k.startswith('SPOT_SITE_')]
             def _eow_spot(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
                 assert (w & 0xFFFF8000) == 0x2D060000, hex(w)  # stp sA, sB, [xN, #0x30]
@@ -896,7 +900,7 @@ def main():
         write_if_changed(os.path.join(args.outdir, f'{args.name}_table.c'), f.getvalue())
     if args.name == 'main':  # (what this code was generated from: the Makefile's game code library id, GAMELIB_BUILD_ID)
         write_if_changed(os.path.join(args.outdir, 'main_build_id.txt'),
-                         (game_addresses.GAMES[args.game][1] if args.game != 'la' else
+                         (game_addresses.game_build(m.nso.build_id)['build_id'] if args.game != 'la' else
                           game_addresses.VERSIONS[version][1]) + '\n')
     print(f'{args.name}: wrote {nchunks} chunks, {time.time() - t0:.0f}s total', file=sys.stderr)
 

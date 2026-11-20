@@ -47,6 +47,20 @@ for key in VERSIONS:
         assert list(patch_values) == list(tables['v1_0_0'][0]), f'patches_{key}.h names differ from v1_0_0'
         assert list(runtime_values) == list(tables['v1_0_0'][1]), f'runtime_{key}.h names differ from v1_0_0'
 assert len({bid for _, bid in VERSIONS.values()}) == len(VERSIONS)
+
+# ---- other games (games.h): one table per build, the same names in the same order (the C struct is laid out from
+# eow_v1_0_2.h's), every address inside main, each build ID once
+builds = game_addresses.GAME_BUILDS
+assert len({b['build_id'] for b in builds}) == len(builds)
+assert {b['build_id'] for b in builds}.isdisjoint(bid for _, bid in VERSIONS.values())
+eow_names = list(game_addresses.load_other_table(TABLE_DIR/'eow_v1_0_2.h'))
+for b in builds:
+    t = game_addresses.other_table(b)
+    assert list(t) == eow_names, f"{b['key']}_{b['table']}.h names differ from eow_v1_0_2.h"
+    assert all(not v or MAIN_BASE <= v < b['sdk_base'] for v in t.values()), \
+        f"{b['key']}_{b['table']}.h: an address outside main"  # (0: not in this build)
+    assert game_addresses.game_build(b['build_id'].lower()) is b
+assert sorted(p.name for p in TABLE_DIR.glob('eow_v*.h')) == sorted(f"{b['key']}_{b['table']}.h" for b in builds)
 assert version_for_build_id('ae16f71e002af8cb059a9a74c4d90f34ba984892') == 'v1_0_0'
 assert version_for_build_id('909E904AF78AC1B8DEEFE97AB2CCDB51968F0EC7') == 'v1_0_1'
 for bad in ('', 'ae16f71e002af8cb', 'ae16f71e002af8cb059a9a74c4d90f34ba98489200000001', '00' * 20):
@@ -292,7 +306,8 @@ for path in (ROOT/'runtime').rglob('*'):
     if path.suffix not in ('.c', '.h', '.m', '.mm', '.cpp') or path.parent.name == 'game_addresses':
         continue
     code = strip_c.sub('', path.read_text(encoding='utf-8'))
-    assert not re.search(r'\bGA_(?!ADDR\b|VERSION\b|RELEASE\b|FIELD\b|AT\b)[A-Z]', code), f'{path}: use GA(NAME)'
+    assert not re.search(r'\bGA_(?!ADDR\b|VERSION\b|RELEASE\b|FIELD\b|AT\b|GAME\b)[A-Z]', code), f'{path}: use GA(NAME)'
+    assert set(re.findall(r'\bOTHER\(([A-Z][A-Z0-9_]*)\)', code)) <= set(eow_names), str(path)
     assert set(re.findall(r'\bGA(?:_FIELD)?\(([A-Z][A-Z0-9_]*)\)', code)) <= values.keys(), str(path)
     for match in re.finditer(r'0x(700[0-9a-fA-F]{7})', code):
         assert int(match[1], 16) in (0x7000000000, 0x7004000000), str(path)

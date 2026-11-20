@@ -1,6 +1,6 @@
 // Start screen, shown before the game boots (user 2026-10-08, styled after Dusklight's launcher): PLAY (the vanilla
 // game), RANDOMIZER (‹ New Seed / a seed ›: user 2026-11-09), SETTINGS, QUIT, game-files status at the lower left.
-// Nothing of the game ships with ReTri: on first launch the user picks the folder with their own game files (1.0.0, 1.0.1 or 1.1.0), we check
+// Nothing of the game ships with ReTri: on first launch the user picks the folder with their own game files (1.0.0, 1.0.1 or 1.0.2), we check
 // the main module's build id (runtime/game_addresses/versions.h), copy the files and build the game's data image; PLAY stays disabled until that worked. The background is the game's own title movie (from the user's files) once extracted: a frame of it, or for EoW on Metal the movie playing.
 //
 // Skipped with --play, LARECOMP_NO_LAUNCHER=1, or any scripted test run (LARECOMP_INPUT): tests boot straight in
@@ -335,12 +335,12 @@ static std::string refused_main(const std::string &exefs) {
         fprintf(stderr, "[launcher] game files: exefs/main isn't the game's program (no NSO0 header)\n");
     if (first && k == GAME_MAIN_NSO)
         fprintf(stderr, "[launcher] game files: an unsupported version (main build ID %s; supported: 1.0.0, 1.0.1, "
-                "1.1.0)\n", hex);
+                "1.0.2)\n", hex);
     return k == GAME_MAIN_NSO ? std::string(hex, 16) : std::string();
 }
 // (with the build ID's first 16 hex digits; without one, the line alone)
-static const char *const VERSION_HINT = LN("ReTri needs version 1.0.0, 1.0.1 or 1.1.0 of the game.");
-static const char *const VERSION_ID_HINT = LN("ReTri needs version 1.0.0, 1.0.1 or 1.1.0 of the game. These game "
+static const char *const VERSION_HINT = LN("ReTri needs version 1.0.0, 1.0.1 or 1.0.2 of the game.");
+static const char *const VERSION_ID_HINT = LN("ReTri needs version 1.0.0, 1.0.1 or 1.0.2 of the game. These game "
                                               "files have build ID %s.");
 // (English, as the setup lines: shown() puts it in the menus' language)
 static std::string version_hint(const std::string &exefs) {
@@ -407,9 +407,11 @@ static bool app_fits_files(const std::string &exefs_parent, std::string *app_v, 
     char built[64], label[32];
     const GameVersion *a = gamelib_built_for(built, sizeof built) ? game_version_by_build_prefix(built) : NULL;
     const GameVersion *f = game_version_of(exefs_parent.c_str());
+    if (!f) f = game_other_of(exefs_parent.c_str());  // (EoW: each build its own game code too)
     if (!a || !f || a == f) return true;
     const char *fl = game_release_label((exefs_parent + "/exefs").c_str(), label, sizeof label);
-    if (app_v) *app_v = a->label;
+    const char *ar = game_other_release_of(a);
+    if (app_v) *app_v = ar ? ar : a->label;
     if (files_v) *files_v = fl ? fl : f->label;
     return false;
 }
@@ -2325,8 +2327,7 @@ static int same_game_files(const std::string &root, const char *src) {  // 1 sam
     bool unusable = false;
     find_game(src, exefs, romfs, unusable);
     if (exefs.empty() || romfs.empty()) return -1;
-    // The same main build ID; for LA also the same release (game_release_label: releases sharing a main). EoW has no
-    // label (game_other), so the build ID alone decides there.
+    // The same main build ID and the same release (game_release_label: LA's releases sharing a main).
     std::string ia = main_build_id(exefs), ib = main_build_id(root + "/exefs");
     char a[32], b[32];
     const char *x = game_release_label(exefs.c_str(), a, sizeof a), *y = game_release_label((root + "/exefs").c_str(), b, sizeof b);
