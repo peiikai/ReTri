@@ -8,6 +8,6 @@
 
 ## Checklist
 
-- [ ] Targets `develop` (or `release/X.Y` for a fix that release needs)
+- [ ] Targets `develop` (or `release/X.Y` for an urgent fix), never `main`
 - [ ] `CHANGELOG.md` updated under Unreleased (if users notice it)
 - [ ] No game files, generated code or fonts

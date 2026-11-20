@@ -27,18 +27,17 @@ ReTri uses [Semantic Versioning](https://semver.org): `MAJOR.MINOR.PATCH`.
 
 | Branch | What it holds | Branches from | Merges into |
 | --- | --- | --- | --- |
-| `main` | released code only, one tag per release | | |
-| `develop` | the next version | | `release/X.Y` |
-| `release/X.Y` | one release line: its last bug fixes, then patch releases | `develop` | `main` (tagged), then back into `develop` |
+| `main` | the current release; never target it | | |
+| `release/X.Y` | the current release; urgent fixes target it | `develop` | `main` (tagged), then back into `develop` |
+| `develop` | the next release; features, and fixes that are less urgent or higher risk | | `release/X.Y` |
 | `feature/<name>` | new features | `develop` | `develop` |
-| `fix/<issue>-<name>` | bug fixes | `develop`, or `release/X.Y` for a fix that release needs | the branch it came from (`release/X.Y`, then back into `develop`) |
+| `fix/<issue>-<name>` | bug fixes | `release/X.Y` if urgent, else `develop` | the branch it came from |
 | `docs/<name>`, `ci/<name>`, `chore/<name>` | docs, CI, upkeep | `develop` | `develop` |
 
 Rules:
 - Branch names are lower case with dashes, for example `fix/12-text-box-flicker`. Never `claude/...`.
-- A fix targets `release/X.Y` when that release needs it, otherwise `develop`. The maintainer decides which version
-  ships it. A release branch is merged back into `develop`, so its fixes reach the next version too.
-- Features never target `release/X.Y`: they go into `develop` and ship in the next version.
+- Never target `main`.
+- Urgent fixes target `release/X.Y`. Features, and fixes that are less urgent or higher risk, target `develop`.
 - `main`, `develop` and `release/*` only change through pull requests. A local pre-push hook refuses direct pushes
   to them (see below).
 - Merge pull requests with a merge commit, so each branch's history stays readable. Delete the branch after it is
@@ -48,7 +47,7 @@ Rules:
 
 - Commit messages are plain English: a short first line saying what changed and why.
 - Each PR does one thing. It names its issue (`Fixes #12`), says how it was tested and updates `CHANGELOG.md`.
-- PRs target `develop`. A fix may target `release/X.Y` instead; features never do.
+- PRs target `develop`, or `release/X.Y` for an urgent fix. Never `main`.
 - The game is play-tested before any PR touching rendering, timing or audio is merged.
 
 ## Pre-push guard
