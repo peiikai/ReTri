@@ -201,12 +201,6 @@ These are under Video and General in ReTri's menu.
 - **Remove tilt-shift blur** (General) turns off the blur at the top and bottom of the screen.
 - **Button icons** (Controls) shows Nintendo, Xbox or PlayStation buttons. Auto matches your controller.
 
-## Performance tips
-
-- Turn on Dynamic resolution and pick an FPS target.
-- Set Ambient occlusion to Off on weaker GPUs.
-- Let the shaders finish preparing before you play.
-
 ## Building from source
 
 Every platform needs your own game files (v1.0.0, v1.0.1 or v1.0.2): build first, then use the start screen's game-file setup.
