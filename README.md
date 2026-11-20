@@ -8,9 +8,9 @@
 > in the controversy in relation to this project. You may simply ignore this project and its code.
 > As with anything on the internet, you run the code at your own discretion.
 
-**ReTri** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch) into a native
-macOS application (Apple Silicon, Metal). It is built on the LAS Recomp runtime, which still supports *Link's
-Awakening*; much of the text below is that runtime's and describes Link's Awakening.
+**ReTri** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch, 2024) into a
+native Windows, macOS, Linux, Android and iOS application. It is built on the runtime of
+[LAS Recomp](https://github.com/peiikai/LASRecomp), the same kind of port for *Link's Awakening*.
 
 > [!NOTE]
 > Currently supported platforms:
@@ -19,8 +19,8 @@ Awakening*; much of the text below is that runtime's and describes Link's Awaken
 > - Linux - x86-64, Vulkan graphics backend (AppImage)
 > - Android - arm64, Vulkan graphics backend
 > - iPhone and iPad - arm64, Metal graphics backend (sideloaded: see [iPhone and iPad](#iphone-and-ipad))
-> - Linux aarch64 (ARM) - **experimental**: the latest build is on the [Experimental builds](https://github.com/peiikai/LASRecomp/releases/tag/experimental) page; reports welcome
->   ([docs/linux.md](docs/linux.md) lists what to include)
+> - Windows on ARM (arm64) and Linux aarch64 (ARM) - **experimental**: on the [releases](https://github.com/peiikai/ReTri/releases)
+>   page; reports welcome ([docs/linux.md](docs/linux.md) lists what to include)
 
 ## System requirements
 
@@ -52,6 +52,10 @@ These are the minimums during the beta and may change as development continues.
 > We recommend turning on Dynamic resolution and choosing an FPS target. The resolution then adjusts to what your device
 > can handle, and drops when the chip heats up and slows down, which most phones and tablets do over longer play.
 
+> [!NOTE]
+> Some Qualcomm (Adreno) GPU drivers have many bugs, even on newer phones. If you see graphical issues, try a Turnip
+> driver (Settings > System, see the GPU driver row above) before you open an issue report.
+
 **iPhone and iPad:**
 
 | | Minimum |
@@ -64,27 +68,24 @@ These are the minimums during the beta and may change as development continues.
 > We recommend turning on Dynamic resolution and choosing an FPS target. The resolution then adjusts to what your device
 > can handle, and drops when the chip heats up and slows down, which most phones and tablets do over longer play.
 
-![Mabe Village in a 21:9 window: the unlocked aspect ratio shows more of the island](docs/ultrawide.jpg)
+![Echoes of Wisdom in a 21:9 window: with Aspect ratio Unlocked the camera fills the whole width](docs/ultrawide.jpg)
 
 > [!NOTE]
 > **No game files are included.** ReTri needs your own legally obtained copy of the extracted game files of
-> *Link's Awakening* **v1.0.0, v1.0.1 or v1.1.0**. When setting up, choose a folder that contains the `exefs`
+> *Echoes of Wisdom* **v1.0.2**. When setting up, choose a folder that contains the `exefs`
 > and `romfs` folders, or their contents. Instructions on how to obtain these files will **NOT** be provided.
 > On first launch the app sets up what it needs, including the actual recompilation locally. No game files, assets or fonts are included.
 > The screenshot shows the start screen after setup; no Nintendo artwork is included until provided by the user.
 
 ![The start screen: play, set up your game files, settings](docs/start_screen.jpg)
 
-## Project Discord
-https://discord.gg/DhrgdYqdcY
-
 ## Status
 
-This is a beta release. That means bugs are likely, crashes could occur and some graphics issues remain (especially in wide and ultrawide aspect ratios). This is a work in progress, hence the beta designation. To report a bug, open a [GitHub issue](https://github.com/peiikai/LASRecomp/issues) - see [CONTRIBUTING.md](CONTRIBUTING.md#reporting-bugs) for what to include.
+This is a beta release. That means bugs are likely, crashes could occur and some graphics issues remain (especially in wide and ultrawide aspect ratios). This is a work in progress, hence the beta designation. To report a bug, open a [GitHub issue](https://github.com/peiikai/ReTri/issues) - see [CONTRIBUTING.md](CONTRIBUTING.md#reporting-bugs) for what to include.
 
 ### Known issues
 
-Known issues and their status are on the [GitHub issues page](https://github.com/peiikai/LASRecomp/issues).
+Known issues and their status are on the [GitHub issues page](https://github.com/peiikai/ReTri/issues).
 
 ## Steam Deck
 
@@ -140,27 +141,22 @@ GetMoreRam. More on the iOS app is there too.
 ## Features
 
 - **This is not emulation.** It runs natively on Windows, macOS, Linux, Android, iPhone and iPad.
-- Works with game versions 1.0.0, 1.0.1 and 1.1.0.
-- Wider screens show more of the island, up to ultrawide. You can switch back to the original 16:9.
+- Works with game version 1.0.2.
+- Wider screens show more of the world, up to ultrawide: the camera, the echo list and the pause screen fill the
+  window. You can switch back to the original 16:9.
 - Higher resolutions, a "match your display" option and dynamic resolution with an FPS target, with MetalFX (Mac)
   or FSR 1 (Windows, Linux and Android) upscaling and SMAA anti-aliasing.
-- Sharper shadows, ambient occlusion and Frame Generation, each optional.
+- Sharper shadows, and an option to remove the tilt-shift blur.
 - Shaders are prepared ahead of time, so new areas don't stutter.
 - In-game menu: F1, or Home or Minus + Plus on a controller.
-- Keyboard, controller and touch controls, with every button remappable and a touch layout editor. Button prompts
+- Keyboard, controller and touch controls, with every button remappable and a touch layout editor. Button icons
   match your controller (Xbox, PlayStation or Nintendo).
-- Controller rumble, and the light bar on PlayStation controllers shows Link's health.
 - Stereo or 5.1 surround sound.
-- Play in English, Japanese, Spanish, French, German, Italian, Dutch, Russian, Korean or Chinese (Simplified or
-  Traditional), with menus also in Portuguese (Brazil). Auto follows your system language.
-- Optional extras: 360-degree movement, a hookshot that snaps to 8 directions, faster or instant text, blur removal,
-  mirror mode and faster walking.
-- Cosmetics: colours for Link, the grass, water, walls and more, weather (looks only), and Game Boy style filters.
-- Optional run timer, with LiveSplit support.
+- Can be started from game launchers, with a profile for RecompLauncher (see [Launchers](#launchers)).
 
 ## Building from source
 
-Every platform needs your own game files (v1.0.0, v1.0.1 or v1.1.0): build first, then use the start screen's game-file setup.
+Every platform needs your own game files (v1.0.2): build first, then use the start screen's game-file setup.
 `make gen` then recompiles the game code from your own game files into `generated/` (the generator, `build/lasgen`, is
 built first), and `make` builds it into its own library next to the app (`build/eowgame.*`); without it the start
 screen builds that library itself, as it does for players. Release builds hold none of the game's code: the start
@@ -215,6 +211,15 @@ Where files live (game files, saves, settings and logs):
 - `--data-dir <dir>` (or `LARECOMP_DATA_ROOT=<dir>`) overrides all of these.
 - For a bug report, attach `eowrecomp.log` from that folder.
 
+### Android
+
+Requirements: the Android SDK with NDK 30.0.16248370, CMake 3.30.4 and platform 36, JDK 17 or newer, bash, curl and
+Python 3 (for the dependency script). Details in [docs/android.md](docs/android.md).
+
+1. Dependencies (once): `bash android/deps/build_deps.sh` and `bash android/deps/build_gen_deps.sh`.
+2. Build: `cd android && ./gradlew assembleDebug` -> `android/app/build/outputs/apk/debug/app-debug.apk`.
+3. Install it on the phone and set up your game files from the start screen. The game code is built on the phone.
+
 ### Resuming game-code builds
 
 If the game-code build is cancelled or interrupted, **Resume game code** continues where it stopped. It also resumes
@@ -223,7 +228,11 @@ without touching the installed game, your game files or your saves.
 
 ## Credits
 
-**Contributors** - thank you to everyone who has sent code (GitHub handles, in order of first contribution):
+**[LAS Recomp](https://github.com/peiikai/LASRecomp)** - ReTri runs on its runtime: the host, the graphics backends,
+the menus, the ports and the game code builder all come from it.
+
+**LAS Recomp contributors** - their code is in ReTri too. Thank you to everyone who has sent code (GitHub handles, in
+order of first contribution; the numbers are LAS Recomp pull requests):
 - **[@dvilelaf](https://github.com/dvilelaf)** - the System language setting (#15), a packaging fix (#10) and the
   level-transition crash fix (#34)
 - **[@Tensorlong](https://github.com/Tensorlong)** - the fix for the white Link on M1 Macs (#18)
@@ -262,16 +271,8 @@ without touching the installed game, your game files or your saves.
 
 Thanks also to everyone who reports issues and tests builds. Your logs and screenshots find most of the bugs.
 
-**Community mods** - some options re-implement ideas from these GameBanana mods (re-implemented in the recomp;
-none of their files are used):
-- **360 Controls (And More!)** by Owen_Splat - 360-degree movement, blur removal (blur removal patch by theboy181)
-  (https://gamebanana.com/mods/659802)
-- **XBOX UI** by fellow_demo - Xbox button prompts (https://gamebanana.com/mods/540069)
-- **PS4 UI Buttons** by messiahgov - PlayStation button prompts (https://gamebanana.com/mods/324458)
-- **No Hero Mode Indicator** by Boo/Calla - hide the Hero Mode icon (https://gamebanana.com/mods/441172)
-
 **Art**
-- **[Kenney](https://kenney.nl)** - the D-pad on the HUD for D-pad items, from the Input Prompts pack (CC0,
+- **[Kenney](https://kenney.nl)** - the D-pad art, from the Input Prompts pack (CC0,
   `third_party/kenney`)
 
 **Libraries and tools**
@@ -312,8 +313,8 @@ none of their files are used):
 
 ## Legal
 
-ReTri is a fan project. It is not affiliated with, endorsed by or sponsored by Nintendo. *The Legend of Zelda*
-and *Link's Awakening* are trademarks of Nintendo. No game files, game code, assets or fonts are included - not in
+ReTri is a fan project. It is not affiliated with, endorsed by or sponsored by Nintendo. *The Legend of Zelda*,
+*Echoes of Wisdom* and *Link's Awakening* are trademarks of Nintendo. No game files, game code, assets or fonts are included - not in
 this repository and not in release builds. You must provide your own legally obtained copy of the game files to play.
 
 ## License
