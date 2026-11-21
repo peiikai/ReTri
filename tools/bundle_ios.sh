@@ -99,8 +99,12 @@ mkdir -p "$APP/LICENSES"
 cp third_party/ryujinx/LICENSE.txt "$APP/LICENSES/audio-renderer-port-LICENSE.txt"
 cp third_party/imgui/LICENSE.txt "$APP/LICENSES/imgui-LICENSE.txt"
 cp third_party/smaa/LICENSE.txt "$APP/LICENSES/SMAA-LICENSE.txt"
-[ -d "$DEPS/licenses" ] || { echo "no $DEPS/licenses (make deps-ios again: it collects the licence texts)"; exit 1; }
-cp "$DEPS"/licenses/* "$APP/LICENSES/"
+# (by name: a build/deps-ios from before the Python removal still holds Python's and its packages' texts, which
+# then went into the kit)
+for f in SDL3-LICENSE.txt FFmpeg-COPYING.LGPLv2.1.txt; do
+    [ -f "$DEPS/licenses/$f" ] || { echo "no $DEPS/licenses/$f (make deps-ios again: it collects the licence texts)"; exit 1; }
+    cp "$DEPS/licenses/$f" "$APP/LICENSES/"
+done
 
 # App icon: the asset catalog compiled from the 1024 png (Assets.car + CFBundleIcons); skipped without actool.
 if command -v xcrun >/dev/null && xcrun --find actool >/dev/null 2>&1; then
