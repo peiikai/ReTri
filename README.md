@@ -14,15 +14,15 @@
 > for any problem you come across, and include your `eowrecomp.log` file and your system specifications.
 
 **ReTri** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch, 2024) into a
-native Windows, macOS, Linux, Android and iOS application.
+native Windows, macOS and Linux application. Android and iOS builds are in testing on nightly builds.
 
 > [!NOTE]
 > Currently supported platforms:
 > - macOS - Apple Silicon only, Metal graphics backend + MetalFX
 > - Windows - x86-64 only, Vulkan graphics backend
 > - Linux - x86-64, Vulkan graphics backend (AppImage)
-> - Android - arm64, Vulkan graphics backend
-> - iPhone and iPad - arm64, Metal graphics backend (sideloaded: see [iPhone and iPad](#iphone-and-ipad))
+> - Android (arm64, Vulkan) and iPhone and iPad (arm64, Metal, sideloaded) - **nightly builds only** for now: they
+>   aren't part of Beta 1 releases. See [iPhone and iPad](#iphone-and-ipad).
 > - Windows on ARM (arm64) and Linux aarch64 (ARM) - **experimental**: on the [releases](https://github.com/peiikai/ReTri/releases)
 >   page; reports welcome ([docs/linux.md](docs/linux.md) lists what to include)
 
@@ -42,7 +42,7 @@ These are the minimums during the beta and may change as development continues.
 | RAM | 8 GB (16 GB recommended) |
 | Disk | About 12 GB free for setup |
 
-**Android:**
+**Android** (nightly builds only, not part of Beta 1):
 
 | | Minimum |
 |---|---|
@@ -60,7 +60,7 @@ These are the minimums during the beta and may change as development continues.
 > Some Qualcomm (Adreno) GPU drivers have many bugs, even on newer phones. If you see graphical issues, try a Turnip
 > driver (Settings > System, see the GPU driver row above) before you open an issue report.
 
-**iPhone and iPad:**
+**iPhone and iPad** (nightly builds only, not part of Beta 1):
 
 | | Minimum |
 |---|---|
@@ -105,10 +105,13 @@ include a profile for RecompLauncher. Details are in [docs/debug-hooks.md](docs/
 
 ## iPhone and iPad
 
+> [!NOTE]
+> iPhone and iPad are on nightly builds only for now: Beta 1 releases don't include the iOS kit (`.laskit`).
+
 The iOS app is made on your computer from your own game files, then sideloaded.
 
 1. Set up ReTri on a Mac, Windows or Linux computer as usual.
-2. From the same release, download `ReTri-<version>-iOS.laskit`.
+2. From a nightly build of the same version, download `ReTri-<version>-iOS.laskit`.
 3. On the start screen, open Settings > System > Recomp for iOS..., choose the kit, then Export iOS app.
    The app is saved to your Downloads folder as `ReTri-<version>-iOS.ipa`.
 4. Install the .ipa with a sideloading tool such as SideStore, AltStore or Sideloadly. A free Apple account works,
