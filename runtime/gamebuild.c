@@ -191,7 +191,7 @@ static bool has_flock(const char *dir) {
 // functions never run in a play session. gamelib-src/hot_functions.txt (the functions play sessions entered, from
 // LASRecomp-Android-Plus by Nycolazs, MIT) keeps those at -O1; every other function in a generated file gets optnone,
 // the -O0 code generator, about 2.3x faster to compile. The list was made on the game's 1.0.0; hot_functions_v1_0_1.txt
-// is the same functions in 1.0.1 / 1.1.0 (tools/hot_functions_map.py). EoW has its own, hot_functions_eow_<key>.txt
+// is the same functions in 1.0.1 / 1.1.0 (tools/hot_functions_map.py). EoW has its own, hot_functions_eow_v1_0_x.txt
 // (recorded on 1.0.2 with LARECOMP_FNPROF, mapped onto 1.0.0 / 1.0.1). LARECOMP_GAMEBUILD_HOT=0: all at -O1. It changes
 // how fast the code builds, not what it does. From LASRecompAndroid by mamcjr (MIT).
 static uint64_t *g_hot;
@@ -737,9 +737,13 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
         const GameVersion *gv = game_version_of(game_dir), *eow = gv ? NULL : game_other_of(game_dir);
         const char *e = getenv("LARECOMP_GAMEBUILD_HOT"), *gen = getenv("LARECOMP_GEN_DIR");
         char hot[1200];  // (the game version's list: the address tables' key, so 1.1.0 uses 1.0.1's)
-        if (eow)  // (EoW: one list per build, hot_functions_eow_v1_0_2.txt; its sdk is loaded higher than LA's)
-            snprintf(hot, sizeof hot, "%s/gamelib-src/hot_functions_eow_%s.txt", gen, eow->key);
-        else
+        if (eow) {  // (EoW: one list per build, release 1.0.2 -> hot_functions_eow_v1_0_2.txt - its key is the game's,
+                    // "eow"; its sdk is loaded higher than LA's)
+            char v[32] = "";
+            const char *r = game_other_release_of(eow);
+            for (size_t i = 0; r && r[i] && i < sizeof v - 1; i++) v[i] = r[i] == '.' ? '_' : r[i];
+            snprintf(hot, sizeof hot, "%s/gamelib-src/hot_functions_%s_v%s.txt", gen, eow->key, v);
+        } else
             snprintf(hot, sizeof hot, "%s/gamelib-src/hot_functions%s%s.txt", gen,
                      gv && strcmp(gv->key, "v1_0_0") ? "_" : "", gv && strcmp(gv->key, "v1_0_0") ? gv->key : "");
         load_hot(e && !atoi(e) ? "" : gv || eow ? hot : "", game_other_sdk_base_of(eow));
