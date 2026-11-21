@@ -84,6 +84,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- Android, Adreno: on the phone's own Qualcomm driver, the start screen recommends a Turnip driver package once,
+  and so does the Vulkan driver setting. If the GPU stops responding, the error now says so and what to do.
 - The iOS app's licence texts: only SDL3's and FFmpeg's from the build, no leftover ones from before Python was
   removed.
 - Recomp for iOS: the page stays open when the export finishes, with where the app went, and the keyboard and a
