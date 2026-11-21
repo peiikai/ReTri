@@ -54,6 +54,10 @@ void save_editor_file_read(const char *p, uint64_t a, int64_t o, int64_t n) {}
 void dpad_items_save_read(const char *p, uint64_t a, int64_t o, int64_t n) {}  // (runtime/hle/dpad_items.c)
 void dpad_items_save_written(const char *p, uint64_t a, int64_t o, int64_t n) {}
 void pace_hitch(const char *why) {}  // (runtime/nvn/pace.c: a save commit is a stall)
+Cpu *kernel_current_cpu(void) { return NULL; }  // (fs.c's LARECOMP_FS_TRAP: runtime/kernel.c)
+uint64_t kernel_heap_size(void) { abort(); }
+void rt_trace_dump(void) { abort(); }
+void warp_other_file_read(const char *p) { abort(); }  // (runtime/hle/warp_other.c)
 static int notices;  // save-failed warnings shown (fs.c tells the player once per run)
 void menu_save_failed(const char *folder) { notices++; }
 #ifdef __linux__
