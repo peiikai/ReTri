@@ -28,8 +28,8 @@ native Windows, macOS and Linux application. Android and iOS builds are in testi
 > - iPhone and iPad - arm64, Metal graphics backend (nightly builds, sideloaded: see [iPhone and iPad](#iphone-and-ipad))
 
 > [!TIP]
-> **Nightly builds** are made from the latest development code and aren't part of Beta 1 releases. Windows on ARM,
-> Android and iPhone and iPad are on nightly builds only for now. They aren't well tested yet, but your reports help
+> **[Nightly builds](https://github.com/peiikai/ReTri/releases/tag/nightly)** are made from the latest development code.
+> Windows on ARM, Android and iPhone and iPad are on nightly builds only for now. They aren't well tested yet, but your reports help
 > us fix whatever you find.
 
 ## System requirements
