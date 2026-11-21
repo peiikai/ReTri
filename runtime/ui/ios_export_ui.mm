@@ -109,7 +109,7 @@ static std::string folder_of(const std::string &path) {
     return sl == std::string::npos ? path : path.substr(0, sl);
 }
 
-void ios_export_rows(bool ready, bool busy, SDL_Window *win) {
+void ios_export_rows(bool ready, bool busy, SDL_Window *win, const std::function<void()> &first_row) {
     g_host.lock();
     std::string kit = g_kit, src = g_src, out = g_out;
     g_host.unlock();
@@ -127,6 +127,7 @@ void ios_export_rows(bool ready, bool busy, SDL_Window *win) {
         static const SDL_DialogFileFilter kit_filters[] = {{"iOS kit", "laskit"}};
         SDL_ShowOpenFileDialog(picked_kit, NULL, win, kit_filters, 1, NULL, false);
     }
+    first_row();
     std::string src_d = L("The game files set up here, or your own copy of the game: any folder the setup would accept "
                           "(exefs and romfs in it, or their contents). Nothing is written into it.");
     if (!src.empty()) src_d += std::string("\n\n") + L("Chosen:") + " " + src;

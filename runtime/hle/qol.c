@@ -169,7 +169,9 @@ void qol_tick(void) {
     setting_at_tick();
     static int env = -1;  // LARECOMP_BLUR_REMOVAL=0/1: test override
     if (env < 0) { const char *e = getenv("LARECOMP_BLUR_REMOVAL"); env = e ? atoi(e) != 0 : 2; }
-    int want = env == 2 ? g_settings.blur_removal : env;
+    // (EoW: off, its row hidden, until the cutscene depth-of-field fix has been tested more - LARECOMP_BLUR_REMOVAL=1 still
+    // turns it on for tests)
+    int want = env == 2 ? g_settings.blur_removal && !game_other() : env;
     if (want != g_tilt_applied && apply_tilt(want)) {
         LOG("[qol] blur removal %s\n", want ? "on" : "off");
         g_tilt_applied = want;

@@ -20,7 +20,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   Linux files. Windows zips are named `windows-x64` / `windows-arm64`.
 - The RecompLauncher profile names what the PC needs (Windows 10, glibc 2.35, Vulkan 1.3), so the launcher can say
   when a PC is too old.
-- "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
 - FPS setting under Resolution: 30 or 60 (default 60), used while Dynamic resolution is off. It switches live.
 - Android (arm64): the app ReTri (`com.retri.android`), which installs next to LAS Recomp. The game code
   is built on the device from your own game files, as in LAS Recomp's Android port.
@@ -44,6 +43,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 - The start screen prepares 836 more shader variants (from a long play test), so fewer stutters the first time a
   scene or effect shows.
+- Android: the first setup builds the game code faster. Functions the game runs in play are built optimized and the
+  rest quickly, as LAS Recomp does, with lists for 1.0.0, 1.0.1 and 1.0.2.
 - Language: Portuguese (Brazil) now changes the game's own text too, not just the menus (it stayed English). New
   options Spanish (Latin America) and French (Canada) use the game's own text for them; Auto picks them from your
   computer's region.
@@ -85,10 +86,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 - The iOS app's licence texts: only SDL3's and FFmpeg's from the build, no leftover ones from before Python was
   removed.
+- Recomp for iOS: the page stays open when the export finishes, with where the app went, and the keyboard and a
+  controller reach its rows (the cursor starts on the iOS kit row).
+- A setup stopped before the game code was built now says "Recompiling the game" when it carries on, not
+  "Updating the game".
+- Setup and Delete game files never write to your own game files through the data folder's links: a setup that
+  can't replace an old link stops instead of writing into it, and on Windows a read-only file stays read-only.
 - Unlocked aspect ratio: the map no longer shows unexplored areas beside the 16:9 part on wide windows.
 - Mac, Aspect ratio Unlocked: rifts no longer flash in wide windows, and their edges are no longer a staircase.
   The outline jumped every few frames while standing still and turned to big steps for a few frames about once a
   second; the rift map now has more pixels in wide windows, so the edges look as they do at 16:9.
+- Start screen: Resolution showed 0x0. Each choice now shows the size the game will render at in this window.
 - Mac: the frame rate no longer slides from 60 to under 30 after the window loses focus (seen at 5120x1440). The
   GPU slowed its clock because each frame's present deadline was set from when it was sent, which a late frame
   still met. Deadlines now follow the 60 fps schedule, so a late frame asks for a faster clock.
