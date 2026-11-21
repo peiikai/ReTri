@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory() as directory:
     cases = [(setting, {}, code) for setting, code in
              [('zh-CN', 'zh-Hans'), ('zh-TW', 'zh-Hant'), ('zh-Hans', 'zh-Hans'),
               ('zh-Hant', 'zh-Hant'), ('en-US', 'en-US'), ('ja', 'ja'), ('unknown', 'en-US'),
-              ('pt-BR', 'pt-BR')]]
+              ('pt-BR', 'pt-BR'), ('es-419', 'es-419'), ('fr-CA', 'fr-CA'), ('es', 'es'), ('fr', 'fr')]]
     if sys.platform.startswith('linux'):
         for locale in ['zh_CN.UTF-8', 'zh_SG.UTF-8', 'zh-Hans', 'zh-Hans-HK', 'zh_Hans_CN', 'zh']:
             cases.append(('auto', {'LC_ALL': locale}, 'zh-Hans'))
@@ -28,7 +28,10 @@ with tempfile.TemporaryDirectory() as directory:
                   ('auto', {'LANG': 'zh_MO.UTF-8'}, 'zh-Hant'),
                   ('auto', {'LC_ALL': 'zh_CN.UTF-8', 'LC_MESSAGES': 'zh_HK.UTF-8'}, 'zh-Hans'),
                   ('auto', {'LC_ALL': 'ja_JP.UTF-8'}, 'ja'), ('auto', {'LC_ALL': 'C'}, 'en-US'),
-                  ('auto', {'LC_ALL': 'pt_BR.UTF-8'}, 'pt-BR')]
+                  ('auto', {'LC_ALL': 'pt_BR.UTF-8'}, 'pt-BR'),
+                  ('auto', {'LC_ALL': 'es_ES.UTF-8'}, 'es'), ('auto', {'LC_ALL': 'es'}, 'es'),
+                  ('auto', {'LC_ALL': 'es_MX.UTF-8'}, 'es-419'), ('auto', {'LC_ALL': 'es-419'}, 'es-419'),
+                  ('auto', {'LC_ALL': 'fr_CA.UTF-8'}, 'fr-CA'), ('auto', {'LC_ALL': 'fr_FR.UTF-8'}, 'fr')]
     count = 0
     for newline in ['\n', '\r\n']:
         for setting, locale, code in cases:
