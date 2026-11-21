@@ -868,9 +868,17 @@ static bool remove_tree_w(wchar_t *w, size_t len, DWORD attr, DWORD tag) {
     bool dir = attr & FILE_ATTRIBUTE_DIRECTORY;
     if ((attr & FILE_ATTRIBUTE_REPARSE_POINT) && !cloud_placeholder(tag))  // junction / symlink: the link only
         return dir ? RemoveDirectoryW(w) != 0 : DeleteFileW(w) != 0;
-    if (!dir && (attr & FILE_ATTRIBUTE_READONLY) && delete_keep_attributes(w)) return true;
+    if (!dir) {
+        // (attr is the folder entry's copy, which NTFS updates only for the name a change went through: a file made
+        // read-only through the player's own name still reads as writable here, and DeleteFileW is then refused)
+        if (!(attr & FILE_ATTRIBUTE_READONLY) && DeleteFileW(w)) return true;
+        if (delete_keep_attributes(w)) return true;
+        DWORD now = GetFileAttributesW(w);  // (the file's own; Windows before 10 1809: cleared to delete)
+        if (now != INVALID_FILE_ATTRIBUTES && (now & FILE_ATTRIBUTE_READONLY))
+            SetFileAttributesW(w, now & ~FILE_ATTRIBUTE_READONLY);
+        return DeleteFileW(w) != 0;
+    }
     if (attr & FILE_ATTRIBUTE_READONLY) SetFileAttributesW(w, attr & ~FILE_ATTRIBUTE_READONLY);
-    if (!dir) return DeleteFileW(w) != 0;
     bool ok = true;
     if (len + 3 >= 32768) return false;
     wcscpy(w + len, L"\\*");

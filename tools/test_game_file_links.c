@@ -106,18 +106,24 @@ int main(int argc, char **argv) {
     printf("setup over a link it can't remove: %s, the player's file %s\n", copied ? "copied" : "failed",
            same(src, PLAYER) ? "unchanged" : "CHANGED");
 
-    // 2. deleting the data folder's copy: the link only, the player's read-only file stays as it was
+    // 2. deleting the data folder's copy: the link only, the player's read-only file stays as it was. Made read-only
+    //    before setup linked it, and after (Windows: the data folder's entry then still lists it as writable)
     remove(dst);
-    CHECK(hard_link(src, dst));
-    make_read_only(src, true);
-    CHECK(plat_remove_tree(data));
-    struct stat st;
-    CHECK(stat(data, &st) != 0);
-    CHECK(same(src, PLAYER));
-    CHECK(read_only(src));
-    printf("delete through a read-only link: the player's file %s, %s\n", same(src, PLAYER) ? "there" : "GONE",
-           read_only(src) ? "still read-only" : "NOT READ-ONLY ANY MORE");
-    make_read_only(src, false);
+    for (int after = 0; after < 2; after++) {
+        mkdir(data, 0755);
+        if (!after) make_read_only(src, true);
+        CHECK(hard_link(src, dst));
+        if (after) make_read_only(src, true);
+        CHECK(plat_remove_tree(data));
+        struct stat st;
+        CHECK(stat(data, &st) != 0);
+        CHECK(same(src, PLAYER));
+        CHECK(read_only(src));
+        printf("delete through a link, read-only %s linking: the player's file %s, %s\n", after ? "after" : "before",
+               same(src, PLAYER) ? "there" : "GONE", read_only(src) ? "still read-only" : "NOT READ-ONLY ANY MORE");
+        make_read_only(src, false);
+        plat_remove_tree(data);
+    }
     plat_remove_tree(player);
 
     if (failures) { printf("%d check(s) failed\n", failures); return 1; }
