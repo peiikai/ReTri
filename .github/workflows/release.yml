@@ -315,7 +315,7 @@ jobs:
       - name: No game files or game code; the kit's layout
         run: |
           K=$(ls build/dist/*-iOS.laskit)
-          ! zipinfo -1 "$K" | grep -q '^Payload/ReTri.app/Frameworks/LASGame.framework/' || { echo "::error::game library in the kit"; exit 1; }
+          ! zipinfo -1 "$K" | grep -qE '^Payload/ReTri.app/Frameworks/LASGame.framework/LASGame(\.id)?$' || { echo "::error::game library in the kit"; exit 1; }
           tools/check_no_game_files.sh "$K"
           zipinfo -1 "$K" | grep -q '^Payload/ReTri.app/Info.plist$' || { echo "::error::no Payload/ReTri.app in the kit"; exit 1; }
           links=$(zipinfo "$K" | grep '^l.* Payload/' || true); [ -z "$links" ] || { echo "::error::symlink entries in the kit's app: $links"; exit 1; }

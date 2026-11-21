@@ -23,7 +23,8 @@ check_dir() {  # <folder> <name for messages>
     while IFS= read -r f; do [ -n "$f" ] && err "$what: must not ship: ${f#"$A"/}"; done < <(
         find "$A" -type d \( -name extracted -o -name 'generated*' -o -name exefs -o -name romfs \) -prune -print
         find "$A" -name '*.c' ! -path '*/zig/lib/*' ! -path '*/gamelib-src/gamelib_entry.c'
-        find "$A" \( -iname 'eowgame*' -o -iname 'lasgame*' \) ! -name '*.h'
+        # (LASGame.framework itself ships, with only its Info.plist: the start screen adds the library on the device)
+        find "$A" -type f \( -iname 'eowgame*' -o -iname 'lasgame*' \) ! -name '*.h'
         find "$A" -type f \( -name main -o -name sdk -o -name 'subsdk[0-9]*' -o -name rtld -o -name '*.npdm' -o -name '*.nso' \
             -o -name '*.nca' -o -name '*.nsp' -o -name '*.xci' -o -name '*.bfres' -o -name '*.bntx' -o -name '*.sarc' \
             -o -name '*.pack' -o -name '*.zs' -o -name '*.bars' -o -name '*.bwav' -o -name '*.bfsar' -o -name '*.bfstm' \
@@ -55,7 +56,8 @@ for P in "$@"; do
                hdiutil attach -quiet -nobrowse -readonly -mountpoint "$MNT" "$P"
                cp -R "$MNT/." "$D/"; hdiutil detach -quiet "$MNT"; MNT= ;;
         *.AppImage) [ -x "$P" ] || chmod +x "$P"
-                    (cd "$D" && "$(cd "$(dirname "$P")" && pwd)/$name" --appimage-extract >/dev/null) ;;
+                    A="$(cd "$(dirname "$P")" && pwd)/$name"  # (absolute: extracted from inside $D)
+                    (cd "$D" && "$A" --appimage-extract >/dev/null) ;;
         *) err "$name: not a file type this check knows"; continue ;;
     esac
     check_dir "$D" "$name"

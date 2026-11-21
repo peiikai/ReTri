@@ -242,12 +242,12 @@ jobs:
           for t in aarch64-macos x86_64-linux aarch64-linux x86_64-windows aarch64-windows; do LLD_TARGET=$t tools/fetch_lld.sh; done
       - name: Kit
         run: make -j"$(sysctl -n hw.ncpu)" ios-kit
-      # (the whole kit: the app under Payload/ and every desktop's linker; LASGame.framework, the game library, is
-      # never in it - the player's desktop builds and adds it)
+      # (the whole kit: the app under Payload/ and every desktop's linker; LASGame.framework holds only its Info.plist:
+      # the game library is never in it - the player's desktop builds and adds it)
       - name: No game files or game code
         run: |
           K=$(ls build/dist/*-iOS.laskit)
-          ! zipinfo -1 "$K" | grep -q '^Payload/ReTri.app/Frameworks/LASGame.framework/' || { echo "::error::game library in the kit"; exit 1; }
+          ! zipinfo -1 "$K" | grep -qE '^Payload/ReTri.app/Frameworks/LASGame.framework/LASGame(\.id)?$' || { echo "::error::game library in the kit"; exit 1; }
           tools/check_no_game_files.sh "$K"
       - name: Publish
         env: { GH_TOKEN: '${{ github.token }}', GH_REPO: '${{ github.repository }}' }
