@@ -110,7 +110,8 @@ Linux: [docs/linux.md](docs/linux.md); iPhone and iPad: [docs/ios.md](docs/ios.m
 
 ## Tests
 
-None of these need game files unless they say so.
+None of these need game files unless they say so. CI runs most of them on every pull request
+([docs/ci.md](docs/ci.md)).
 
 - `python3 tools/menu_strings.py check`: what each menu language is missing (untranslated text shows in English).
 - `python3 tools/test_save.py`: the save handlers commit and reload, and a failed save keeps the last one.
