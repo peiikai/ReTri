@@ -42,6 +42,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Game versions 1.0.0 and 1.0.1 work too, besides 1.0.2. The start screen shows which version the game files are.
 
 ### Changed
+- The start screen prepares 836 more shader variants (from a long play test), so fewer stutters the first time a
+  scene or effect shows.
 - Language: Portuguese (Brazil) now changes the game's own text too, not just the menus (it stayed English). New
   options Spanish (Latin America) and French (Canada) use the game's own text for them; Auto picks them from your
   computer's region.
