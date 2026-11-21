@@ -1,0 +1,509 @@
+# ReTri's release builds (from LAS Recomp's release.yml): each platform's file from the same commit, with its signed
+# update file (update-<platform>.txt, appcast-macOS.xml), put on a DRAFT GitHub release with their sha256s. It never
+# publishes: a person reads the draft, writes the notes and publishes it (then appcast_notes.yml puts the notes in the
+# macOS feed). None of the files holds game code or game files (the start screen builds the game code from the
+# player's own game files): every build runs tools/check_no_game_files.sh before its upload.
+#
+# Runs on a pushed tag vX.Y.Z (notes/releasing.md), or by hand:
+#   gh workflow run release.yml --ref <branch> -f tag=<tag> [-f ref=<branch or commit>] [-f platforms=...]
+#   tag: the release tag; must equal LARECOMP_VERSION (runtime/ui/launcher.mm) at ref - the file names come from it.
+#     test-<name>: a test build (a pre-release). ci-test-<name>: a dry run of this workflow (the tag may differ from
+#     LARECOMP_VERSION; the files keep its name; a pre-release draft).
+#   platforms: test builds only - which files go on the draft (comma list); empty: the release's set.
+#
+# The platforms a release ships (RELEASE below; Beta 1: macOS, Windows x64, Linux x64, and Linux arm64 marked
+# experimental). Android, iOS and Windows on ARM stay on the nightly page for now; to ship one with releases, add it to
+# RELEASE (android, ios, windows-arm64: their jobs are here and run whenever it is named).
+name: Release
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (= LARECOMP_VERSION at ref; test-*: test build; ci-test-*: dry run)'
+        required: true
+      ref:
+        description: 'Branch or commit to build (default: the dispatching ref)'
+        required: false
+        default: ''
+      platforms:
+        description: 'Test builds only: macos, windows, linux, linux-arm64, windows-arm64, android, ios (comma list). Empty: the release set'
+        required: false
+        default: ''
+permissions:
+  contents: read
+concurrency:  # (one run per tag at a time; a second waits instead of racing the first's draft)
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.v.outputs.sha }}
+      version: ${{ steps.v.outputs.version }}
+      platforms: ${{ steps.v.outputs.platforms }}
+      linux: ${{ steps.v.outputs.linux }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      # (the inputs go through env, never into the script text)
+      - name: Tag = LARECOMP_VERSION
+        id: v
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          PLATFORMS: ${{ inputs.platforms }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE="macos windows linux linux-arm64"  # (the platforms every release ships: see the top of this file)
+          [[ $TAG =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::tag '$TAG': letters, digits, . _ - only"; exit 1; }
+          SHA=$(git rev-parse HEAD)
+          VERSION=$(sed -n 's/^#define LARECOMP_VERSION "\(.*\)"/\1/p' runtime/ui/launcher.mm)
+          if [ "$VERSION" != "$TAG" ]; then
+            if [[ $TAG == ci-test-* ]]; then
+              echo "::warning::dry run: tag $TAG, LARECOMP_VERSION $VERSION (the files are named after $VERSION)"
+            else
+              echo "::error::LARECOMP_VERSION at $SHA is '$VERSION', not '$TAG': set it in runtime/ui/launcher.mm first"
+              exit 1
+            fi
+          fi
+          if [[ $TAG == v* ]] && [ "v$(tr -d '[:space:]' < VERSION)" != "$TAG" ]; then
+            echo "::error::VERSION at $SHA is '$(cat VERSION)', not '${TAG#v}'"; exit 1
+          fi
+          # an existing tag must already point at this commit (a dispatched draft's tag is made when it is published)
+          if TAGGED=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" -q .sha 2>/dev/null); then
+            [ "$TAGGED" = "$SHA" ] || { echo "::error::tag $TAG exists at $TAGGED, not at $SHA"; exit 1; }
+          fi
+          PLATFORMS=${PLATFORMS//,/ }
+          if [ -z "${PLATFORMS// /}" ]; then PLATFORMS=$RELEASE
+          elif [[ $TAG != test-* && $TAG != ci-test-* ]]; then echo "::error::platforms: only for test builds; a release ships its set"; exit 1; fi
+          LINUX=()
+          for p in $PLATFORMS; do
+            case $p in
+              macos|windows|windows-arm64|android|ios) ;;
+              linux) LINUX+=('{"arch":"x86_64","name":"x64","runner":"ubuntu-24.04"}') ;;
+              linux-arm64) LINUX+=('{"arch":"aarch64","name":"arm64","runner":"ubuntu-24.04-arm"}') ;;
+              *) echo "::error::platform '$p': macos, windows, linux, linux-arm64, windows-arm64, android or ios"; exit 1 ;;
+            esac
+          done
+          {
+            echo "platforms=$(echo $PLATFORMS)"
+            echo "linux=[$(IFS=,; echo "${LINUX[*]}")]"
+            echo "sha=$SHA"
+            echo "version=$VERSION"
+          } >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+  macos:
+    needs: check
+    if: contains(format(' {0} ', needs.check.outputs.platforms), ' macos ')
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+      - name: Packages
+        run: brew install ninja  # (cmake is on the runner; the rest comes from make deps)
+      # make deps skips each part whose output exists; src/ (sources, build trees) isn't needed for that
+      # (restore / save as two steps: saved as soon as it's built, even when a later step fails)
+      - name: Deps cache
+        id: deps
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/deps
+            !build/deps/src
+          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/build_deps_macos.sh') }}
+      - name: Deps (SDL3, LGPL FFmpeg)
+        run: make deps
+      - uses: actions/cache/save@v4
+        if: steps.deps.outputs.cache-hit != 'true'
+        with:
+          path: |
+            build/deps
+            !build/deps/src
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+      - name: Compiler for the player's machine
+        run: tools/fetch_zig.sh
+      - name: App and disk image
+        run: make -j"$(sysctl -n hw.ncpu)" dmg
+      - name: No game files or game code
+        run: |
+          tools/check_no_game_files.sh build/dist/*-macOS.dmg
+          ls -la build/dist
+      # Sparkle's feed for the macOS app (tools/sparkle_appcast.sh; none without the key). The notes go in once the
+      # release is published (appcast_notes.yml).
+      - name: Sparkle feed
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: tools/sparkle_appcast.sh "$TAG" build/dist/*-macOS.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            build/dist/*.dmg
+            build/dist/appcast-*.xml
+          if-no-files-found: error
+          compression-level: 0  # (already compressed)
+
+  windows:
+    needs: check
+    if: contains(format(' {0} ', needs.check.outputs.platforms), ' windows ')
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: LF line endings, as tools/setup_windows.ps1 sets for clones
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+      # MSYS2 UCRT64 as tools/setup_windows.ps1 sets it up (minus the debugger / validation layers; no FFmpeg: the
+      # release links make deps-windows' LGPL one), nasm for FFmpeg's VP9 assembly, zip / unzip for the release zip
+      # and the compiler download
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: make git curl tar xz diffutils zip unzip
+          pacboy: clang:p lld:p binutils:p sdl3:p vulkan-devel:p shaderc:p spirv-tools:p pkgconf:p
+            vulkan-memory-allocator:p nasm:p
+      - name: Deps cache
+        id: deps
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/deps-win
+            !build/deps-win/src
+          key: deps-${{ runner.os }}-${{ hashFiles('tools/build_deps_windows.sh') }}
+      - name: Deps (LGPL FFmpeg)
+        run: make deps-windows
+      - uses: actions/cache/save@v4
+        if: steps.deps.outputs.cache-hit != 'true'
+        with:
+          path: |
+            build/deps-win
+            !build/deps-win/src
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+      - name: Compiler for the player's machine
+        run: tools/fetch_zig.sh
+      # (make dist: the exe holds no game code, no GPL codec libraries)
+      - name: Release zip
+        run: make -j"$(nproc)" dist
+      - name: No game files or game code
+        run: |
+          tools/check_no_game_files.sh build/dist/*-windows-x64.zip
+          ls -la build/dist
+      # the self-updater's signed manifest (tools/update_manifest.sh; none without the key: Download only)
+      - name: Update manifest
+        env: { UPDATE_SIGNING_KEY: '${{ secrets.UPDATE_SIGNING_KEY }}', VERSION: '${{ needs.check.outputs.version }}' }
+        run: tools/update_manifest.sh "$VERSION" windows-x64 build/dist/*-windows-x64.zip build/dist/ReTri
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            build/dist/*.zip
+            build/dist/update-*.txt
+          if-no-files-found: error
+          compression-level: 0
+
+  # Windows on ARM (MSYS2 CLANGARM64): nightly only for now; built when the platforms name windows-arm64
+  windows-arm64:
+    needs: check
+    if: contains(format(' {0} ', needs.check.outputs.platforms), ' windows-arm64 ')
+    runs-on: windows-11-arm
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: LF line endings, as tools/setup_windows.ps1 sets for clones
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANGARM64
+          update: true
+          install: make git curl tar xz diffutils zip unzip
+          pacboy: clang:p lld:p sdl3:p vulkan-devel:p shaderc:p spirv-tools:p pkgconf:p vulkan-memory-allocator:p
+      - name: Deps cache
+        id: deps
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/deps-win
+            !build/deps-win/src
+          key: deps-windows-arm64-${{ hashFiles('tools/build_deps_windows.sh') }}
+      - name: Deps (LGPL FFmpeg)
+        run: make deps-windows
+      - uses: actions/cache/save@v4
+        if: steps.deps.outputs.cache-hit != 'true'
+        with:
+          path: |
+            build/deps-win
+            !build/deps-win/src
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+      - name: Compiler for the player's machine
+        run: tools/fetch_zig.sh
+      - name: Release zip
+        run: make -j"$(nproc)" dist
+      - name: No game files or game code
+        run: |
+          tools/check_no_game_files.sh build/dist/*-windows-arm64.zip
+          ls -la build/dist
+      - name: Update manifest
+        env: { UPDATE_SIGNING_KEY: '${{ secrets.UPDATE_SIGNING_KEY }}', VERSION: '${{ needs.check.outputs.version }}' }
+        run: tools/update_manifest.sh "$VERSION" windows-arm64 build/dist/*-windows-arm64.zip build/dist/ReTri
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64
+          path: |
+            build/dist/*.zip
+            build/dist/update-*.txt
+          if-no-files-found: error
+          compression-level: 0
+
+  # The iOS kit (tools/ios_kit.sh, one .laskit file): the app without game code (make ios-skeleton: Xcode's iOS SDK,
+  # so a Mac), the Mach-O linker for each desktop (tools/fetch_lld.sh, all five targets) and the compiler's Darwin
+  # headers. The start screen on any desktop reads it as it is and writes the player's .ipa (runtime/iosexport.c).
+  # Nightly only for now; built when the platforms name ios.
+  ios:
+    needs: check
+    if: contains(format(' {0} ', needs.check.outputs.platforms), ' ios ')
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+      - name: Packages
+        run: brew install ninja
+      - name: Deps cache
+        id: deps
+        uses: actions/cache/restore@v4
+        with:
+          path: build/deps-ios
+          key: deps-ios-${{ hashFiles('tools/build_deps_ios.sh', 'tools/patches/SDL3-3.4.18-ios27-orientation.patch') }}  # (as ci.yml's)
+      - name: Deps (SDL3, FFmpeg)
+        run: make deps-ios
+      - uses: actions/cache/save@v4
+        if: steps.deps.outputs.cache-hit != 'true'
+        with:
+          path: build/deps-ios
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+      - name: Toolchain cache (the zig archive, the five lld archives)
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/zig-dl
+            build/lld-dl
+          key: ios-kit-tools-${{ hashFiles('tools/fetch_zig.sh', 'tools/fetch_lld.sh') }}
+      - name: Linkers for every desktop, the compiler's headers
+        run: |
+          tools/fetch_zig.sh
+          for t in aarch64-macos x86_64-linux aarch64-linux x86_64-windows aarch64-windows; do LLD_TARGET=$t tools/fetch_lld.sh; done
+      - name: Kit
+        run: make -j"$(sysctl -n hw.ncpu)" ios-kit
+      # (the kit as the runtime reads it: the app under Payload/, no symlink entries in it (an iOS install drops
+      # them; zipinfo's 'l'), every host's linker in it, the executable signed with its entitlements)
+      - name: No game files or game code; the kit's layout
+        run: |
+          K=$(ls build/dist/*-iOS.laskit)
+          ! zipinfo -1 "$K" | grep -qE '^Payload/ReTri.app/Frameworks/LASGame.framework/LASGame(\.id)?$' || { echo "::error::game library in the kit"; exit 1; }
+          tools/check_no_game_files.sh "$K"
+          zipinfo -1 "$K" | grep -q '^Payload/ReTri.app/Info.plist$' || { echo "::error::no Payload/ReTri.app in the kit"; exit 1; }
+          links=$(zipinfo "$K" | grep '^l.* Payload/' || true); [ -z "$links" ] || { echo "::error::symlink entries in the kit's app: $links"; exit 1; }
+          for t in aarch64-macos x86_64-linux aarch64-linux x86_64-windows aarch64-windows; do
+            zipinfo -1 "$K" | grep -q "^lld/$t/bin/lld" || { echo "::error::no linker for $t in the kit"; exit 1; }
+          done
+          zipinfo -1 "$K" | grep -q '^version.txt$' || { echo "::error::no version.txt in the kit"; exit 1; }
+          X=$(mktemp -d); unzip -q "$K" 'Payload/ReTri.app/eowrecomp' -d "$X"
+          codesign -d --entitlements :- "$X/Payload/ReTri.app/eowrecomp" 2>/dev/null | grep -q increased-memory-limit || { echo "::error::the kit's executable is signed without increased-memory-limit"; exit 1; }
+          ls -la build/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iOS
+          path: build/dist/*-iOS.laskit
+          if-no-files-found: error
+          compression-level: 0
+
+  # Each arch on a runner of its own arch: tools/linux/appimage.sh then builds everything natively in one container
+  # (its cross path stays for an x86-64 machine building the arm64 AppImage). The AppImage and the tarball made from
+  # the same AppDir (tools/linux/tarball.sh: one folder, for places without FUSE).
+  linux:
+    needs: check
+    if: needs.check.outputs.linux != '[]'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.check.outputs.linux) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+      # build_deps.sh skips each part whose output exists (deps-build/: the build trees, not needed for that)
+      - name: Deps cache
+        id: deps
+        uses: actions/cache/restore@v4
+        with:
+          path: build/linux/${{ matrix.arch }}/deps
+          key: deps-linux-${{ matrix.arch }}-${{ hashFiles('tools/linux/build_deps.sh', 'tools/linux/Containerfile') }}
+      - name: AppImage
+        run: make appimage ARCH=${{ matrix.arch }}
+      # saved once complete (shaderc: build_deps.sh's last part), even when a later part of the build fails
+      - uses: actions/cache/save@v4
+        if: always() && steps.deps.outputs.cache-hit != 'true' && hashFiles(format('build/linux/{0}/deps/lib/libshaderc_shared.so*', matrix.arch)) != ''
+        with:
+          path: build/linux/${{ matrix.arch }}/deps
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+      - name: Tarball
+        run: make tarball ARCH=${{ matrix.arch }}
+      - name: No game files or game code
+        run: |
+          tools/check_no_game_files.sh build/dist/*-linux-${{ matrix.name }}.AppImage build/dist/*-linux-${{ matrix.name }}.tar.gz
+          ls -la build/dist
+      - name: Data folder rules
+        run: tools/linux/check_portable.sh ${{ matrix.arch }}
+      - name: Update manifest
+        env: { UPDATE_SIGNING_KEY: '${{ secrets.UPDATE_SIGNING_KEY }}', VERSION: '${{ needs.check.outputs.version }}' }
+        run: tools/update_manifest.sh "$VERSION" linux-${{ matrix.name }} build/dist/*-linux-${{ matrix.name }}.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.name }}
+          path: |
+            build/dist/*.AppImage
+            build/dist/*.tar.gz
+            build/dist/update-*.txt
+          if-no-files-found: error
+          compression-level: 0
+
+  # The Android app as a release build: this release's LARECOMP_VERSION, signed with the published APKs' key
+  # (repository secrets ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD). Nightly only for now; built when the
+  # platforms name android.
+  android:
+    needs: check
+    if: contains(format(' {0} ', needs.check.outputs.platforms), ' android ')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: NDK and CMake
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;30.0.16248370" "cmake;3.30.4" "platforms;android-36" > /dev/null
+      - name: Dependencies cache
+        id: deps
+        uses: actions/cache/restore@v4
+        with:
+          path: android/deps/out
+          key: android-deps-${{ hashFiles('android/deps/build_deps.sh', 'android/deps/build_gen_deps.sh') }}
+      - name: Dependencies (SDL3, shaderc, FFmpeg, volk, Vulkan headers; the game code builder)
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: |
+          bash android/deps/build_deps.sh
+          bash android/deps/build_gen_deps.sh
+      - uses: actions/cache/save@v4
+        if: steps.deps.outputs.cache-hit != 'true'
+        with:
+          path: android/deps/out
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+      - name: APK
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          LARECOMP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          LARECOMP_VERSION_NAME: ${{ needs.check.outputs.version }}
+        run: |
+          [ -n "$KEYSTORE_B64" ] && [ -n "$LARECOMP_KEYSTORE_PASSWORD" ] || { echo "::error::the signing key secrets are not set"; exit 1; }
+          export LARECOMP_KEYSTORE=$RUNNER_TEMP/retri.keystore
+          echo "$KEYSTORE_B64" | base64 -d > "$LARECOMP_KEYSTORE"
+          # (Android's version code only grows: minutes since 2026-01-01)
+          export LARECOMP_VERSION_CODE=$(( ($(date -u +%s) - $(date -u -d 20260101 +%s)) / 60 ))
+          (cd android && ./gradlew assembleRelease --console=plain)
+          rm -f "$LARECOMP_KEYSTORE"
+      - name: Signed, and no game files
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          "$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner" verify --print-certs "$APK"
+          tools/check_no_game_files.sh "$APK"
+          mkdir -p build/dist && cp "$APK" "build/dist/ReTri-$VERSION-android.apk" && ls -la build/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: build/dist/*.apk
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    needs: [check, macos, windows, windows-arm64, linux, android, ios]
+    # (a platform that isn't named is skipped: a skipped job doesn't hold the draft back, a failed one does)
+    if: always() && needs.check.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write  # (only here: the draft release)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Draft release
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          SHA: ${{ needs.check.outputs.sha }}
+          PLATFORMS: ${{ needs.check.outputs.platforms }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd dist
+          mkdir ../manifests && mv update-*.txt appcast-*.xml ../manifests/ 2>/dev/null || true  # (the updaters', beside the files)
+          ls -la . ../manifests
+          # every named platform's files, and nothing else
+          want=0
+          for p in $PLATFORMS; do
+            case $p in
+              macos) pat='*-macOS.dmg' ;; windows) pat='*-windows-x64.zip' ;; windows-arm64) pat='*-windows-arm64.zip' ;;
+              linux) pat='*-linux-x64.AppImage *-linux-x64.tar.gz' ;; linux-arm64) pat='*-linux-arm64.AppImage *-linux-arm64.tar.gz' ;;
+              android) pat='*-android.apk' ;; ios) pat='*-iOS.laskit' ;;
+            esac
+            for g in $pat; do
+              want=$((want + 1))
+              compgen -G "$g" >/dev/null || { echo "::error::$p: no $g"; exit 1; }
+            done
+          done
+          [ "$(ls | wc -l)" -eq "$want" ] || { echo "::error::expected $want files"; exit 1; }
+          MANIFESTS=(); for m in ../manifests/*; do [ -f "$m" ] && MANIFESTS+=("$m"); done
+          {
+            echo "Release notes: (to be written)"
+            echo
+            echo "Built from $SHA."
+            echo
+            if [[ " $PLATFORMS " == *" linux-arm64 "* ]]; then
+              echo "Linux arm64 (\`linux-arm64\`) is **experimental**."
+              echo
+            fi
+            echo "| File | sha256 |"
+            echo "|---|---|"
+            for f in *; do echo "| \`$f\` | \`$(sha256sum "$f" | cut -d' ' -f1)\` |"; done
+          } > ../notes.md
+          cat ../notes.md
+          PRE=(); [[ $TAG == test-* || $TAG == ci-test-* ]] && PRE=(--prerelease)
+          # an existing release is only ever updated while it's still a draft
+          if DRAFT=$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null); then
+            [ "$DRAFT" = true ] || { echo "::error::release $TAG is already published: not touched"; exit 1; }
+            gh release edit "$TAG" --draft --target "$SHA" --notes-file ../notes.md "${PRE[@]}"
+            gh release upload "$TAG" --clobber * "${MANIFESTS[@]}"
+          else
+            gh release create "$TAG" --draft --target "$SHA" --title "$TAG" --notes-file ../notes.md "${PRE[@]}" * "${MANIFESTS[@]}"
+          fi
+          gh release view "$TAG" --json url,isDraft,assets -q '.url, .isDraft, (.assets[] | "\(.name) \(.size)")'

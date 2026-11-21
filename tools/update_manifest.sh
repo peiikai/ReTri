@@ -14,7 +14,9 @@ if [ -z "${UPDATE_SIGNING_KEY:-}" ]; then
     exit 0
 fi
 mkdir -p build/dist
-"${CXX_UPDATE:-clang++}" -std=c++17 -O2 -Iruntime tools/update_sign.cpp -o build/update_sign
+# (-lbcrypt: BCryptGenRandom. update_sign.cpp's #pragma comment(lib) is ignored by MinGW's ld and lld)
+case $(uname -s) in MINGW*|MSYS*) LIBS=-lbcrypt ;; *) LIBS= ;; esac
+"${CXX_UPDATE:-clang++}" -std=c++17 -O2 -Iruntime tools/update_sign.cpp -o build/update_sign $LIBS
 build/update_sign manifest "$@" > "$out.part"
 # (read back from the file as the app reads it: catches anything the way out changed, e.g. CR LF line ends)
 build/update_sign verify "$out.part" "$(build/update_sign public | awk '/^public /{print $2}')"
