@@ -118,6 +118,9 @@ None of these need game files unless they say so.
   resume.
 - `python3 tools/test_cli.py`: the command line for launchers (needs `build/eowrecomp`).
 - `python3 tools/test_data_move.py`: moving the data folder.
+- `python3 tools/test_game_file_links.py`: setup and Delete game files never change the player's files through the
+  data folder's links. `tools/test_game_files_read_only.sh <game files>` runs setup, play and delete under a guard
+  that reports any write to those files (macOS, Linux; needs game files).
 - `python3 tools/test_gen_cpp.py build/lasgen <extracted folder> --game eow`: the C++ generator against the Python
   one (needs game files).
 - `python3 tools/test_game_addresses.py`: the address tables of every game version and the patch output (with
