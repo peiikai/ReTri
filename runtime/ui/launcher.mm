@@ -2966,7 +2966,8 @@ extern "C" void launcher_run(const char *root) {
         if (was_busy && !busy) {
             g_build_cache_changed = true;
             status = check_game_files(g_root);
-            if (status.empty()) { if (!g_bg) load_background(dev); page = MAIN; }
+            // (an iOS export ends here too: its page stays open with the result and Show in Finder)
+            if (status.empty()) { if (!g_bg) load_background(dev); if (page != IOS) page = MAIN; }
             if (status.empty() && ap && getenv("LARECOMP_LAUNCHER_PREPARE")) play = true;
             if (status.empty() && g_cli_play) play = true;
             g_cli_play = false;
@@ -3455,8 +3456,9 @@ extern "C" void launcher_run(const char *root) {
                 opt_begin(ios_page ? "##ios" : "##files", sc, !ios_page && !ready);  // (before the setup: the example folder on the right)
 #if LARECOMP_IOSEXPORT
                 if (ios_page) {
-                    ios_export_rows(ready, busy, win);
-                    first_row();
+                    // (the cursor starts on the kit row: set after the last row, it sat on Export, disabled until a
+                    // kit is chosen, and the keyboard and controller couldn't reach the rows)
+                    ios_export_rows(ready, busy, win, first_row);
                 } else
 #endif
                 if (!ready) {
