@@ -44,15 +44,15 @@ the nightly page only; to ship one with releases, add it to `RELEASE` in `releas
 ## Cost
 
 While the repository is private, Actions minutes come out of the plan's monthly allowance, and GitHub counts a Windows
-minute as two and a macOS minute as ten. Rough numbers per run, with the caches warm (the first run of each job builds
-its dependencies and takes longer):
+minute as two and a macOS minute as ten (each job rounded up to a whole minute). Measured in November 2026, caches
+warm (a job's first run builds its dependencies and takes longer):
 
-| Run | Minutes counted |
-|---|---|
-| `ci.yml`, push or pull request (no macOS) | about 100 |
-| `ci.yml` by hand (with macOS and iOS) | about 350 |
-| `nightly.yml`, every platform | about 500 |
-| `release.yml`, the Beta 1 set | about 300 |
+| Run | Takes | Minutes counted |
+|---|---|---|
+| `ci.yml`, push or pull request (no macOS) | about 12 min | about 60 |
+| `ci.yml` by hand (with macOS and iOS) | about 12 min | about 130 |
+| `nightly.yml`, every platform | about 15 min | about 110 |
+| `release.yml`, the Beta 1 set | about 10 min | about 50 (estimate) |
 
 So the nightly schedule stays off until the repository is public (public repositories' minutes are free). To turn it
 on, uncomment the two `cron` lines at the top of `nightly.yml`.
