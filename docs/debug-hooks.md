@@ -204,6 +204,7 @@ All of these write to the log (`eowrecomp.log` in the data folder, or the run's 
 | `LARECOMP_LOG_DYNRES` | 1 | Log every dynamic resolution decision, not only the steps. |
 | `LARECOMP_METAL_HUD` | 1 | Mac, iPhone and iPad. Set by the app itself when it starts with the Metal HUD setting on; not needed by hand. |
 | `LARECOMP_FNPROF` | `from:to` (frames) | Sample which game functions run between those frames, to `build/fnprof.txt`. `0:<to>` starts at process start. |
+| `LARECOMP_FNPROF_EVERY` | frames | Also write that file every that many frames, for runs that end before `to` (the warp tour). |
 | `LARECOMP_DEBUG_FRAME` | frame | Dump that frame's render passes to `build/pass_NNN.png` and log its draws (F9 does the same for the next frame). |
 | `LARECOMP_DEBUG_FRAMES` | count | With `LARECOMP_DEBUG_FRAME` (Vulkan): dump that many frames in a row. |
 | `LARECOMP_LOG_FSHASH` | 1 | In the debug frame: log each fragment shader's hash (for `LARECOMP_SKIP_FSHASH`). |

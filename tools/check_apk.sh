@@ -10,6 +10,6 @@ unzip -Z1 "$APK" |
   grep -vE '^(META-INF/|res/|classes[0-9]*\.dex$|AndroidManifest\.xml$|resources\.arsc$|lib/arm64-v8a/lib(main|SDL3|shaderc_shared|hook_impl|main_hook|file_redirect_hook|gsl_alloc_hook|avcodec|avformat|avutil|swscale|zig)\.so$|assets/gen\.zip$|assets/res/(Baloo2-SemiBold\.ttf|Baloo2-OFL\.txt|HyliaSerifBeta-Regular\.otf|HyliaSerif-README\.md|BIZUDPGothic-Regular\.ttf|BIZUDPGothic-OFL\.txt|DejaVuSans(-Bold)?\.ttf|DejaVu-LICENSE\.txt|icon\.png|libadrenotools-LICENSE\.txt|liblinkernsbypass-LICENSE\.txt|volk-LICENSE\.md)$)' \
   > unexpected.txt || true
 unzip -p "$APK" assets/gen.zip > gen.zip && unzip -Z1 gen.zip |
-  grep -vE '^(zig/|gamelib-src/(cpu|simd|simd_fp|gamelib)\.h$|gamelib-src/gamelib_entry\.c$|gamelib-src/hot_functions(_v[0-9_]+)?\.txt$|gamelib-src/$)' \
+  grep -vE '^(zig/|gamelib-src/(cpu|simd|simd_fp|gamelib)\.h$|gamelib-src/gamelib_entry\.c$|gamelib-src/hot_functions(_eow)?(_v[0-9_]+)?\.txt$|gamelib-src/$)' \
   | sed 's#^#gen.zip: #' >> unexpected.txt || true
 if [ -s unexpected.txt ]; then echo "unexpected files in the APK:"; cat unexpected.txt; exit 1; fi

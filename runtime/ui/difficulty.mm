@@ -57,8 +57,7 @@ extern "C" void general_draw(float scale) {
     opt_section("General");
     {
         // what the game is told the console's language is: its text follows this (runtime/settings.c), and the menus
-        // at once. Each language by its own name (the row leaves names it has no translation for as they are). The
-        // menus' own languages (pt-BR) have no game text: the game stays English.
+        // at once. Each language by its own name (the row leaves names it has no translation for as they are).
         const char *code = settings_menu_language(), *auto_name = "English";
         for (int i = 1; i < N_LANGUAGES; i++)
             if (!strcmp(code, g_language_codes[i])) auto_name = g_language_endonyms[i];
@@ -67,17 +66,16 @@ extern "C" void general_draw(float scale) {
         const char *names[N_LANGUAGES];
         names[0] = autol;
         for (int i = 1; i < N_LANGUAGES; i++) names[i] = g_language_endonyms[i];
-        bool menus_only = strcmp(code, "en-US") && !strcmp(settings_language(), "en-US");
         if (opt_choice("Language", &g_settings.language, names, N_LANGUAGES, LANG_AUTO,
-                       menus_only ? "The language of the menus. The game has no text in this language, so it stays English."
-                                  : "The language of the menus and the game's text. The game's text changes after a restart."))
+                       "The language of the menus and the game's text. The game's text changes after a restart."))
             settings_save();
     }
     bool la = !game_other();  // (another game on the engine: LA's own features stay out)
     if (la && opt_choice("Text speed", &g_settings.text_speed, g_text_speeds, N_TEXT_SPEEDS, TEXT_SPEED_NORMAL,
                    "How fast message text appears. Each message still waits for your button press."))
         settings_save();
-    {   // (from Video, user 2026-11-12, after Text speed: a live preview, as an Off / On choice; EoW too)
+    if (la) {   // (from Video, user 2026-11-12, after Text speed: a live preview, as an Off / On choice; hidden for EoW
+        // until its cutscene fix has been tested more - runtime/hle/qol.c keeps it off there)
         static const char *const oo[] = {LN("Off"), LN("On")};
         int rb = g_settings.blur_removal;
         if (opt_preview("Remove tilt-shift blur", &rb, oo, 2, 0,

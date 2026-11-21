@@ -1844,7 +1844,11 @@ static void present_tail(NvnTexture *t, uint64_t frame) {
     if (b && b->tex) {  // LARECOMP_SHOT_AT=<frame>,<frame>,... (ascending): the game image at those frames -> build/frames/frame_N.png
         static const char *next;
         static int init;
-        if (!init) { init = 1; next = getenv("LARECOMP_SHOT_AT"); if (next) mkdir("build/frames", 0755); }
+        if (!init) {
+            init = 1;
+            next = getenv("LARECOMP_SHOT_AT");
+            if (next) mkdir("build", 0755), mkdir("build/frames", 0755);  // (no build/ beside a release)
+        }
         while (next && *next) {
             long at = strtol(next, (char **)&next, 10);
             if ((long)frame < at) { while (next > getenv("LARECOMP_SHOT_AT") && next[-1] != ',') next--; break; }
@@ -1860,6 +1864,7 @@ static void present_tail(NvnTexture *t, uint64_t frame) {
     if (shot_from < 0) { const char *e = getenv("LARECOMP_SCREENSHOT_FROM"); shot_from = e ? atol(e) : 0; }
     if (shot_every && b && b->tex && frame % shot_every == 0 && (long)frame >= shot_from) {
         char path[256];
+        mkdir("build", 0755);  // (not there beside a release: a run from the data folder)
         if (shot_from) mkdir("build/frames", 0755);
         snprintf(path, sizeof path, shot_from ? "build/frames/frame_%05llu.png" : "build/frame_%05llu.png", frame);
         save_png(b->tex, path);

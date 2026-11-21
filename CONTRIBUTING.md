@@ -110,7 +110,8 @@ Linux: [docs/linux.md](docs/linux.md); iPhone and iPad: [docs/ios.md](docs/ios.m
 
 ## Tests
 
-None of these need game files unless they say so.
+None of these need game files unless they say so. CI runs most of them on every pull request
+([docs/ci.md](docs/ci.md)).
 
 - `python3 tools/menu_strings.py check`: what each menu language is missing (untranslated text shows in English).
 - `python3 tools/test_save.py`: the save handlers commit and reload, and a failed save keeps the last one.
@@ -118,6 +119,9 @@ None of these need game files unless they say so.
   resume.
 - `python3 tools/test_cli.py`: the command line for launchers (needs `build/eowrecomp`).
 - `python3 tools/test_data_move.py`: moving the data folder.
+- `python3 tools/test_game_file_links.py`: setup and Delete game files never change the player's files through the
+  data folder's links. `tools/test_game_files_read_only.sh <game files>` runs setup, play and delete under a guard
+  that reports any write to those files (macOS, Linux; needs game files).
 - `python3 tools/test_gen_cpp.py build/lasgen <extracted folder> --game eow`: the C++ generator against the Python
   one (needs game files).
 - `python3 tools/test_game_addresses.py`: the address tables of every game version and the patch output (with

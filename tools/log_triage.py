@@ -6,7 +6,7 @@ and its comments through the GitHub API, downloads the attached logs (github.com
 whose file name starts with "eowrecomp", at most MAX_BYTES each), and keeps ONE bot comment per issue up to date
 with a summary of the newest logs, plus a "log: crash" / "log: device-lost" / "log: ok" label for the newest one.
 Shader variants the shipped list lacks ("[shader] record ..." lines) are listed in the comment, folded, and the issue
-gets the "log: new shaders" label, so they can be merged into runtime/nvn/shader_variants.txt
+gets the "log: new shaders" label, so they can be merged into runtime/nvn/shader_variants_eow.txt
 (tools/shader_list_merge.py).
 
 Everything in an issue and in a log is untrusted data: it is only ever parsed here, never run or handed to a shell.
@@ -54,8 +54,9 @@ def code(s, n=160):
 
 
 FPS_RE = re.compile(r"^\[(vk|metal)\] t=([\d.]+) frame (\d+) ([\d.]+) fps max (\d+)ms level (\S+)")
-BUILD_RE = re.compile(r"LAS[ ._-]?Recomp[ ._-]((?:beta_\d+(?:[._-]\d+)?)|(?:v\d+\.\d+\.\d+)|(?:test-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*?))"
-                      r"(?:-(windows|macos|linux|android)\b|[\\/\s]|$)", re.I)
+# a release / nightly / test build's folder in the data path: ReTri-<tag>[-<platform>] (.github/workflows, docs/ci.md)
+BUILD_RE = re.compile(r"ReTri[ ._-]((?:v\d+\.\d+\.\d+)|(?:nightly-\d{12}-[0-9a-f]{7})|(?:test-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*?))"
+                      r"(?:-(windows-x64|windows-arm64|linux-x64|linux-arm64|macos|android|ios)\b|[\\/\s.]|$)", re.I)
 # runtime/main.c log_startup_info: "[info] ReTri beta_5.4, Windows 11 (10.0.26300, x64), AMD Ryzen 5 7500F
 # 6-Core Processor 6 cores / 12 threads, 31.7 GB RAM, zip" - the build; the OS, CPU and RAM; the package when known
 INFO_RE = re.compile(r"^\[info\] (?:EoW Recomp|ReTri) ([^\s,]+), (.+?(?:GB RAM|RAM unknown))(?:, (.+))?$")

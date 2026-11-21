@@ -47,7 +47,7 @@ The zip's `ReTri/` folder holds `eowrecomp.exe` (icon from `docs/icon/icon.ico`,
 the folder must be writable (the app says so and quits if it isn't, e.g. under Program Files). A source checkout
 with `extracted/` in the starting folder keeps using that folder instead.
 
-## Windows on ARM (experimental)
+## Windows on ARM
 Builds natively on ARM64 Windows. The same `tools\setup_windows.ps1` sees ARM64 and sets up MSYS2 CLANGARM64
 instead of UCRT64, plus an x64 Python 3.12 in `%LOCALAPPDATA%\Programs\Python\Python312-x64` for the Python tests
 (unicorn and capstone have no ARM64 Windows wheels).

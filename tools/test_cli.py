@@ -44,6 +44,10 @@ with tempfile.TemporaryDirectory() as t:
         found = [line[len('[paths] data: '):] for line in lines if line.startswith('[paths] data: ')]
         return found[-1] if found else None, r
 
+    def same(folder, path):
+        """The app's folder is the expected one (Windows: either slash, any case, as the OS compares paths)"""
+        return folder is not None and os.path.normcase(os.path.normpath(folder)) == os.path.normcase(os.path.normpath(str(path)))
+
     def settings(stdout):
         out = {}
         for line in stdout.splitlines():
@@ -76,7 +80,7 @@ with tempfile.TemporaryDirectory() as t:
     before = ini.read_bytes()
     folder, r = data_of(['--data-dir', str(d), '--fullscreen', '--set', 'volume=1.5', '--set', 'bogus=1'])
     s = settings(r.stdout)
-    check('--data-dir is the data folder', folder == str(d), folder)
+    check('--data-dir is the data folder', same(folder, d), f'{folder!r}, not {str(d)!r}')
     check('--fullscreen and --set apply', s.get('fullscreen') == '1' and s.get('volume') == '1.50', s)
     check('the file keeps its own values', ini.read_bytes() == before)
     check('the rest comes from the file', s.get('resolution') == '2x', s)
@@ -95,16 +99,16 @@ with tempfile.TemporaryDirectory() as t:
     # --new-data-dir (RecompLauncher's profile): a new player's data goes there; a player with data already keeps it
     normal, new = t / 'platform-home', t / 'new'
     folder, _ = data_of(['--new-data-dir', str(new)])
-    check('--new-data-dir: nothing anywhere yet -> the new folder', folder == str(new), folder)
+    check('--new-data-dir: nothing anywhere yet -> the new folder', same(folder, new), f'{folder!r}, not {str(new)!r}')
     shutil.rmtree(new)
     normal.mkdir(exist_ok=True)
     (normal / 'larecomp.ini').write_text('volume = 0.50\n')
     folder, _ = data_of(['--new-data-dir', str(new)])
-    check('--new-data-dir: data in the usual folder -> kept there', folder == str(normal) and not (new / 'larecomp.ini').exists(), folder)
+    check('--new-data-dir: data in the usual folder -> kept there', same(folder, normal) and not (new / 'larecomp.ini').exists(), f'{folder!r}, not {str(normal)!r}')
     new.mkdir(exist_ok=True)
     (new / 'save').mkdir()
     folder, _ = data_of(['--new-data-dir', str(new)])
-    check('--new-data-dir: set up there before -> the new folder', folder == str(new), folder)
+    check('--new-data-dir: set up there before -> the new folder', same(folder, new), f'{folder!r}, not {str(new)!r}')
 
     if sys.platform.startswith('linux'):
         # the tarball: <folder>/usr/bin/eowrecomp with <folder>/portable.txt (an unpacked AppImage the same)
@@ -121,19 +125,19 @@ with tempfile.TemporaryDirectory() as t:
         folder, _ = data_of([], dict(nohome, APPDIR=str(tb), APPIMAGE=str(t / 'x.AppImage')), exe=exe)
         check('a mounted AppImage never writes into itself', folder != str(tb), folder)
         folder, _ = data_of(['--data-dir', str(d)], exe=exe)
-        check('tarball --data-dir', folder == str(d), folder)
+        check('tarball --data-dir', same(folder, d), f'{folder!r}, not {str(d)!r}')
         (tb / 'portable.txt').unlink()
         folder, _ = data_of([], {'LARECOMP_DATA_HOME': ''}, exe=exe)
-        check('tarball without portable.txt: XDG_DATA_HOME', folder == str(xdg / 'eowrecomp'), folder)
+        check('tarball without portable.txt: XDG_DATA_HOME', folder == str(xdg / 'retri'), folder)
         # the AppImage's portable folder: <file>.AppImage.home next to it ($APPIMAGE names the file)
         ai = t / 'game.AppImage'
         ai.write_bytes(b'')
         (t / 'game.AppImage.home').mkdir()
         folder, _ = data_of([], {'APPIMAGE': str(ai), 'LARECOMP_DATA_HOME': ''})
-        check('AppImage with .home', folder == str(t / 'game.AppImage.home' / '.local' / 'share' / 'eowrecomp'), folder)
+        check('AppImage with .home', folder == str(t / 'game.AppImage.home' / '.local' / 'share' / 'retri'), folder)
         shutil.rmtree(t / 'game.AppImage.home')
         folder, _ = data_of([], {'APPIMAGE': str(ai), 'LARECOMP_DATA_HOME': ''})
-        check('AppImage without .home: XDG_DATA_HOME', folder == str(xdg / 'eowrecomp'), folder)
+        check('AppImage without .home: XDG_DATA_HOME', folder == str(xdg / 'retri'), folder)
 
 if failures:
     sys.exit(f'{len(failures)} command line check(s) failed')

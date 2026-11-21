@@ -61,9 +61,10 @@ const char *const k_pt_br[][2] = {
 #include "lang/pt-BR.inc"
     {NULL, NULL}};
 // by g_language_codes index (Auto and English: none)
-const Pair *const k_tables[N_LANGUAGES] = {NULL, k_ja, NULL, k_es, k_fr, k_de, k_it, k_nl, k_ru, k_ko, k_zh_hans, k_zh_hant,
-                                           k_pt_br};
-enum { L_JA = 1, L_EN = 2, L_RU = 8, L_KO = 9, L_ZH_HANS = 10, L_ZH_HANT = 11 };
+// (es-419 and fr-CA: the Spanish and French menus, only the game's text differs)
+const Pair *const k_tables[N_LANGUAGES] = {NULL, k_ja, NULL, k_es, k_es, k_fr, k_fr, k_de, k_it, k_nl, k_ru, k_ko,
+                                           k_zh_hans, k_zh_hant, k_pt_br};
+enum { L_JA = 1, L_EN = 2, L_RU = 10, L_KO = 11, L_ZH_HANS = 12, L_ZH_HANT = 13 };
 
 struct Table {
     std::unordered_map<std::string_view, const char *> text;

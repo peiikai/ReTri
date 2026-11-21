@@ -272,6 +272,11 @@ static void pick_device(void) {
 // The GPU's PCI-style vendor ID (0x5143 Qualcomm, 0x13B5 Arm, ...); 0 before a device is picked. Android's start
 // screen offers driver packages only on Adreno (runtime/ui/launcher.mm driver_rows).
 uint32_t vk_gpu_vendor(void) { return g_vk.phys ? g_vk.props.vendorID : 0; }
+// Qualcomm's own Adreno driver, not a driver package (Turnip): on the Retroid Pocket 6 (Adreno 740, driver build
+// 69e13475cb, Vulkan 1.3.128) it hung the GPU a few seconds into play at the first draw of an effect shader, and ran
+// at 34 fps where Turnip ran 49-55. The start screen and the crash dialog point the player to a Turnip package.
+static bool g_qualcomm_driver;
+bool vk_qualcomm_driver(void) { return g_qualcomm_driver; }
 
 static bool g_fault_ext;
 // After VK_ERROR_DEVICE_LOST: what the driver says faulted (VK_EXT_device_fault), into the log.
@@ -725,6 +730,7 @@ static void create_device(void) {
         if (pbin_ext) pbp.pNext = pr.pNext, pr.pNext = &pbp;
 #endif
         vkGetPhysicalDeviceProperties2(g_vk.phys, &pr);
+        g_qualcomm_driver = drv.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY;
         // the heap as driver memory (exec.c guest_heap_dmabuf) by default: RADV, and PanVK (Mali-G610, Mesa 27.0-devel,
         // issue #483: an 81-minute run without faults, the Field 15 -> 21 fps, ~85% fewer uploads). PanVK's device name
         // is the GPU's ("Mali-G610 MC4"), hence the driver ID.
@@ -1896,7 +1902,11 @@ void backend_present_now(NvnTexture *t, uint64_t frame) {
     {   // LARECOMP_SHOT_AT=<frame>,<frame>,... (ascending): the game image at those frames -> build/frames/frame_N.png
         static const char *next;
         static int init;
-        if (!init) { init = 1; next = getenv("LARECOMP_SHOT_AT"); if (next) mkdir("build/frames", 0755); }
+        if (!init) {
+            init = 1;
+            next = getenv("LARECOMP_SHOT_AT");
+            if (next) mkdir("build", 0755), mkdir("build/frames", 0755);  // (no build/ beside a release)
+        }
         while (next && *next) {
             long at = strtol(next, (char **)&next, 10);
             if ((long)frame < at) { while (next > getenv("LARECOMP_SHOT_AT") && next[-1] != ',') next--; break; }
@@ -1912,6 +1922,7 @@ void backend_present_now(NvnTexture *t, uint64_t frame) {
     if (shot_from < 0) { const char *e = getenv("LARECOMP_SCREENSHOT_FROM"); shot_from = e ? atol(e) : 0; }
     if (shot_every && frame % shot_every == 0 && (long)frame >= shot_from) {
         char path[256];
+        mkdir("build", 0755);  // (not there beside a release: a run from the data folder)
         if (shot_from) mkdir("build/frames", 0755);
         snprintf(path, sizeof path, shot_from ? "build/frames/frame_%05llu.png" : "build/frame_%05llu.png",
                  (unsigned long long)frame);
