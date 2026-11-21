@@ -9,6 +9,7 @@ nothing they build or publish holds game code: `tools/check_no_game_files.sh` ch
 | `nightly.yml` | by hand (schedule off) | builds every platform and puts the files on the rolling [`nightly`](https://github.com/peiikai/ReTri/releases/tag/nightly) pre-release |
 | `release.yml` | a pushed `vX.Y.Z` tag, by hand | builds the release's files into a draft release, for a person to write the notes and publish |
 | `appcast_notes.yml` | a release published or edited | puts the release notes into the macOS update feed |
+| `log_triage.yml` | an issue or comment added or edited | one bot comment summing up the attached `eowrecomp.log` files, and a `log: ...` label |
 
 ## By hand
 
