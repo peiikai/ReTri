@@ -1195,29 +1195,22 @@ void output_scale_log(unsigned long long frame, double dw, double dh, const OutS
     psx = o->sx, psy = o->sy, pdw = dw, pdh = dh;
 }
 
-void output_scale(double dw, double dh, bool reshape_allowed, double now, double game_ms, double win_ms, OutScale *o) {
-    double fit = fmin(dw / 1920.0, dh / 1080.0);
-    static double forced = -1, wide_test = -1;
-    if (forced < 0) forced = getenv("LARECOMP_SCALE") ? atof(getenv("LARECOMP_SCALE")) : 0;
+// The window's shape over 16:9 when the camera is widened to fill it (Aspect ratio Unlocked, outdoors), else 1
+static double window_shape(double dw, double dh, bool reshape_allowed) {
+    static double wide_test = -1;
     if (wide_test < 0) wide_test = getenv("LARECOMP_WIDE_TEST") ? atof(getenv("LARECOMP_WIDE_TEST")) : 0;
     double shape = wide_test > 0 ? wide_test : (dw / dh) / (16.0 / 9.0);
-    bool reshape = reshape_allowed && fabs(shape - 1.0) > 0.005;
-    if (!reshape) shape = 1.0;
-    // render height in units of the Switch's 1080 lines
-    double h, dyn = 1.0;
-    int mode = g_settings.dyn_res ? RES_DYNAMIC : g_settings.res_mode;  // (Dynamic: up to the display, the setting aside)
-    if (mode != RES_DYNAMIC) g_dyn_active = false;
-    // The user changed a setting that changes the GPU's load (the menu, the start screen; Dynamic's own steps are g_dyn,
-    // not a setting): the frame pacer's 30 fps hold and backoff were learned under the old load (pace.c).
-    static int p_mode = -1, p_ups, p_aa, p_fps;
-    if (p_mode >= 0) {
-        extern void pace_settings_changed(const char *what);
-        if (mode != p_mode) pace_settings_changed("resolution");
-        else if (g_settings.upscaler != p_ups) pace_settings_changed("upscaler"), g_win_setting = true;
-        else if (g_settings.antialias != p_aa) pace_settings_changed("anti-aliasing"), g_win_setting = true;
-        else if (settings_fps_target() != p_fps) pace_settings_changed("FPS target");
-    }
-    p_mode = mode, p_ups = g_settings.upscaler, p_aa = g_settings.antialias, p_fps = settings_fps_target();
+    return reshape_allowed && fabs(shape - 1.0) > 0.005 ? shape : 1.0;
+}
+
+// The allocation scale (ax x ay of 1920x1080) at a resolution setting `mode` (RES_*; RES_DYNAMIC: its top, Match
+// display) in a dw x dh window: output_scale's, and the menus' sizes for each choice - the start screen's too, before
+// a frame is drawn (it showed the last frame's size there: 0x0). Returns Match display's lines (in units of 1080) when
+// the mode goes by the window, else 0 (a fixed resolution, or LARECOMP_SCALE): Dynamic resolution's top.
+static double alloc_scale(int mode, double dw, double dh, double shape, double *ax, double *ay) {
+    static double forced = -1;
+    if (forced < 0) forced = getenv("LARECOMP_SCALE") ? atof(getenv("LARECOMP_SCALE")) : 0;
+    double fit = fmin(dw / 1920.0, dh / 1080.0), h, match = 0;
     // (another game: EoW draws its 3D at 1408x792 docked - its level 8 of 1080 - 36 x level lines - and only its 2D
     // at 1080 lines. Scaled by the 2D, the 3D was 792/1080 of the setting: soft at Match display, a 5120x1440 screen
     // got 1056 lines stretched to 1440. Scaled by the 3D, as LA's 1080-line 3D is: Match display puts it at the
@@ -1231,26 +1224,65 @@ void output_scale(double dw, double dh, bool reshape_allowed, double now, double
         // large screen's GPU load (2 in 2560x720: a 5120x1440 screen's 3D, Dynamic resolution and all)
         static double match_test = -1;
         if (match_test < 0) match_test = getenv("LARECOMP_MATCH_SCALE") ? atof(getenv("LARECOMP_MATCH_SCALE")) : 0;
-        h = (reshape ? dh / 1080.0 : fit) * game_3d * (match_test > 0 ? match_test : 1.0);
-        if (mode == RES_DYNAMIC) {
-            static double pinned = -1;
-            if (pinned < 0) pinned = getenv("LARECOMP_DYN_TEST") ? atof(getenv("LARECOMP_DYN_TEST")) : 0;
-            if (pinned > 0) dyn = pinned;
-            else { dyn_update(now, game_ms, win_ms, h * 1080); dyn = g_dyn; }
-            g_dyn_active = pinned <= 0;
-        }
-        else if (mode == RES_Q75) h *= 0.75;
+        h = match = (shape != 1.0 ? dh / 1080.0 : fit) * game_3d * (match_test > 0 ? match_test : 1.0);
+        if (mode == RES_Q75) h *= 0.75;
         else if (mode == RES_Q25) h *= 0.25;
         else if (mode == RES_Q50) h *= 0.5;
     }
     h = fmax(h, 0.1);  // (.25x of a small window)
-    double ax = h * shape, ay = h;
-    double cap = fmin(MAX_TEX / (1920.0 * ax), MAX_TEX / (1080.0 * ay));
-    if (cap < 1.0) { ax *= cap; ay *= cap; }
+    *ax = h * shape, *ay = h;
+    double cap = fmin(MAX_TEX / (1920.0 * *ax), MAX_TEX / (1080.0 * *ay));
+    if (cap < 1.0) *ax *= cap, *ay *= cap;
+    return match;
+}
+
+// (shown in the menu and the FPS counter: the 3D's size - EoW's 2D is drawn larger, see alloc_scale)
+static void size_3d(double sx, double sy, int *w, int *h) {
+    double game_3d = game_other() ? 1080.0 / 792.0 : 1.0;
+    *w = (int)lround(1920.0 * sx / game_3d), *h = (int)lround(1080.0 * sy / game_3d);
+}
+
+void output_scale_size_for(int mode, double dw, double dh, bool reshape_allowed, int *w, int *h) {
+    *w = *h = 0;
+    if (!(dw > 0) || !(dh > 0)) return;
+    double ax, ay;
+    alloc_scale(mode, dw, dh, window_shape(dw, dh, reshape_allowed), &ax, &ay);
+    size_3d(ax, ay, w, h);
+}
+
+void output_scale(double dw, double dh, bool reshape_allowed, double now, double game_ms, double win_ms, OutScale *o) {
+    double fit = fmin(dw / 1920.0, dh / 1080.0);
+    static double wide_test = -1;
+    if (wide_test < 0) wide_test = getenv("LARECOMP_WIDE_TEST") ? atof(getenv("LARECOMP_WIDE_TEST")) : 0;
+    double shape = window_shape(dw, dh, reshape_allowed);
+    bool reshape = shape != 1.0;
+    double dyn = 1.0;
+    int mode = g_settings.dyn_res ? RES_DYNAMIC : g_settings.res_mode;  // (Dynamic: up to the display, the setting aside)
+    if (mode != RES_DYNAMIC) g_dyn_active = false;
+    // The user changed a setting that changes the GPU's load (the menu, the start screen; Dynamic's own steps are g_dyn,
+    // not a setting): the frame pacer's 30 fps hold and backoff were learned under the old load (pace.c).
+    static int p_mode = -1, p_ups, p_aa, p_fps;
+    if (p_mode >= 0) {
+        extern void pace_settings_changed(const char *what);
+        if (mode != p_mode) pace_settings_changed("resolution");
+        else if (g_settings.upscaler != p_ups) pace_settings_changed("upscaler"), g_win_setting = true;
+        else if (g_settings.antialias != p_aa) pace_settings_changed("anti-aliasing"), g_win_setting = true;
+        else if (settings_fps_target() != p_fps) pace_settings_changed("FPS target");
+    }
+    p_mode = mode, p_ups = g_settings.upscaler, p_aa = g_settings.antialias, p_fps = settings_fps_target();
+    double ax, ay, match = alloc_scale(mode, dw, dh, shape, &ax, &ay);
+    if (mode == RES_DYNAMIC && match > 0) {
+        static double pinned = -1;
+        if (pinned < 0) pinned = getenv("LARECOMP_DYN_TEST") ? atof(getenv("LARECOMP_DYN_TEST")) : 0;
+        if (pinned > 0) dyn = pinned;
+        else { dyn_update(now, game_ms, win_ms, match * 1080); dyn = g_dyn; }
+        g_dyn_active = pinned <= 0;
+    }
     o->ax = ax; o->ay = ay;
     o->sx = ax * dyn; o->sy = ay * dyn; o->shape = shape;
-    // (shown in the menu and the FPS counter: the 3D's size - EoW's 2D is drawn larger, see game_3d)
-    g_render_w = (int)lround(1920.0 * o->sx / game_3d), g_render_h = (int)lround(1080.0 * o->sy / game_3d);
+    int rw, rh;
+    size_3d(o->sx, o->sy, &rw, &rh);
+    g_render_w = rw, g_render_h = rh;
     // where the image goes in the window: fills it when reshaped, else a fitted 16:9 box
     if (reshape) { o->vw = dw; o->vh = dh; }
     else { o->vw = 1920.0 * fit; o->vh = 1080.0 * fit; }

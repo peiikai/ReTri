@@ -21,6 +21,9 @@ double output_scale_dynamic_factor(void);
 int output_scale_dynamic_state(void);
 // The size the game's frames are drawn at now (pixels: the render scale x 1920x1080); the FPS counter shows it with Dynamic
 void output_scale_render_size(int *w, int *h);
+// The size the game's frames are drawn at with resolution setting `mode` (RES_*; RES_DYNAMIC: its top) in a dw x dh
+// window (pixels) - the menus' size for each choice, on the start screen too, before a frame is drawn. 0x0: no window.
+void output_scale_size_for(int mode, double dw, double dh, bool reshape_allowed, int *w, int *h);
 double output_scale_dynamic_hold_fps(void);
 // The device's thermal state (metal.m: NSProcessInfo, at start and at every change): 0 nominal, 1 fair, 2 serious, 3
 // critical. Dynamic's heat rules on a paced GPU go by it (serious and critical); tools/test_dynres.c sets it

@@ -561,6 +561,7 @@ static std::atomic<bool> g_cancel_build{false};
 static bool build_cancelled(void) { return g_cancel_build.load(); }
 static bool g_copy_skipped;                  // (only the game code to build: the bar is all of that)
 static bool g_auto_update;                   // started by itself: game files there, game code from an older version
+static bool g_auto_first;                    // ... and no game code at all (a setup stopped before it was built)
 static void setup_progress(uint64_t done, uint64_t) { g_done = g_phase_base + done; }
 #ifdef __ANDROID__
 static void import_progress(uint64_t done, uint64_t total) { g_total = total, g_done = done; }  // (the copy is the first phase)
@@ -1969,10 +1970,11 @@ static void draw_busy_overlay(ImVec2 ds, const std::string &job, bool test_busy,
     unsigned prep_done = (unsigned)(pc >> 32), prep_total = (unsigned)pc;
     bool count = preparing && g_prep_frac >= 0 && prep_total;  // (the total is known once the game files are indexed)
     if (count) f = (float)prep_done / (float)prep_total;      // (the bar from the same numbers as the count)
-    const char *title = preparing ? L("Preparing shaders") : g_auto_update ? L("Updating the game")
+    const bool updating = g_auto_update && !g_auto_first;
+    const char *title = preparing ? L("Preparing shaders") : updating ? L("Updating the game")
                       : recompiling ? L("Recompiling the game") : L("Setting up the game files");
     const char *const notes[] = {L("This only needs to be done once and may take a while.")};
-    int nnotes = recompiling && !g_auto_update ? 1 : 0;
+    int nnotes = recompiling && !updating ? 1 : 0;
     float tfs = g_font_menu->FontSize * 0.75f, sfs = g_font_small->FontSize * 0.85f;
     ImVec2 ts = g_font_menu->CalcTextSizeA(tfs, FLT_MAX, 0, title);
     float line_h = g_font_small->CalcTextSizeA(sfs, FLT_MAX, 0, "A").y;
@@ -2731,7 +2733,8 @@ extern "C" void launcher_run(const char *root) {
         if (pg && !strcmp(pg + 1, "preparing")) page = SETUP, prep_progress(666, 1585), set_job(LN("Preparing shaders"));
         if (pg && !strcmp(pg + 1, "skipask")) page = SETUP, prep_progress(666, 1585), set_job(LN("Preparing shaders")), g_prep_skip_ask = true;
         if (pg && !strncmp(pg + 1, "fail", 4)) page = SETUP, set_failure(atoi(pg + 5));  // (the failure messages)
-        if (pg && !strncmp(pg + 1, "settings", 8) && pg[9] == ':') g_tab_request_ext = atoi(pg + 10);  // settings:<tab>
+        if (pg && !strncmp(pg + 1, "settings", 8) && pg[9] == ':')  // settings:<tab> (the cursor on it, not System's)
+            g_tab_request_ext = atoi(pg + 10), menu_tabs_focus(false);
         if (pg && !strcmp(pg + 1, "delete")) page = SETUP, g_confirm_delete = true;
         if (pg && !strcmp(pg + 1, "tip")) g_settings.menu_tip_seen = false, g_tip_test = true;
         if (pg && !strcmp(pg + 1, "recompiling")) page = SETUP, g_build_frac = 0.42f, set_job(LN("Recompiling the game"));
@@ -2790,7 +2793,8 @@ extern "C" void launcher_run(const char *root) {
     // relinked it, "the game files' exefs/main is missing", seen testing the Windows zip)
     if (!g_busy && !status.empty() && check_copied_files(g_root).empty() && gamebuild_available() &&
         !getenv("LARECOMP_LAUNCHER_DELETE")) {
-        fprintf(stderr, "[launcher] game code out of date: updating it\n");
+        g_auto_first = !file_exists(g_root + "/" GAMELIB_NAME);  // (no earlier build to update: not "Updating")
+        fprintf(stderr, "[launcher] game code %s: building it\n", g_auto_first ? "not built yet" : "out of date");
         g_src.clear();
         g_busy = true, g_auto_update = true;
         page = SETUP;
@@ -3716,6 +3720,10 @@ extern "C" void launcher_run(const char *root) {
             menu_sfx_frame(frame_page != MAIN);
 
             ImGui::Render();
+            // (test) LARECOMP_PREVIEW=<row label> with :settings:<tab>: that row's live preview, as in game (menu.mm),
+            // halfway to the shot (once the tab is up: the preview runs the page shown)
+            if (shot_at && frame == shot_at / 2 && page == SETTINGS && getenv("LARECOMP_PREVIEW") && !preview_active())
+                preview_open(getenv("LARECOMP_PREVIEW"), -1);
 #if PLAT_TOUCH
             {   // (after Render: its EndFrame starts the keyboard through the backend; the start screen draws in points)
                 ImVec2 mn, mx;
