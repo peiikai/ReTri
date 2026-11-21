@@ -43,6 +43,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 - The start screen prepares 836 more shader variants (from a long play test), so fewer stutters the first time a
   scene or effect shows.
+- Android: the first setup builds the game code faster. Functions the game runs in play are built optimized and the
+  rest quickly, as LAS Recomp does, with lists for 1.0.0, 1.0.1 and 1.0.2.
 - Language: Portuguese (Brazil) now changes the game's own text too, not just the menus (it stayed English). New
   options Spanish (Latin America) and French (Canada) use the game's own text for them; Auto picks them from your
   computer's region.
@@ -84,6 +86,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 - A setup stopped before the game code was built now says "Recompiling the game" when it carries on, not
   "Updating the game".
+- Setup and Delete game files never write to your own game files through the data folder's links: a setup that
+  can't replace an old link stops instead of writing into it, and on Windows a read-only file stays read-only.
 - Unlocked aspect ratio: the map no longer shows unexplored areas beside the 16:9 part on wide windows.
 - Mac, Aspect ratio Unlocked: rifts no longer flash in wide windows, and their edges are no longer a staircase.
   The outline jumped every few frames while standing still and turned to big steps for a few frames about once a
