@@ -96,9 +96,11 @@ INTERPOSE(g_freopen, freopen);
 INTERPOSE(g_truncate, truncate);
 INTERPOSE(g_rename, rename);
 #else
-#define REAL(name, type) static type real_##name; if (!real_##name) real_##name = (type)dlsym(RTLD_NEXT, #name)
+#define REAL(name) \
+    static __typeof__(&name) real_##name; \
+    if (!real_##name) real_##name = (__typeof__(&name))dlsym(RTLD_NEXT, #name)
 int open(const char *p, int flags, ...) {
-    REAL(open, int (*)(const char *, int, ...));
+    REAL(open);
     va_list ap;
     va_start(ap, flags);
     int mode = (flags & O_CREAT) ? va_arg(ap, int) : 0;
@@ -107,7 +109,7 @@ int open(const char *p, int flags, ...) {
     return real_open(p, flags, mode);
 }
 int open64(const char *p, int flags, ...) {
-    REAL(open64, int (*)(const char *, int, ...));
+    REAL(open64);
     va_list ap;
     va_start(ap, flags);
     int mode = (flags & O_CREAT) ? va_arg(ap, int) : 0;
@@ -116,7 +118,7 @@ int open64(const char *p, int flags, ...) {
     return real_open64(p, flags, mode);
 }
 int openat(int dir, const char *p, int flags, ...) {
-    REAL(openat, int (*)(int, const char *, int, ...));
+    REAL(openat);
     va_list ap;
     va_start(ap, flags);
     int mode = (flags & O_CREAT) ? va_arg(ap, int) : 0;
@@ -125,22 +127,22 @@ int openat(int dir, const char *p, int flags, ...) {
     return real_openat(dir, p, flags, mode);
 }
 FILE *fopen(const char *p, const char *m) {
-    REAL(fopen, FILE *(*)(const char *, const char *));
+    REAL(fopen);
     if (write_mode(m) && guarded(p)) report("fopen for writing", p);
     return real_fopen(p, m);
 }
 FILE *fopen64(const char *p, const char *m) {
-    REAL(fopen64, FILE *(*)(const char *, const char *));
+    REAL(fopen64);
     if (write_mode(m) && guarded(p)) report("fopen for writing", p);
     return real_fopen64(p, m);
 }
 int truncate(const char *p, off_t n) {
-    REAL(truncate, int (*)(const char *, off_t));
+    REAL(truncate);
     if (guarded(p)) report("truncate", p);
     return real_truncate(p, n);
 }
 int rename(const char *a, const char *b) {
-    REAL(rename, int (*)(const char *, const char *));
+    REAL(rename);
     if (guarded(a)) report("rename from", a);
     if (guarded(b)) report("rename onto", b);
     return real_rename(a, b);
