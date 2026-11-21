@@ -76,19 +76,21 @@ Settings g_settings = {
 #endif
 };
 
-// The game's own text languages: its RomFS carries these per region (regionUS/USen|USes|USfr, regionEU/EUen|EUes|...,
-// regionJP/JPja, regionKR/KRkr, regionTW/TWch, regionCN/CNch), and the game picks one from the system language it
-// reads back (runtime/services/am.c), exactly as it does on the console. Codes as the Switch reports them, except for
-// the Chinese ones: the game only recognizes zh-Hans / zh-Hant and falls back to Japanese when told zh-CN / zh-TW.
-// Then the menus' own (N_GAME_LANGUAGES on): the game has no text in them, its text stays English.
-const char *const g_language_codes[N_LANGUAGES] = {"auto", "ja", "en-US", "es", "fr", "de", "it", "nl", "ru", "ko",
-                                                   "zh-Hans", "zh-Hant", "pt-BR"};
-const char *const g_language_names[N_LANGUAGES] = {"Auto", "Japanese", "English", "Spanish", "French", "German",
-                                                   "Italian", "Dutch", "Russian", "Korean", "Chinese (Simplified)",
-                                                   "Chinese (Traditional)", "Portuguese (Brazil)"};
-const char *const g_language_endonyms[N_LANGUAGES] = {"Auto", "日本語", "English", "Español", "Français", "Deutsch",
-                                                      "Italiano", "Nederlands", "Русский", "한국어", "简体中文", "繁體中文",
-                                                      "Português (Brasil)"};
+// The game's own text languages: its RomFS carries these per region (regionUS/USen|USes|USfr|USpt,
+// regionEU/EUen|EUes|..., regionJP/JPja, regionKR/KRko, regionTW/TWzh, regionCN/CNzh), and the game picks one from the
+// system language it reads back (runtime/services/am.c), exactly as it does on the console. Codes as the Switch
+// reports them, except for the Chinese ones: the game only recognizes zh-Hans / zh-Hant and falls back to Japanese
+// when told zh-CN / zh-TW. es and fr are EUes / EUfr; es-419, fr-CA and pt-BR are USes / USfr / USpt.
+const char *const g_language_codes[N_LANGUAGES] = {"auto", "ja", "en-US", "es", "es-419", "fr", "fr-CA", "de", "it",
+                                                   "nl", "ru", "ko", "zh-Hans", "zh-Hant", "pt-BR"};
+const char *const g_language_names[N_LANGUAGES] = {"Auto", "Japanese", "English", "Spanish (Spain)",
+                                                   "Spanish (Latin America)", "French (France)", "French (Canada)",
+                                                   "German", "Italian", "Dutch", "Russian", "Korean",
+                                                   "Chinese (Simplified)", "Chinese (Traditional)", "Portuguese (Brazil)"};
+const char *const g_language_endonyms[N_LANGUAGES] = {"Auto", "日本語", "English", "Español (España)",
+                                                      "Español (Latinoamérica)", "Français (France)",
+                                                      "Français (Canada)", "Deutsch", "Italiano", "Nederlands",
+                                                      "Русский", "한국어", "简体中文", "繁體中文", "Português (Brasil)"};
 
 // A locale name ("es_ES.UTF-8", "zh-Hans-CN", "ja-JP", "zh_TW") -> one of the game's codes, NULL for none of its
 // languages.
@@ -115,6 +117,14 @@ static const char *match_locale(const char *e) {
     static const struct { const char *loc, *code; } map[] = {{"ja", "ja"}, {"ko", "ko"}, {"ru", "ru"}, {"nl", "nl"},
                                                              {"de", "de"}, {"it", "it"}, {"fr", "fr"}, {"es", "es"},
                                                              {"en", "en-US"}, {"pt", "pt-BR"}};
+    // Spanish outside Spain is Latin American (es-MX, es-419, es_AR), French in Canada is Canadian (fr-CA)
+    char r[8] = {0};
+    size_t k = 0;
+    if (n && e[n] && strchr("_-", e[n]))
+        for (const char *p = e + n + 1; *p && !strchr(".@_-", *p) && k < sizeof r - 1; p++)
+            r[k++] = (char)toupper((unsigned char)*p);
+    if (!strcmp(l, "es") && *r && strcmp(r, "ES")) return "es-419";
+    if (!strcmp(l, "fr") && !strcmp(r, "CA")) return "fr-CA";
     for (size_t i = 0; i < sizeof map / sizeof *map; i++)
         if (!strcmp(l, map[i].loc)) return map[i].code;
     return NULL;
@@ -160,12 +170,7 @@ const char *settings_menu_language(void) {
     return i > LANG_AUTO && i < N_LANGUAGES ? g_language_codes[i] : host_language();
 }
 
-const char *settings_language(void) {
-    const char *c = settings_menu_language();
-    for (int i = N_GAME_LANGUAGES; i < N_LANGUAGES; i++)
-        if (!strcmp(c, g_language_codes[i])) return "en-US";  // (the menus' only)
-    return c;
-}
+const char *settings_language(void) { return settings_menu_language(); }
 
 const char *settings_language_name(void) {
     const char *c = settings_menu_language();

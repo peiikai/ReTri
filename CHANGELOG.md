@@ -42,6 +42,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Game versions 1.0.0 and 1.0.1 work too, besides 1.0.2. The start screen shows which version the game files are.
 
 ### Changed
+- Language: Portuguese (Brazil) now changes the game's own text too, not just the menus (it stayed English). New
+  options Spanish (Latin America) and French (Canada) use the game's own text for them; Auto picks them from your
+  computer's region.
 - Menus use the EoW colours without LAS Recomp's gold: buttons such as Show in Finder, Import fonts, Return and
   Apply are plain, lit only under the mouse or the controller cursor; headings are bronze, arrows cream. The start
   screen's title and menu are cream and bronze too. The System tab no longer mentions seeds.
