@@ -82,6 +82,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- Android, Adreno: on the phone's own Qualcomm driver, the start screen recommends a Turnip driver package once,
+  and so does the Vulkan driver setting. If the GPU stops responding, the error now says so and what to do.
 - Unlocked aspect ratio: the map no longer shows unexplored areas beside the 16:9 part on wide windows.
 - Mac, Aspect ratio Unlocked: rifts no longer flash in wide windows, and their edges are no longer a staircase.
   The outline jumped every few frames while standing still and turned to big steps for a few frames about once a

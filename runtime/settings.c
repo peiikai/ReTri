@@ -315,6 +315,7 @@ static bool settings_apply(const char *key, const char *val) {
             if (!strcmp(v, g_language_codes[i])) g_settings.language = i;
     }
     else if (!strcmp(key, "menu_tip_seen")) g_settings.menu_tip_seen = atoi(val) != 0;
+    else if (!strcmp(key, "driver_note_seen")) g_settings.driver_note_seen = atoi(val) != 0;
     else if (!strcmp(key, "aspect_asked")) g_settings.aspect_asked = atoi(val) != 0;
     else if (!strcmp(key, "onedrive_kept")) g_settings.onedrive_kept = atoi(val) != 0;
     else if (!strcmp(key, "cheat_hearts")) g_settings.cheat_hearts = atoi(val) != 0;
@@ -617,6 +618,7 @@ static void write_settings(FILE *f) {
                                                      ? g_settings.language : LANG_AUTO]);
     fprintf(f, "aspect_asked = %d\n", g_settings.aspect_asked);
     fprintf(f, "menu_tip_seen = %d\n", g_settings.menu_tip_seen);
+    fprintf(f, "driver_note_seen = %d\n", g_settings.driver_note_seen);
     fprintf(f, "onedrive_kept = %d\n", g_settings.onedrive_kept);
     fprintf(f, "cheat_hearts = %d\ncheat_ammo = %d\ncheat_rupees = %d\n", g_settings.cheat_hearts, g_settings.cheat_ammo,
             g_settings.cheat_rupees);

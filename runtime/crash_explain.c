@@ -106,6 +106,20 @@ void rt_crash_explain(char *out, size_t n, const char *log_path) {
                                                                          // unwind; runtime/hle/warp.c rt_cxa_throw)
         snprintf(head, sizeof head, "The game ran into an error it couldn't recover from");
         snprintf(what, sizeof what, "This is a bug in ReTri, not a problem with your game files or PC. %s", report);
+    } else if (has("GPU did not finish")) {  // (runtime/nvn/vulkan/exec.c: the GPU hung)
+        snprintf(head, sizeof head, "Your graphics driver stopped responding");
+#ifdef __ANDROID__
+        extern bool vk_qualcomm_driver(void);  // runtime/nvn/vulkan/device.c
+        if (vk_qualcomm_driver())
+            snprintf(what, sizeof what, "The phone's own Adreno driver can't run the game. Use a Turnip driver "
+                     "package: on the start screen, Settings > System > Vulkan driver.");
+        else
+            snprintf(what, sizeof what, "Try another driver package, or the phone's own driver. If it keeps happening, "
+                     "please report it with the log file below.");
+#else
+        snprintf(what, sizeof what, "Update your graphics driver (NVIDIA, AMD or Intel) and try again. If it keeps "
+                 "happening, please report it with the log file below.");
+#endif
     } else if (in_gpu_driver(g_pc)) {
         snprintf(head, sizeof head, "Your graphics driver crashed");
 #ifdef __ANDROID__

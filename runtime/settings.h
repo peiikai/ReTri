@@ -80,6 +80,7 @@ typedef struct {
     bool face_by_label;
     bool aspect_asked;   // the start screen's one-time "authentic 16:9 or unlocked?" question was answered
     bool menu_tip_seen;  // the start screen's one-time "how to open the menu" note was shown (first PLAY ever)
+    bool driver_note_seen;  // Android: the start screen's one-time "use a Turnip package" note (Qualcomm's own driver)
     bool onedrive_kept;  // the start screen's OneDrive warning (Windows) was answered with Keep here
     // cheats (runtime/ui/cheats.mm), applied every frame while a save is loaded
     bool cheat_hearts;   // health kept full
