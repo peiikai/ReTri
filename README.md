@@ -23,9 +23,14 @@ native Windows, macOS and Linux application. Android and iOS builds are in testi
 > - Linux - x86-64, Vulkan graphics backend (AppImage)
 > - Linux aarch64 (ARM) - **experimental**: on the [releases](https://github.com/peiikai/ReTri/releases) page; reports
 >   welcome ([docs/linux.md](docs/linux.md) lists what to include)
-> - Android (arm64, Vulkan), iPhone and iPad (arm64, Metal, sideloaded) and Windows on ARM (arm64) - **nightly builds
->   only** for now, not part of Beta 1 releases. They aren't well tested yet, but your reports help us fix whatever
->   you find. See [iPhone and iPad](#iphone-and-ipad).
+> - Windows on ARM - arm64, Vulkan graphics backend (nightly builds)
+> - Android - arm64, Vulkan graphics backend (nightly builds)
+> - iPhone and iPad - arm64, Metal graphics backend (nightly builds, sideloaded: see [iPhone and iPad](#iphone-and-ipad))
+
+> [!TIP]
+> **Nightly builds** are made from the latest development code and aren't part of Beta 1 releases. Windows on ARM,
+> Android and iPhone and iPad are on nightly builds only for now. They aren't well tested yet, but your reports help
+> us fix whatever you find.
 
 ## System requirements
 
