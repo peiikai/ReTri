@@ -84,6 +84,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- The iOS app's licence texts: only SDL3's and FFmpeg's from the build, no leftover ones from before Python was
+  removed.
 - Recomp for iOS: the page stays open when the export finishes, with where the app went, and the keyboard and a
   controller reach its rows (the cursor starts on the iOS kit row).
 - A setup stopped before the game code was built now says "Recompiling the game" when it carries on, not
