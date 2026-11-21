@@ -21,8 +21,9 @@ native Windows, macOS and Linux application. Android and iOS builds are in testi
 > - macOS - Apple Silicon only, Metal graphics backend + MetalFX
 > - Windows - x86-64 only, Vulkan graphics backend
 > - Linux - x86-64, Vulkan graphics backend (AppImage)
-> - Android (arm64, Vulkan) and iPhone and iPad (arm64, Metal, sideloaded) - **nightly builds only** for now: they
->   aren't part of Beta 1 releases. See [iPhone and iPad](#iphone-and-ipad).
+> - Android (arm64, Vulkan) and iPhone and iPad (arm64, Metal, sideloaded) - **nightly builds only** for now, not part
+>   of Beta 1 releases. They aren't well tested yet, but your reports help us fix whatever you find. See
+>   [iPhone and iPad](#iphone-and-ipad).
 > - Windows on ARM (arm64) and Linux aarch64 (ARM) - **experimental**: on the [releases](https://github.com/peiikai/ReTri/releases)
 >   page; reports welcome ([docs/linux.md](docs/linux.md) lists what to include)
 
@@ -106,7 +107,8 @@ include a profile for RecompLauncher. Details are in [docs/debug-hooks.md](docs/
 ## iPhone and iPad
 
 > [!NOTE]
-> iPhone and iPad are on nightly builds only for now: Beta 1 releases don't include the iOS kit (`.laskit`).
+> iPhone and iPad are on nightly builds only for now: Beta 1 releases don't include the iOS kit (`.laskit`). They
+> aren't well tested yet, but your reports help us fix whatever you find.
 
 The iOS app is made on your computer from your own game files, then sideloaded.
 
