@@ -20,7 +20,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   Linux files. Windows zips are named `windows-x64` / `windows-arm64`.
 - The RecompLauncher profile names what the PC needs (Windows 10, glibc 2.35, Vulkan 1.3), so the launcher can say
   when a PC is too old.
-- "Remove tilt-shift blur" setting (General tab, Off by default), as in LAS Recomp. It switches live.
 - FPS setting under Resolution: 30 or 60 (default 60), used while Dynamic resolution is off. It switches live.
 - Android (arm64): the app ReTri (`com.retri.android`), which installs next to LAS Recomp. The game code
   is built on the device from your own game files, as in LAS Recomp's Android port.
