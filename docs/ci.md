@@ -19,6 +19,9 @@ nothing they build or publish holds game code: `tools/check_no_game_files.sh` ch
 
 `new_round=false` builds only the platforms the current nightly round is missing (a failed job).
 
+GitHub starts a workflow by hand only if a file of that name is on `main`. Until the next release brings these
+there, `ci.yml` and `release.yml` work (`main` has older files with those names) and `nightly.yml` doesn't.
+
 ## Files
 
 Release files are `ReTri-<tag>-<platform>.<ext>`: `macOS.dmg`, `windows-x64.zip`, `windows-arm64.zip`,
