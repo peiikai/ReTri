@@ -17,6 +17,8 @@
 #   ref: what a new round builds (default develop). A branch's round still goes on the one nightly page.
 name: Nightly
 on:
+  push:  # TEMPORARY: test run while nightly.yml isn't on main (removed in the next commit)
+    branches: ['ci/workflows']
   # schedule:
   #   - cron: '0 10 * * *'   # a new round, if develop moved
   #   - cron: '0 */3 * * *'  # catch-up for the current round
@@ -61,7 +63,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           SCHEDULE: ${{ github.event.schedule }}
           NEW_ROUND: ${{ inputs.new_round }}
-          REF: ${{ inputs.ref || 'develop' }}
+          REF: ${{ inputs.ref || (github.event_name == 'push' && github.ref_name) || 'develop' }}
         run: |
           [[ $REF =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::ref '$REF': a branch name"; exit 1; }
           DEV=$(gh api "repos/$GH_REPO/commits/$REF" -q .sha)
@@ -69,7 +71,7 @@ jobs:
           ROUND=$(grep -o 'nightly-round: [0-9]\{12\} [0-9a-f]\{40\}' <<< "$BODY" | head -1 || true)
           RSTAMP=$(awk '{print $2}' <<< "$ROUND"); RSHA=$(awk '{print $3}' <<< "$ROUND")
           NEW=false
-          if [ "$SCHEDULE" = '0 10 * * *' ] || { [ "$EVENT" = workflow_dispatch ] && [ "$NEW_ROUND" = true ]; }; then
+          if [ "$SCHEDULE" = '0 10 * * *' ] || { [ "$EVENT" = workflow_dispatch ] && [ "$NEW_ROUND" = true ]; } || [ "$EVENT" = push ]; then
             [ "$DEV" != "$RSHA" ] && NEW=true
           fi
           # GitHub sometimes drops a scheduled trigger: if today's 10:00 one never started a round, the first
