@@ -132,6 +132,8 @@ Comma-separated entries, each starting with a frame:
 |---|---|---|
 | `--load-save` / `LARECOMP_LOAD_SAVE` | `1`, `2`, `1:3` or a save folder path | Boot straight into a save (see below). |
 | `LARECOMP_WARP_AT` | `frame:level:locator,...` (see below) | Warp to that level and spawn point at each frame. |
+| `LARECOMP_TELEPORT_AT` | `frame:x:y:z:r:x2:y2:z2` | Echoes of Wisdom: move Zelda from near x,y,z to x2,y2,z2 at that frame (see below). |
+| `LARECOMP_TRIGGER_DIR` | folder | Echoes of Wisdom: files dropped in that folder while the game runs act once (see below). |
 
 ### Loading a save from the command line (Echoes of Wisdom)
 
@@ -166,6 +168,28 @@ level and locator are a place from the game's level files, as in the overlay men
 
 Use it with `--load-save` (to get into a save) and `LARECOMP_SAVE_DIR` (so the run does not touch real saves).
 `LARECOMP_WARP_TOUR=<from>[:<to>]` warps to every place in turn instead, with a screenshot of each in `build/tour/`.
+
+### Places with no spawn point, and fights already won (Echoes of Wisdom)
+
+Ugly helpers for getting a test copy to one room or fight. They change the game's memory directly, so use them only
+on a scratch save.
+
+- `LARECOMP_TELEPORT_AT=frame:x:y:z:r:x2:y2:z2` moves every float triple in guest memory within `r` of `x,y,z`
+  (Zelda's position and its copies) by `(x2,y2,z2) - (x,y,z)`. Warp or load to a spawn point first, so Zelda's
+  position is known, and pick the target from the level file's actor positions. Suthorn Ruins' possessed-Link room
+  from the dungeon's restart point: `1000:-209.25:33:-164.25:6:-203.25:33:-72`.
+- `LARECOMP_TRIGGER_DIR=<folder>`: each of these files, dropped into the folder, is read once and deleted:
+  - `flags`: `<main.bin> <section hex> <byte.bit> ...` clears those bits of the save's flag bitfield (the section
+    at `0x610`) in the running game. The game's copy is found by the section's first 64 bytes in that `main.bin`.
+    The bits set between an older and a newer save bring the fights in between back on the next room entry.
+  - `capture`: `<every N frames> <for M frames>` saves the window to `build/cap/frame_<n>.png`. `<N> 0` stops it.
+    At 5120x1440 it slows the game down.
+  - `teleport`: as `LARECOMP_TELEPORT_AT`, the seven numbers separated by spaces.
+  - `hpsnap`: `<x> <y> <z> <r>` copies 16 KB around every float triple near `x,y,z`; `hpdiff` then logs the words
+    there that went down by 1-255 since. Snapshot, hit an enemy once, diff, and repeat once: the address that drops
+    both times is its health (possessed Link: 42, down 2 a hit, 21 in phase 2).
+  - `poke`: `<hex address> <i32|f32|u16|u8> <value>` writes it. Set the health to 1 and hit once to end a fight.
+- Log lines start with `[trigger]`.
 
 ## Gameplay features and menus
 
