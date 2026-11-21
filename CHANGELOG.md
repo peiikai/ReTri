@@ -84,6 +84,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- A setup stopped before the game code was built now says "Recompiling the game" when it carries on, not
+  "Updating the game".
 - Setup and Delete game files never write to your own game files through the data folder's links: a setup that
   can't replace an old link stops instead of writing into it, and on Windows a read-only file stays read-only.
 - Unlocked aspect ratio: the map no longer shows unexplored areas beside the 16:9 part on wide windows.
