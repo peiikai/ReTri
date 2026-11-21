@@ -181,6 +181,7 @@ typedef struct {
     uint64_t checked_frame, full_frame;
     bool scalable;       // screen-shaped render target: allocated at the output resolution
     bool shadow;         // (scalable) the game's shadow map: at its own scale (tex_shadow)
+    bool rift_map;       // (scalable) EoW's rift map: at its own scale (tex_rift_map)
     bool ao;             // (scalable) the game's ambient occlusion: at its own scale (tex_ao)
     bool two_d;          // (scalable) another game's 1080-line 2D: the frame's scale times output_scale_2d (tex_2d)
     float ax, ay;        // allocation scale (the Metal texture's size); sx, sy below: the scale its contents were drawn at
@@ -273,8 +274,13 @@ static bool tex_shadow(const NvnTexture *t) {
     return output_scale_is_shadow_map(t->target, t->samples, t->width, t->height, t->format, (t->flags & 8) != 0);
 }
 
+// EoW's rift map (output_scale_is_rift_map): its own scale, output_scale_rift_map() - the widescreen factor, 1 at 16:9.
+static bool tex_rift_map(const NvnTexture *t) {
+    return output_scale_is_rift_map(t->target, t->samples, t->width, t->height, t->format, (t->flags & 8) != 0);
+}
+
 static bool tex_scalable(const NvnTexture *t) {
-    if (tex_shadow(t)) return true;  // (its scale can change in the menu: 1 at Default)
+    if (tex_shadow(t) || tex_rift_map(t)) return true;  // (its scale can change in the menu: 1 at Default)
     static int off = -1;  // (per texture lookup: cached)
     if (off < 0) off = getenv("LARECOMP_NO_SCALE") != NULL;
     if (off) return false;
@@ -290,8 +296,8 @@ static bool tex_scalable(const NvnTexture *t) {
 static bool tex_2d(const NvnTexture *t) { return game_other() && t->width == 1920 && t->height == 1080; }
 // The scale a scalable texture is allocated and drawn at: the ambient occlusion's own, else the frame's
 // (the AO: uniform, by the height's; EoW's 2D: a part of the frame's)
-static float tex_alloc_x(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : b->two_d ? g_al_x * output_scale_2d() : g_al_x; }
-static float tex_alloc_y(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); return b->ao ? output_scale_ao(g_al_y) : b->two_d ? g_al_y * output_scale_2d() : g_al_y; }
+static float tex_alloc_x(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); if (b->rift_map) return output_scale_rift_map(); return b->ao ? output_scale_ao(g_al_y) : b->two_d ? g_al_x * output_scale_2d() : g_al_x; }
+static float tex_alloc_y(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); if (b->rift_map) return output_scale_rift_map(); return b->ao ? output_scale_ao(g_al_y) : b->two_d ? g_al_y * output_scale_2d() : g_al_y; }
 static float tex_draw_x(const TexBackend *b) { return b->two_d ? g_rs_x * output_scale_2d() : g_rs_x; }
 static float tex_draw_y(const TexBackend *b) { return b->two_d ? g_rs_y * output_scale_2d() : g_rs_y; }
 
@@ -330,7 +336,7 @@ bool renderer_texture_frame_fresh(NvnTexture *t) {
     static int on = -1;
     if (on < 0) on = getenv("LARECOMP_NO_FRAME_CLEAR") == NULL;
     TexBackend *b = t ? (TexBackend *)t->backend : NULL;
-    if (!on || !b || !b->scalable || b->shadow || b->frame_cleared == renderer_exec_frame() + 1) return false;
+    if (!on || !b || !b->scalable || b->shadow || b->rift_map || b->frame_cleared == renderer_exec_frame() + 1) return false;
     b->frame_cleared = renderer_exec_frame() + 1;
     return true;
 }
@@ -340,7 +346,7 @@ bool renderer_texture_level_fresh(NvnTexture *t) {
     static int keep = -1;
     if (keep < 0) keep = getenv("LARECOMP_KEEP_TARGETS") != NULL;
     if (!b || keep || b->level_gen == g_level_gen) return false;
-    if (!b->scalable || b->shadow) { b->level_gen = g_level_gen; return false; }  // scene buffers only: UI textures the game draws once
+    if (!b->scalable || b->shadow || b->rift_map) { b->level_gen = g_level_gen; return false; }  // scene buffers only: UI textures the game draws once
                                                                        // and reuses (rupee counter) must keep their contents
     bool fresh = b->level_gen != 0;  // first use ever: nothing stale to hide
     b->level_gen = g_level_gen;
@@ -400,8 +406,9 @@ static TexBackend *tex_backend(NvnTexture *t) {
     TexBackend *b = calloc(1, sizeof *b);
     b->scalable = tex_scalable(t);
     b->shadow = tex_shadow(t);
-    b->ao = b->scalable && !b->shadow && tex_ao(t);
-    b->two_d = b->scalable && !b->shadow && !b->ao && tex_2d(t);
+    b->rift_map = !b->shadow && tex_rift_map(t);
+    b->ao = b->scalable && !b->shadow && !b->rift_map && tex_ao(t);
+    b->two_d = b->scalable && !b->shadow && !b->rift_map && !b->ao && tex_2d(t);
     if (t->width == 1920 && t->height == 1080 && getenv("LARECOMP_LOG_SCALABLE"))
         LOG("[scale] 1920x1080 tex %p f%#x flags %#x target %u samples %u levels %u -> scalable %d (%s)\n", (void *)t, t->format,
             t->flags, t->target, t->samples, t->levels, b->scalable, t->label);
@@ -472,8 +479,8 @@ static void create_backend_texture(NvnTexture *t, TexBackend *b) {
     d.pixelFormat = mf.pf;
     b->ax = b->scalable ? tex_alloc_x(b) : 1;
     b->ay = b->scalable ? tex_alloc_y(b) : 1;
-    b->sx = b->scalable ? (b->ao || b->shadow ? b->ax : tex_draw_x(b)) : 1;
-    b->sy = b->scalable ? (b->ao || b->shadow ? b->ay : tex_draw_y(b)) : 1;
+    b->sx = b->scalable ? (b->ao || b->shadow || b->rift_map ? b->ax : tex_draw_x(b)) : 1;
+    b->sy = b->scalable ? (b->ao || b->shadow || b->rift_map ? b->ay : tex_draw_y(b)) : 1;
     uint32_t tw = t->width ? t->width : 1, th = t->height ? t->height : 1;
     if (b->scalable) {
         tw = (uint32_t)lroundf(tw * b->ax); th = (uint32_t)lroundf(th * b->ay);
@@ -719,7 +726,7 @@ id<MTLTexture> renderer_texture(NvnTexture *t, id<MTLBlitCommandEncoder> blit, b
 void renderer_mark_gpu_owned(NvnTexture *t) {
     TexBackend *b = tex_backend(t);
     b->gpu_owned = true;
-    if (b->scalable && !b->ao && !b->shadow) { b->sx = tex_draw_x(b); b->sy = tex_draw_y(b); }
+    if (b->scalable && !b->ao && !b->shadow && !b->rift_map) { b->sx = tex_draw_x(b); b->sy = tex_draw_y(b); }
 }
 // The tap scale of the ambient occlusion's own blurs (translate.c ao_grid_fix): the AO's scale for a draw into one of
 // its 480x270 targets (the two blurs after the AO pass), 0 for any other target.

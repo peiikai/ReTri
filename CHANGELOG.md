@@ -43,6 +43,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 - Language: Portuguese (Brazil) now changes the game's own text too, not just the menus (it stayed English).
+- Menus use the EoW colours without LAS Recomp's gold: buttons such as Show in Finder, Import fonts, Return and
+  Apply are plain, lit only under the mouse or the controller cursor; headings are bronze, arrows cream. The start
+  screen's title and menu are cream and bronze too. The System tab no longer mentions seeds.
 - The game always runs at 60 fps: its own switch to 30 fps when frames run long is off (it could get stuck at 30).
   On slower devices, set FPS (under Resolution) to 30, or turn on Dynamic resolution and pick its FPS target.
 - The game code generator is part of the app (C++, from LAS Recomp): no release ships Python any more, and setup
@@ -76,6 +79,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- Mac, Aspect ratio Unlocked: rifts no longer flash in wide windows, and their edges are no longer a staircase.
+  The outline jumped every few frames while standing still and turned to big steps for a few frames about once a
+  second; the rift map now has more pixels in wide windows, so the edges look as they do at 16:9.
 - Mac: the frame rate no longer slides from 60 to under 30 after the window loses focus (seen at 5120x1440). The
   GPU slowed its clock because each frame's present deadline was set from when it was sent, which a late frame
   still met. Deadlines now follow the 60 fps schedule, so a late frame asks for a faster clock.
