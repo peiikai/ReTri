@@ -52,7 +52,9 @@ run() {  # <what> <env...>: one copy of the game under the guard (tools/game_slo
     local what=$1; shift
     ( . tools/game_slot.sh
       export_guard
-      env "$@" ./build/eowrecomp > "$WG/$what.log" 2>&1 ) || true
+      env "$@" ./build/eowrecomp > "$WG/$what.out" 2>&1 ) || true
+    # (the app's log is the data folder's eowrecomp.log outside a source checkout; stdout is mostly empty)
+    cp "$DATA/eowrecomp.log" "$WG/$what.log" 2>/dev/null || cp "$WG/$what.out" "$WG/$what.log"
     echo "$what: $(grep -c 'WRITE-GUARD' "$LOG" 2>/dev/null || echo 0) guard lines so far ($WG/$what.log)"
 }
 for p in $PHASES; do
