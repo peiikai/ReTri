@@ -21,11 +21,11 @@ native Windows, macOS and Linux application. Android and iOS builds are in testi
 > - macOS - Apple Silicon only, Metal graphics backend + MetalFX
 > - Windows - x86-64 only, Vulkan graphics backend
 > - Linux - x86-64, Vulkan graphics backend (AppImage)
-> - Android (arm64, Vulkan) and iPhone and iPad (arm64, Metal, sideloaded) - **nightly builds only** for now, not part
->   of Beta 1 releases. They aren't well tested yet, but your reports help us fix whatever you find. See
->   [iPhone and iPad](#iphone-and-ipad).
-> - Windows on ARM (arm64) and Linux aarch64 (ARM) - **experimental**: on the [releases](https://github.com/peiikai/ReTri/releases)
->   page; reports welcome ([docs/linux.md](docs/linux.md) lists what to include)
+> - Linux aarch64 (ARM) - **experimental**: on the [releases](https://github.com/peiikai/ReTri/releases) page; reports
+>   welcome ([docs/linux.md](docs/linux.md) lists what to include)
+> - Android (arm64, Vulkan), iPhone and iPad (arm64, Metal, sideloaded) and Windows on ARM (arm64) - **nightly builds
+>   only** for now, not part of Beta 1 releases. They aren't well tested yet, but your reports help us fix whatever
+>   you find. See [iPhone and iPad](#iphone-and-ipad).
 
 ## System requirements
 
@@ -235,7 +235,7 @@ Requirements: Apple Silicon, Xcode command line tools (clang), [Homebrew](https:
 ### Windows
 
 Requirements: Windows 10+ x86-64, a CPU with AVX2 and a GPU with Vulkan 1.3. More detail in
-[docs/BUILD-windows.md](docs/BUILD-windows.md). Windows on ARM (experimental) builds with the same setup script; see
+[docs/BUILD-windows.md](docs/BUILD-windows.md). Windows on ARM builds with the same setup script; see
 that page.
 
 1. One-time setup, in PowerShell from the repo root: `powershell -ExecutionPolicy Bypass -File tools\setup_windows.ps1`.
