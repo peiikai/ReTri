@@ -191,7 +191,8 @@ fi
 if [ -n "${IOS_SIM:-}" ]; then
     # The simulator runs ad-hoc signed code, every binary signed, and refuses the executable with our entitlement
     # in its signature ("Security policy issue"): plain ad-hoc signatures, inside out.
-    for f in "$APP"/Frameworks/*.framework; do codesign --force --sign - --timestamp=none "$f"; done
+    # (none at all once LASGame.framework is gone: SDL3 and FFmpeg are linked in)
+    for f in "$APP"/Frameworks/*.framework; do [ -e "$f" ] || continue; codesign --force --sign - --timestamp=none "$f"; done
     codesign --force --sign - --timestamp=none "$APP"
     echo "$APP (simulator): $(du -sh "$APP" | cut -f1), $(ls "$APP/Frameworks" | wc -l | tr -d ' ') frameworks, ad-hoc signed"
     exit 0
