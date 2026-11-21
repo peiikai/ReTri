@@ -92,6 +92,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Mac, Aspect ratio Unlocked: rifts no longer flash in wide windows, and their edges are no longer a staircase.
   The outline jumped every few frames while standing still and turned to big steps for a few frames about once a
   second; the rift map now has more pixels in wide windows, so the edges look as they do at 16:9.
+- Start screen: Resolution showed 0x0. Each choice now shows the size the game will render at in this window.
 - Mac: the frame rate no longer slides from 60 to under 30 after the window loses focus (seen at 5120x1440). The
   GPU slowed its clock because each frame's present deadline was set from when it was sent, which a late frame
   still met. Deadlines now follow the 60 fps schedule, so a late frame asks for a faster clock.

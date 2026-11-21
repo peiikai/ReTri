@@ -41,6 +41,7 @@ extern "C" {
 #include "../hle.h"
 #include "../settings.h"
 #include "../nvn/output_scale.h"
+bool widescreen_allowed(void);  // (runtime/hle/widescreen.c: the camera widened to fill the window)
 #include "../nvn/hud_stats.h"
 #include "../menu_sfx.h"
 #include "menu.h"
@@ -761,8 +762,11 @@ static void tab_display(void) {
             if (res_mode[i] == g_settings.res_mode) ri = i;
             if (res_mode[i] == g_default_res_mode) rdef = i;
         }
-        int rw = 0, rh = 0;  // (the 3D's size: another game's 2D may be drawn larger - output_scale.c game_3d)
-        output_scale_render_size(&rw, &rh);
+        // the 3D's size at the chosen resolution in this window (another game's 2D may be drawn larger -
+        // output_scale.c alloc_scale): worked out, not the last frame's - the start screen has drawn none (0x0), and
+        // in the preview it is this frame's choice, not the one before
+        int rw = 0, rh = 0;
+        output_scale_size_for(g_settings.res_mode, g_win_px_w, g_win_px_h, widescreen_allowed(), &rw, &rh);
         float sx = rw / 1920.0f, sy = rh / 1080.0f;
         char d[1024];  // (in the menus' language already: the row leaves it as it is)
         snprintf(d, sizeof d,
