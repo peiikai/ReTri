@@ -3,6 +3,7 @@
 // folder - saved as an unsigned .ipa where they choose. Reached from Settings > Prelaunch; shares the launcher's
 // busy state, job line and progress bar (the launcher's hooks below).
 #pragma once
+#include <functional>
 #include <string>
 
 struct SDL_Window;
@@ -23,8 +24,9 @@ struct IosExportHost {
 void ios_export_ui_init(const IosExportHost &host);
 
 // The page's rows (option_rows.h, inside the launcher's opt_begin / opt_end). ready: the set-up game files can be
-// played; busy: the launcher's busy state.
-void ios_export_rows(bool ready, bool busy, SDL_Window *win);
+// played; busy: the launcher's busy state; first_row: called right after the first row (the launcher's controller and
+// keyboard cursor starts there).
+void ios_export_rows(bool ready, bool busy, SDL_Window *win, const std::function<void()> &first_row);
 // Settings > Prelaunch: the "Recomp for iOS..." button and, after an export, where it went
 void ios_export_prelaunch(bool busy);
 // The Prelaunch button was pressed since the last call (the launcher opens the page)
