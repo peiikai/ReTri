@@ -33,6 +33,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   up from your own extracted files and builds the game code on your PC (about an hour the first time).
 - Linux (x64 and arm64, Vulkan): an AppImage, `ReTri-<version>-linux-<x64|arm64>.AppImage`, and the same files as a
   tarball. Like the Windows zip, it sets the game up from your own extracted files and builds the game code on your PC.
+  arm64 is on nightly builds only for now.
 - The EoW touch controls look like the inventory screen's background (its felt and colour, the item slots'
   edges, see-through and lit when pressed as in LAS), laid out as in LAS. Y shows the echo or item on the HUD's Y slot.
 - Phones and tablets, EoW: the hearts go to the screen's upper left corner, the mini map to the upper right with the
