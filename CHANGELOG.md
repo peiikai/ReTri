@@ -41,7 +41,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Game versions 1.0.0 and 1.0.1 work too, besides 1.0.2. The start screen shows which version the game files are.
 
 ### Changed
-- The start screen prepares 836 more shader variants (from a long play test), so fewer stutters the first time a
+- The start screen prepares 890 more shader variants (from play tests), so fewer stutters the first time a
   scene or effect shows.
 - Android: the first setup builds the game code faster. Functions the game runs in play are built optimized and the
   rest quickly, as LAS Recomp does, with lists for 1.0.0, 1.0.1 and 1.0.2.
