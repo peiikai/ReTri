@@ -18,6 +18,9 @@ bool pace_target_30(void) { return false; }
 bool pace_is_slow(void) { return false; }
 void pace_try_60(void) {}
 bool menu_is_open(void) { return false; }
+int pace_cpu_frames(void) { return 0; }
+const char *game_other(void) { return NULL; }  // (LA's shadow map: runtime/game_addresses.c)
+float widescreen_factor(void) { return 1; }  // (runtime/hle/widescreen.c)
 
 // A fragment shader in the game's shape: the x taps' offsets from c4[0x240] and, when `compare`, a compare lookup on a
 // 2D array. Without the lookup a read of c4[0x240] is some other constant.

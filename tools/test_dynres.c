@@ -26,6 +26,8 @@ static int g_pace_try;  // (pacer cases: Dynamic asked the frame pacer to try 60
 void pace_try_60(void) { g_pace_try = 1; }
 static int g_pace_cpu;  // (pacer cases: the case's CPU time over a frame - nvn/pace.c pace_cpu_frames, all 60 or none)
 int pace_cpu_frames(void) { return g_pace_cpu; }
+const char *game_other(void) { return NULL; }  // (LA's 3D scale: runtime/game_addresses.c)
+float widescreen_factor(void) { return 1; }  // (runtime/hle/widescreen.c)
 
 static unsigned g_rng = 1;
 static double rnd(void) { g_rng = g_rng * 1103515245u + 12345u; return ((g_rng >> 8) & 0xffff) / 65535.0; }

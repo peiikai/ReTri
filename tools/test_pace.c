@@ -31,6 +31,8 @@ int64_t pace_gpu_ns(void) { return (int64_t)gpu_total_ns; }
 int game_in_play(void) { return 1; }
 bool world_on_screen(void) { return true; }
 const char *game_level_name(void) { return "Field"; }
+const char *game_other(void) { return NULL; }  // (LA's pacing: runtime/game_addresses.c)
+int g_nvn_present_interval = 1;  // (pace_other_cadence: runtime/nvn/objects.c)
 uint64_t game_camera_zone(void) { return zone; }
 void slow_frame_present(uint64_t now, uint64_t gcpu) { (void)now, (void)gcpu; }
 // Dynamic resolution's state for pace.c "Resolution first" (output_scale.c): 0 off, 1 at its floor, 2 above it. The

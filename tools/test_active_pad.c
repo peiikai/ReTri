@@ -30,6 +30,7 @@ void ipc_return_object(IpcResp *r, Service *s) { abort(); }
 int game_in_play(void) { abort(); }
 int cheats_link_health(int *max) { abort(); }
 int bind_label_family(void) { abort(); }
+void blip_request(void) { abort(); }  // (input.c's F10: runtime/nvn/metal.m)
 int16_t g_bind_pad[BIND_PAD_COUNT], g_bind_key[BIND_KEY_COUNT];  // (A on the bottom button, as by default)
 int bind_pad_host(int slot) { return g_bind_pad[slot]; }  // (by position: Button layout "Switch")
 
