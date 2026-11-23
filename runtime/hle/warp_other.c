@@ -6,6 +6,7 @@
 // when an event ends (its processor, OTHER(WARP_REQUEST_PROC), runs then). The request has LA's layout at another
 // offset: level at R+0x218 (length +0x258), locator at +0x260 (length +0x2a0), offset +0x2b0; runtime/gen/patches.cpp
 // hooks the processor to tell us where it is (rt_other_request_holder). The places come from the game's level files (warp_other_places).
+#include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -71,6 +72,170 @@ void warp_other_request(const char *level, const char *locator) {
 
 static void tour_frame(uint64_t frame);
 
+// (debug) LARECOMP_TRIGGER_DIR=<dir>: while a copy runs, files dropped in that folder act once, then are deleted.
+// "flags": "<save main.bin path> <section start hex> <byte.bit ...>" clears those bits of a save's flag bitfield in the
+// game's own copy (found in guest memory by the save section's first 64 bytes), so a fight already won comes back at
+// the next room entry. "capture": "<every N frames> <for M frames>" saves the window then to build/cap/frame_<n>.png.
+static char *trigger_take(const char *name) {
+    const char *d = getenv("LARECOMP_TRIGGER_DIR");
+    if (!d) return NULL;
+    char path[1024];
+    snprintf(path, sizeof path, "%s/%s", d, name);
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    char *b = calloc(1, 65536);
+    if (b) fread(b, 1, 65535, f);
+    fclose(f);
+    unlink(path);
+    return b;
+}
+static void trigger_flags(void) {
+    static int n;
+    if (++n % 30) return;  // (twice a second)
+    char *t = trigger_take("flags");
+    if (!t) return;
+    char save[512];
+    unsigned sec = 0;
+    int used = 0;
+    if (sscanf(t, "%511s %x%n", save, &sec, &used) == 2) {
+        FILE *f = fopen(save, "rb");
+        uint8_t key[64];
+        if (f && fseek(f, sec + 16, SEEK_SET) == 0 && fread(key, 1, 64, f) == 64) {
+            extern uint64_t kernel_heap_size(void);
+            uint8_t *h = (uint8_t *)(uintptr_t)HEAP_BASE, *end = h + kernel_heap_size() - 0x2000;
+            int hits = 0;
+            for (uint8_t *q = h; q < end; q += 4) {
+                if (memcmp(q, key, 64)) continue;
+                hits++;
+                const char *p = t + used;
+                unsigned off, bit;
+                int k, nb = 0;
+                while (sscanf(p, " %x.%u%n", &off, &bit, &k) == 2) { q[off] &= (uint8_t)~(1u << bit); p += k; nb++; }
+                LOG("[trigger] flags: cleared %d bits at %llx\n", nb, (unsigned long long)(uintptr_t)q);
+            }
+            LOG("[trigger] flags: %d copies of %s's flags found\n", hits, save);
+        } else LOG("[trigger] flags: can't read %s\n", save);
+        if (f) fclose(f);
+    }
+    free(t);
+}
+// "teleport": "<x> <y> <z> <r> <x2> <y2> <z2>" (or LARECOMP_TELEPORT_AT=<frame>:<same 7 numbers>): every float triple in
+// guest memory within r of x,y,z (Zelda's position and its copies, right after a warp to a spawn point) is moved by
+// (x2,y2,z2)-(x,y,z) - a place with no spawn point of its own. Ugly, debug only.
+static void teleport(const float *v) {
+    extern uint64_t kernel_heap_size(void);
+    uint8_t *h = (uint8_t *)(uintptr_t)HEAP_BASE, *end = h + kernel_heap_size() - 16;
+    int hits = 0;
+    float d[3] = {v[4] - v[0], v[5] - v[1], v[6] - v[2]}, r = v[3];
+    for (uint8_t *q = h; q < end; q += 4) {
+        float *f = (float *)q;
+        if (!(fabsf(f[1] - v[1]) <= 1.0f && fabsf(f[0] - v[0]) <= r && fabsf(f[2] - v[2]) <= r)) continue;
+        if (f[0] == 0 || f[2] == 0) continue;
+        for (int i = 0; i < 3; i++) f[i] += d[i];
+        hits++;
+        q += 8;
+    }
+    LOG("[trigger] teleport: %d triples moved by %.1f %.1f %.1f\n", hits, d[0], d[1], d[2]);
+}
+static void trigger_teleport(void) {
+    static long at = -1;
+    static float tv[7];
+    if (at < 0) {
+        const char *e = getenv("LARECOMP_TELEPORT_AT");
+        at = 0;
+        if (e && sscanf(e, "%ld:%f:%f:%f:%f:%f:%f:%f", &at, &tv[0], &tv[1], &tv[2], &tv[3], &tv[4], &tv[5], &tv[6]) != 8) at = 0;
+    }
+    extern uint64_t renderer_present_count(void);
+    if (at && (long)renderer_present_count() >= at) { at = 0; teleport(tv); }
+    static int n;
+    if (++n % 30) return;
+    char *t = trigger_take("teleport");
+    if (!t) return;
+    float v[7];
+    if (sscanf(t, "%f %f %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6]) == 7) teleport(v);
+    free(t);
+}
+// "hpsnap": "<x> <y> <z> <r>": keep a copy of 16 KB around every float triple near x,y,z (an actor's position and
+// its copies); "hpdiff": log the 32-bit words there that went down by 1-255 since (its health, after a hit);
+// "poke": "<hex address> <i32|f32|u16|u8> <value>". Ugly, debug only.
+typedef struct { uint8_t *at; uint8_t old[0x4000]; } HpWin;
+static HpWin *g_hpw;
+static int g_nhpw;
+static void trigger_hp(void) {
+    static int n;
+    if (++n % 30) return;
+    char *t = trigger_take("hpsnap");
+    if (t) {
+        float v[4];
+        if (sscanf(t, "%f %f %f %f", &v[0], &v[1], &v[2], &v[3]) == 4) {
+            extern uint64_t kernel_heap_size(void);
+            uint8_t *h = (uint8_t *)(uintptr_t)HEAP_BASE, *end = h + kernel_heap_size() - 0x2000;
+            free(g_hpw); g_hpw = NULL; g_nhpw = 0;
+            for (uint8_t *q = h + 0x2000; q < end && g_nhpw < 512; q += 4) {
+                float *f = (float *)q;
+                if (!(fabsf(f[0] - v[0]) <= v[3] && fabsf(f[1] - v[1]) <= 1.5f && fabsf(f[2] - v[2]) <= v[3])) continue;
+                uint8_t *w = (uint8_t *)((uintptr_t)(q - 0x2000) & ~(uintptr_t)0xf);
+                if (g_nhpw && w < g_hpw[g_nhpw - 1].at + 0x4000) continue;
+                g_hpw = realloc(g_hpw, sizeof *g_hpw * (size_t)(g_nhpw + 1));
+                g_hpw[g_nhpw].at = w;
+                memcpy(g_hpw[g_nhpw].old, w, 0x4000);
+                g_nhpw++;
+            }
+            LOG("[trigger] hpsnap: %d windows\n", g_nhpw);
+        }
+        free(t);
+    }
+    t = trigger_take("hpdiff");
+    if (t) {
+        int hits = 0;
+        for (int i = 0; i < g_nhpw; i++)
+            for (int o = 0; o < 0x4000; o += 4) {
+                int32_t a, b;
+                memcpy(&a, g_hpw[i].old + o, 4); memcpy(&b, g_hpw[i].at + o, 4);
+                float fa, fb;
+                memcpy(&fa, &a, 4); memcpy(&fb, &b, 4);
+                bool ints = a > 0 && a < 100000 && b >= 0 && a - b >= 1 && a - b <= 255;
+                bool flts = fa > 0 && fa < 100000 && fb >= 0 && fa - fb >= 0.25f && fa - fb <= 255 && fa == (int)fa && fb == (int)fb;
+                if ((ints || flts) && hits++ < 200)
+                    LOG("[trigger] hpdiff: %llx %s %d -> %d\n", (unsigned long long)(uintptr_t)(g_hpw[i].at + o), ints ? "i32" : "f32",
+                        ints ? a : (int)fa, ints ? b : (int)fb);
+            }
+        LOG("[trigger] hpdiff: %d candidates\n", hits);
+        free(t);
+    }
+    t = trigger_take("poke");
+    if (t) {
+        unsigned long long a;
+        char ty[8];
+        double val;
+        if (sscanf(t, "%llx %7s %lf", &a, ty, &val) == 3 && a >= HEAP_BASE) {
+            void *p = (void *)(uintptr_t)a;
+            if (!strcmp(ty, "i32")) { int32_t x = (int32_t)val; memcpy(p, &x, 4); }
+            else if (!strcmp(ty, "f32")) { float x = (float)val; memcpy(p, &x, 4); }
+            else if (!strcmp(ty, "u16")) { uint16_t x = (uint16_t)val; memcpy(p, &x, 2); }
+            else if (!strcmp(ty, "u8")) { uint8_t x = (uint8_t)val; memcpy(p, &x, 1); }
+            LOG("[trigger] poke %llx %s %g\n", a, ty, val);
+        }
+        free(t);
+    }
+}
+static void trigger_capture(uint64_t frame) {
+    static long every, until;
+    if (!(frame % 30)) {
+        char *t = trigger_take("capture");
+        if (t) {
+            long m = 0;
+            if (sscanf(t, "%ld %ld", &every, &m) == 2 && every > 0) { until = (long)frame + m; mkdir("build", 0755); mkdir("build/cap", 0755); }
+            LOG("[trigger] capture every %ld frames until %ld\n", every, until);
+            free(t);
+        }
+    }
+    if ((long)frame < until && !(frame % every)) {
+        extern char g_window_shot_request[256];
+        snprintf(g_window_shot_request, sizeof g_window_shot_request, "build/cap/frame_%06llu.png", (unsigned long long)frame);
+    }
+}
+
 // Render thread, once a frame: the test hooks queue warps (handed to the game by warp_other_game_tick).
 void warp_other_frame(uint64_t frame) {
     static long test_at = -1;  // (test) LARECOMP_WARP_AT=<frame>:<level>:<locator>
@@ -81,6 +246,7 @@ void warp_other_frame(uint64_t frame) {
         if (e && sscanf(e, "%ld:%63[^:]:%63s", &test_at, tl, tc) != 3) test_at = 0;
     }
     tour_frame(frame);
+    trigger_capture(frame);
     if (test_at && (long)frame == test_at) { warp_other_request(tl, tc); LOG("[warp] test warp queued at frame %llu (request %llx)\n", (unsigned long long)frame, (unsigned long long)g_req); }
 }
 
@@ -244,6 +410,9 @@ static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
 }
 
 void warp_other_game_tick(Cpu *c) {
+    trigger_flags();
+    trigger_teleport();
+    trigger_hp();
     if (g_pending && !getenv("LARECOMP_WARP_REQUEST_ONLY")) {  // the game's own fast-travel event
         pthread_mutex_lock(&g_lock);
         char lv[64], lc[64];
