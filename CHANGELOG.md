@@ -95,7 +95,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Setup and Delete game files never write to your own game files through the data folder's links: a setup that
   can't replace an old link stops instead of writing into it, and on Windows a read-only file stays read-only.
 - Unlocked aspect ratio: the map no longer shows unexplored areas beside the 16:9 part on wide windows.
-- Mac, Aspect ratio Unlocked: rifts no longer flash in wide windows, and their edges are no longer a staircase.
+- Aspect ratio Unlocked: rifts no longer flash in wide windows, and their edges are no longer a staircase.
   The outline jumped every few frames while standing still and turned to big steps for a few frames about once a
   second; the rift map now has more pixels in wide windows, so the edges look as they do at 16:9.
 - Start screen: Resolution showed 0x0. Each choice now shows the size the game will render at in this window.

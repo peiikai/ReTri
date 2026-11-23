@@ -2078,7 +2078,7 @@ static void compile_program(Prog *pr) {
 // uv to each side, two of the 1024x1024 map's texels. With the map larger than the Switch's (metal.m tex_rift_map, in
 // wide windows) the taps stay 1/512 apart and skip texels: a row of sharp teeth along the rifts' edges. Each offset
 // is divided by the map's scale (rscale[4].x, the slot's texture scale): two texels again, at any size, and the
-// game's own offsets at 1x. MSL only (the Vulkan backend translates to GLSL and has no rift map scale).
+// game's own offsets at 1x. Vulkan: the same on the GLSL (vulkan/exec.c rift_mask_taps).
 static uint64_t hmix(uint64_t h, const void *p, size_t n);
 static void rift_mask_taps(ShaderInfo *fi, const uint8_t *fcode, size_t fmax) {
     if (!game_other() || !fcode || fmax < 0x230 || !strstr(fi->msl, "texture2d<float> t3 [[texture(3)]]")) return;
