@@ -32,7 +32,7 @@ android {
             create("release") {
                 storeFile = file(ks)
                 storePassword = System.getenv("LARECOMP_KEYSTORE_PASSWORD")
-                keyAlias = "lasrecomp"
+                keyAlias = "retri"
                 keyPassword = System.getenv("LARECOMP_KEYSTORE_PASSWORD")
             }
         }
