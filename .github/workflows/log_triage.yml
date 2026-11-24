@@ -1,6 +1,8 @@
-# Log triage: when an issue or a comment has an attached lasrecomp.log (a github.com/user-attachments/files/... link),
-# tools/log_triage.py keeps one bot comment on the issue with a short summary of the newest logs (build, system, GPU,
-# settings, how the run ended, frame rate, notable lines) and a "log: crash" / "log: device-lost" / "log: ok" label.
+# Log triage (from LAS Recomp's): when an issue or a comment has an attached eowrecomp.log (a
+# github.com/user-attachments/files/... link), tools/log_triage.py keeps one bot comment on the issue with a short
+# summary of the newest logs (build, system, GPU, settings, how the run ended, frame rate, notable lines) and a
+# "log: crash" / "log: device-lost" / "log: ok" label, plus "log: new shaders" when a log has shader variants the
+# shipped list lacks. The script makes the labels on first use. The Issues desk's watcher skips the bot's comments.
 #
 # Security: no issue or comment text is ever put into this file's expressions or a shell. The script gets only the
 # issue number (from the event, or the dispatch input, checked to be digits) and reads the issue itself through the
@@ -14,8 +16,8 @@ name: Log triage
 on:
   issues:
     types: [opened, edited]
-  issue_comment:
-    types: [created]
+  issue_comment:  # (edited too: a log attached by editing the comment just posted)
+    types: [created, edited]
   workflow_dispatch:
     inputs:
       issue:

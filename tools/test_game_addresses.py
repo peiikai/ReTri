@@ -3,11 +3,8 @@
 Optional:
   --game KEY=FOLDER (repeatable, e.g. --game v1_0_0=extracted --game v1_0_1=/path/to/1.0.1): extracted game files of
     that version. Every RomFS file must be one of that version's (romfs_files.h), every patch's instruction check and
-    every hook word then runs on that version's main program, the
-    randomizer's patch sites (tools/rando/patch_variants.json, and --seeds) must hold the same original bytes in every
-    given version, the start screen's release label is checked, and with v1_0_0 and another version the committed
-    tables must equal tools/version_map.py's output.
-  --seeds FOLDER: randomizer seeds (rando/), whose exefs/1.0.0.pchtxt patch sites are checked like patch_variants.json.
+    every hook word then runs on that version's main program, the start screen's release label is checked, and with
+    v1_0_0 and another version the committed tables must equal tools/version_map.py's output.
   --compare-generated BEFORE AFTER: compares two complete generation directories made from the same player-provided
     exefs before/after a change.
 """
@@ -20,7 +17,6 @@ import os
 from pathlib import Path
 import re
 import shlex
-import shutil
 import struct
 import subprocess
 import sys
@@ -36,7 +32,6 @@ MAIN_BASE = 0x7000000000
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument('--compare-generated', type=Path, nargs=2, metavar=('BEFORE', 'AFTER'))
 parser.add_argument('--game', action='append', default=[], metavar='KEY=FOLDER')
-parser.add_argument('--seeds', type=Path)
 args = parser.parse_args()
 
 # ---- every version: the same names, one header each, distinct values
@@ -52,6 +47,20 @@ for key in VERSIONS:
         assert list(patch_values) == list(tables['v1_0_0'][0]), f'patches_{key}.h names differ from v1_0_0'
         assert list(runtime_values) == list(tables['v1_0_0'][1]), f'runtime_{key}.h names differ from v1_0_0'
 assert len({bid for _, bid in VERSIONS.values()}) == len(VERSIONS)
+
+# ---- other games (games.h): one table per build, the same names in the same order (the C struct is laid out from
+# eow_v1_0_2.h's), every address inside main, each build ID once
+builds = game_addresses.GAME_BUILDS
+assert len({b['build_id'] for b in builds}) == len(builds)
+assert {b['build_id'] for b in builds}.isdisjoint(bid for _, bid in VERSIONS.values())
+eow_names = list(game_addresses.load_other_table(TABLE_DIR/'eow_v1_0_2.h'))
+for b in builds:
+    t = game_addresses.other_table(b)
+    assert list(t) == eow_names, f"{b['key']}_{b['table']}.h names differ from eow_v1_0_2.h"
+    assert all(not v or MAIN_BASE <= v < b['sdk_base'] for v in t.values()), \
+        f"{b['key']}_{b['table']}.h: an address outside main"  # (0: not in this build)
+    assert game_addresses.game_build(b['build_id'].lower()) is b
+assert sorted(p.name for p in TABLE_DIR.glob('eow_v*.h')) == sorted(f"{b['key']}_{b['table']}.h" for b in builds)
 assert version_for_build_id('ae16f71e002af8cb059a9a74c4d90f34ba984892') == 'v1_0_0'
 assert version_for_build_id('909E904AF78AC1B8DEEFE97AB2CCDB51968F0EC7') == 'v1_0_1'
 for bad in ('', 'ae16f71e002af8cb', 'ae16f71e002af8cb059a9a74c4d90f34ba98489200000001', '00' * 20):
@@ -81,7 +90,7 @@ for address, expected in fixture['patches'].items():
     code = patches.PATCHES[address](gen, address)
     assert hashlib.sha256(code.encode()).hexdigest() == expected['sha256'], f'Patch output changed at {address:x}'
 assert hashlib.sha256(json.dumps(patches.HOOKS, sort_keys=True).encode()).hexdigest() == fixture['hooks_sha256']
-assert addr_text('f_@HAS_ITEM@(c);') == f'f_{ADDRESS.HAS_ITEM:x}(c);'
+assert addr_text('f_@NO_HANDLER_CATCH@(c);') == f'f_{ADDRESS.NO_HANDLER_CATCH:x}(c);'
 try:
     addr_text('@UNKNOWN_ADDRESS@')
 except AttributeError:
@@ -127,6 +136,12 @@ if (argc == 3 && !strcmp(argv[1], "label")) {  // label <exefs folder>
     puts(l ? l : "none");
     return 0;
 }
+if (argc == 3 && !strcmp(argv[1], "main")) {  // main <exefs/main>: what it is, and its build ID
+    char hex[41] = "x";
+    GameMainKind k = game_main_build_id(argv[2], hex);
+    printf("%s %s\n", k == GAME_MAIN_NSO ? "nso" : k == GAME_MAIN_MISSING ? "missing" : "not-nso", hex[0] ? hex : "-");
+    return 0;
+}
 if (argc == 3 && !strcmp(argv[1], "select")) {  // select <game folder>
     char why[256] = "";
     int ok = game_version_select(argv[2], why, sizeof why);
@@ -142,11 +157,13 @@ if ((argc == 3 || argc == 4) && !strcmp(argv[1], "romfs")) {
     GameRomfsCheck *c = game_romfs_check_begin(v);
     char line[1100], path[1024];
     unsigned long long size;
+    uint64_t bytes = 0;
     while (fgets(line, sizeof line, stdin)) {
         if (sscanf(line, "%llu %1023[^\n]", &size, path) != 2) continue;
         if (argc == 4 && game_romfs_exefs_copy(argv[3], path, size)) printf("copy %s\n", path);
-        else if (!game_romfs_check_file(c, path, size)) printf("odd %s %llu\n", path, size);
+        else if (!game_romfs_check_file(c, path, size, &bytes)) printf("odd %s %llu\n", path, size);
     }
+    printf("bytes %llu %llu\n", (unsigned long long)bytes, (unsigned long long)game_romfs_bytes(v));
     printf("missing %d\n", game_romfs_check_end(c));
     return 0;
 }
@@ -190,6 +207,18 @@ assert native('select', g1)[:2] == ['1', 'v1_0_1']
 out = native('select', gx)
 assert out[0] == '0' and 'unsupported version' in ' '.join(out), out
 assert native('select', tmp/'missing')[0] == '0'
+# what the launcher logs when it refuses game files (#696: the log had no build ID, a player had to hexdump exefs/main)
+assert native('main', gx/'exefs/main') == ['nso', '11' * 20]
+assert native('main', g1/'exefs/main') == ['nso', VERSIONS['v1_0_1'][1].upper()]
+assert native('main', tmp/'missing/exefs/main') == ['missing', '-']
+gn = tmp/'gn/exefs'
+gn.mkdir(parents=True)
+(gn/'main').write_bytes(b'NCA3' + bytes(0x5c))  # (another container, header long enough)
+assert native('main', gn/'main') == ['not-nso', '-']
+out = native('select', gn.parent)
+assert out[0] == '0' and 'NSO0' in ' '.join(out), out
+(gn/'main').write_bytes(b'NSO0' + bytes(0x10))  # (cut short before the build ID)
+assert native('main', gn/'main') == ['not-nso', '-']
 
 # ---- the RomFS file check (runtime/game_addresses/romfs_files.h, from tools/romfs_files.py): hashes only
 import romfs_files  # noqa: E402
@@ -201,18 +230,29 @@ for rel, size in (('region_common/event/x.bfevfl', 2712), ('a', 0), ('b c/d.bin'
     assert int(native('hash', rel, size)[0], 16) == romfs_files.entry_hash(rel, size), rel
 
 
-def romfs_check(build_id, files, game=None):
+def romfs_check(build_id, files, game=None, bytes_out=None):
+    # the odd and copied files, how many of the version's are missing; bytes_out: [the game's files' bytes, the
+    # version's total]
     out = subprocess.run([str(exe), 'romfs', build_id] + ([str(game)] if game else []),
                          input=''.join(f'{n} {p}\n' for p, n in files), encoding='utf-8',
                          capture_output=True, check=True).stdout.splitlines()
-    assert out[-1].startswith('missing '), out
-    return out[:-1], int(out[-1].split()[1])
+    assert out[-1].startswith('missing ') and out[-2].startswith('bytes '), out
+    if bytes_out is not None:
+        bytes_out[:] = map(int, out[-2].split()[1:])
+    return out[:-2], int(out[-1].split()[1])
 
 
 made_up = [('region_common/made_up.bin', 12), ('Ä/ü.bin', 3)]
 assert romfs_check('-', made_up) == ([], 0)  # (no version: no check)
 for key, (label, bid) in VERSIONS.items():
     assert romfs_check(bid, made_up) == (['odd region_common/made_up.bin 12', 'odd Ä/ü.bin 3'], 3836), key
+# the files that aren't the game's add no bytes (#553: a 6 GB extra file in romfs tripped "damaged or changed"); with no
+# version every file's are added
+total = []
+romfs_check(VERSIONS['v1_0_1'][1], made_up + [('extra.bin', 6314471936)], bytes_out=total)
+assert total == [0, 6232003903], total
+romfs_check('-', made_up, bytes_out=total)
+assert total == [15, 0], total
 
 # copies of the game code's six exefs files at the romfs root (#389: 3842 files) are skipped, only when each is the
 # same file as its exefs one; any other extra there is still odd
@@ -240,17 +280,6 @@ others = [(n, (gc/'romfs'/n).stat().st_size if (gc/'romfs'/n).exists() else 9)
 assert romfs_check(bid0, others + [('main', copies[0][1]), ('main', copies[0][1] + 1)], gc) == (
     [f'odd {n} {z}' for n, z in others] + ['copy main', f'odd main {copies[0][1] + 1}'], 3836)
 
-# Same resource location used by tools/lasgen.spec in the frozen helper.
-bundled = tmp/'bundle/runtime/game_addresses'
-bundled.mkdir(parents=True)
-shutil.copyfile(TABLE_DIR/'versions.h', bundled/'versions.h')
-for key in VERSIONS:
-    shutil.copyfile(table_path(key), bundled/table_path(key).name)
-check = ('import sys; sys._MEIPASS=sys.argv[1]; sys.path.insert(0,sys.argv[2]); '
-         'import game_addresses as g; g.select_build_id(sys.argv[3]); print(g.ADDRESS.HAS_ITEM)')
-for key, (label, bid) in VERSIONS.items():
-    output = subprocess.check_output([sys.executable, '-c', check, str(tmp/'bundle'), str(ROOT/'tools'), bid])
-    assert int(output) == tables[key][0]['HAS_ITEM']
 bad = tmp/'bad.h'
 for content in ('', 'GA_ADDR(BAD, 123)\n', 'GA_ADDR(DUP, 0x123)\n'*2):
     bad.write_text(content)
@@ -277,7 +306,8 @@ for path in (ROOT/'runtime').rglob('*'):
     if path.suffix not in ('.c', '.h', '.m', '.mm', '.cpp') or path.parent.name == 'game_addresses':
         continue
     code = strip_c.sub('', path.read_text(encoding='utf-8'))
-    assert not re.search(r'\bGA_(?!ADDR\b|VERSION\b|RELEASE\b|FIELD\b|AT\b)[A-Z]', code), f'{path}: use GA(NAME)'
+    assert not re.search(r'\bGA_(?!ADDR\b|VERSION\b|RELEASE\b|FIELD\b|AT\b|GAME\b)[A-Z]', code), f'{path}: use GA(NAME)'
+    assert set(re.findall(r'\bOTHER\(([A-Z][A-Z0-9_]*)\)', code)) <= set(eow_names), str(path)
     assert set(re.findall(r'\bGA(?:_FIELD)?\(([A-Z][A-Z0-9_]*)\)', code)) <= values.keys(), str(path)
     for match in re.finditer(r'0x(700[0-9a-fA-F]{7})', code):
         assert int(match[1], 16) in (0x7000000000, 0x7004000000), str(path)
@@ -304,9 +334,17 @@ if games:
     # every RomFS file is one of its version's, every one of them there
     for key, folder in games.items():
         files = romfs_files.romfs_files(folder/'romfs')
-        out, missing = romfs_check(VERSIONS[key][1], sorted(files.items()), folder)
+        total = []
+        out, missing = romfs_check(VERSIONS[key][1], sorted(files.items()), folder, total)
         copies = [line for line in out if line.startswith('copy ')]
         assert out == copies and not missing, (key, out[:20], missing)
+        assert total[0] == total[1], (key, total)  # (the game's files add up to the version's total)
+        # an extra file beside them leaves the total; one of them a byte longer is odd, missing and short
+        extra = romfs_check(VERSIONS[key][1], sorted(files.items()) + [('extra.bin', 5)], folder, total)
+        assert extra == (copies + ['odd extra.bin 5'], 0) and total[0] == total[1], (key, extra, total)
+        (rel, size), *rest = sorted(files.items())
+        out, missing = romfs_check(VERSIONS[key][1], [(rel, size + 1)] + rest, folder, total)
+        assert missing == 1 and f'odd {rel} {size + 1}' in out and total[0] == total[1] - size, (key, missing, total)
         print(f'{key}: {len(files) - len(copies)} RomFS files, all the game\'s' +
               (f' ({len(copies)} copies of the game code at the root, ignored)' if copies else ''))
     from nso import Nso
@@ -325,28 +363,6 @@ if games:
         print(f'{key}: {len(p.PATCHES)} patch checks and {len(p.HOOKS)} hook words pass on {folder}')
     select_version('v1_0_0')
     patches = importlib.reload(patches)
-    # the randomizer: the same original bytes at every patch site (rando.c reads 1.0.0.pchtxt on every version)
-    variants = json.loads((ROOT/'tools/rando/patch_variants.json').read_text())
-    sites = {int(a, 16): 4 for a in variants['code']} | {int(a, 16): 16 for a in variants['data']}
-    if args.seeds:
-        for pch in sorted(args.seeds.glob('*/exefs/1.0.0.pchtxt')):
-            enabled = False
-            for line in pch.read_text(encoding='utf-8', errors='replace').splitlines():
-                if line.startswith('@enabled'):
-                    enabled = True
-                elif line.startswith('@stop'):
-                    enabled = False
-                elif enabled and re.match(r'[0-9A-Fa-f]{8} ', line):
-                    off, data = line.split(None, 1)
-                    n = len(data.split('"')[1]) + 1 if data.startswith('"') else len(bytes.fromhex(data.split()[0]))
-                    sites[int(off, 16)] = max(sites.get(int(off, 16), 0), n)
-    first = next(iter(images.values()))
-    for key, n in images.items():
-        for off, size in sorted(sites.items()):
-            assert bytes(first.image[off:off + size]) == bytes(n.image[off:off + size]), \
-                f'{key}: the randomizer patch site main+{off:#x} differs'
-    if len(images) > 1:
-        print(f'{len(sites)} randomizer patch sites hold the same bytes in {", ".join(images)}')
     # the start screen's release label from the real files
     for key, folder in games.items():
         label = ' '.join(native('label', folder/'exefs'))

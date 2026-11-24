@@ -1,6 +1,7 @@
 # your own game files and what's made from them (building from source puts them here)
 input/
-extracted/
+# (no trailing slash: a dev checkout's extracted is often a symlink to the game files)
+extracted
 generated/
 generated-*/
 /rando/
@@ -11,6 +12,7 @@ generated-*/
 build/
 /cache/
 save/
+/load_save/
 /larecomp.ini
 /gamecontrollerdb.txt
 # tools and Python environments (machine-specific)

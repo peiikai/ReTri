@@ -6,8 +6,9 @@
 #include "imgui.h"
 
 struct PlasticTheme {
-    ImVec4 panel, panel2, inset, frame, frame_inner, row, row_sel, row_mark, row_hot, button, danger, tab, tab_sel;
+    ImVec4 panel, panel2, inset, frame, frame_inner, row, row_sel, row_mark, row_hot, button, danger, tab, tab_sel, tab_hot;
     ImVec4 ring, ring_sel;  // the rims round rows, buttons and tabs (ring_sel: on the selection)
+    ImVec4 bar;  // a progress bar's done part
     ImU32 text, text_dim, text_sel, text_button, section, value, value_changed, warn, title, arrow;
     ImU32 text_tab_sel;  // the selected tab's name
     float ring_w;   // a rim's width (design pixels)
@@ -18,9 +19,11 @@ struct PlasticTheme {
     float glare;    // over a dark scene the pieces come down by up to this much
     float corner;   // rows, buttons and tabs: their rounding at most this (design pixels; 0: as the caller asks)
     bool brackets;  // the cursor: corner brackets round the piece (gold on top, green below) instead of a lit rim
+    bool button_row;  // actions: drawn as rows, a chevron in the arrow colour marking them (not raised, lit buttons)
 };
 // LA's; another game on the engine (game_other) gets its own pause menu's colours
 const PlasticTheme &plastic_theme(void);
+bool ui_eow_look(void);  // EoW's look: its game files, or none chosen yet
 static inline ImVec4 plastic_col(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
 
 enum PlasticKind { PK_SLAB = 0, PK_INSET = 1, PK_PILL = 2, PK_RING = 3 };
@@ -36,14 +39,33 @@ void plastic_pill(ImDrawList *dl, ImVec2 a, ImVec2 b, float radius, ImVec4 col, 
 void plastic_brackets(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale);
 // a big panel: the paper slab in its frame (the menu window, popups, the start screen's windows)
 void plastic_panel(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale);
+// the paper filling the screen a..b, no frame (phones and tablets: a menu page)
+void plastic_panel_full(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale);
 // a well (recessed) - the panes, text fields
 void plastic_well(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale);
+// a progress bar: a recessed track, the done part a pill (frac 0..1; below 0, ImGui::ProgressBar's -time * speed: a
+// piece sliding along, the amount not known)
+void plastic_progress(ImDrawList *dl, ImVec2 a, ImVec2 b, float frac, float scale);
+// the same as an item at the cursor (size.x <= 0: the width left; size.y <= 0: a frame's height), the overlay text
+// (or none) beside it on the right
+void plastic_progress_bar(float frac, ImVec2 size, const char *overlay, float scale);
 // the round close X at the cursor (size: its diameter); true when clicked
 bool plastic_close_button(float size, float scale);
 // that X in the current window's top right corner, inside the frame; the layout is left as it was
 bool plastic_close_corner(float size, float scale);
+// touch screens: the same X inside the current window (a pane), at its top right
+bool plastic_close_pane(float size, float scale);
 // a round reset arrow just left of that X, the same size, with its tooltip; true when clicked
 bool plastic_reset_corner(float size, float scale);
+// iPhone: the screen's rounded corners' radius, in the current window's units (0 elsewhere); the menus set it each frame
+extern float g_plastic_corner_r;
+// touch screens: the centre height of the last pane's close X (plastic_close_pane) and the ImGui frame it was drawn in -
+// a page's corner icon lines up with it
+extern float g_plastic_pane_close_cy;
+extern int g_plastic_pane_close_frame;
+// how far from the screen's side the centre of a round button (centre cy below the top, radius r) has to be to clear
+// a rounded corner
+float plastic_corner_clear(float cy, float r);
 // While on (the menus' windows): ImGui's own frames (buttons, text fields, headers, check boxes) and window / popup
 // backgrounds are drawn as pieces too. The caller turns it off again before anything else is drawn.
 void plastic_widgets(bool on);

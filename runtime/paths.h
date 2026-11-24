@@ -1,16 +1,20 @@
-// Where LAS Recomp keeps its files (runtime/paths.c).
+// Where ReTri keeps its files (runtime/paths.c).
 //
 // Data root: everything the app writes or the user brings - extracted/ (game files), rando/ (seeds), save/,
 // cache/ (shaders / pipelines), fonts/ (imported), larecomp.ini. rt_paths_init() picks it and makes it the
 // working directory, so the rest of the runtime opens those by their relative names. In order:
-//   1. LARECOMP_DATA_ROOT (tests, scratch installs)
-//   2. dev / portable mode: the starting directory already has extracted/ (a source checkout: `./build/lasrecomp
+//   1. --data-dir <folder> / LARECOMP_DATA_ROOT (launchers, tests, scratch installs; runtime/main.c)
+//      --new-data-dir <folder> / LARECOMP_NEW_DATA_DIR (a launcher's game folder): that folder when it has data, or
+//      when the rules below find none (a new player); else the rules below (a player who played before keeps theirs)
+//   2. dev / portable mode: the starting directory already has extracted/ (a source checkout: `./build/eowrecomp
 //      extracted`, the test scripts) - used as is
 //   3. the folder named in data_root.txt in the platform's folder (4), chosen on the start screen (never inside the
 //      app); asks to try again / use the default when it's missing (a drive not connected)
-//   4. macOS: ~/Library/Application Support/com.peiikai.lasrecomp (the .app bundle itself is never written to)
+//   4. macOS: ~/Library/Application Support/com.peiikai.retri (the .app bundle itself is never written to)
 //      Windows: the folder of the .exe (portable, no installer); refuses to start, with a message, if not writable
-//      Linux: $XDG_DATA_HOME/lasrecomp (~/.local/share/lasrecomp)
+//      Linux: <file>.AppImage.home/.local/share/retri when that folder is next to the AppImage (the AppImage
+//      runtime's portable mode); the tarball's own folder when it has portable.txt (like the Windows zip); else
+//      $XDG_DATA_HOME/retri (~/.local/share/retri)
 //      LARECOMP_DATA_HOME (tests) stands in for it.
 //
 // Resources: files that ship with the app (helper programs, the window icon) - next to the executable (the
@@ -23,10 +27,11 @@
 extern "C" {
 #endif
 
-#define RT_BUNDLE_ID "com.peiikai.lasrecomp"
+#define RT_BUNDLE_ID "com.peiikai.retri"
 
 void rt_paths_init(void);         // first thing in main(), after plat_init
 const char *rt_data_root(void);   // absolute
+const char *rt_data_home(void);   // the platform's own data folder (where a data folder elsewhere is named)
 bool rt_dev_mode(void);           // dev / portable mode (rule 2 above): e.g. a source checkout
 // Before rt_paths_init (the session log): the data root by the rules above; false in dev mode
 bool rt_data_root_early(char *out, size_t n);
@@ -34,11 +39,11 @@ bool rt_data_root_early(char *out, size_t n);
 // Choosing another data folder (the start screen). NULL = it can be changed; else why not (rules 1 / 2).
 const char *rt_data_root_fixed(void);
 typedef struct {
-    char path[1100];               // where the data would go: the folder picked, or a "LAS Recomp" folder in it
+    char path[1100];               // where the data would go: the folder picked, or a "ReTri" folder in it
                                    // when it holds other things
     unsigned long long bytes;      // the data now (saves, seeds, settings, fonts, caches, game files)
     unsigned long long need, free; // space a move needs there (little on the same drive: hard links), space there
-    bool has_data;                 // LAS Recomp data already there: used as is, not moved into
+    bool has_data;                 // ReTri data already there: used as is, not moved into
     char refuse[160];              // why it can't be the data folder ("" = it can)
 } RtDataTarget;
 void rt_data_target(const char *picked, RtDataTarget *t);
@@ -47,6 +52,9 @@ void rt_data_target(const char *picked, RtDataTarget *t);
 // folder and removes the unfinished copy (or, after the switch, finishes removing the old one). progress: step 0
 // copying, 1 checking, 2 removing the old copy. false: err says why; the data stays where it was.
 bool rt_data_move(const char *to, void (*progress)(int step, double frac), char *err, size_t n);
+// From another thread while rt_data_move copies or checks: it stops and fails ("Move cancelled."), the copy removed.
+// Too late once the switch is made (step 2).
+void rt_data_move_cancel(void);
 // Only the switch: from the next start the data folder is `to` (created if needed), as it is. The old one is kept.
 bool rt_data_use(const char *to, char *err, size_t n);
 // Start again (the same command line, from the starting folder): after a switch. Returns only on failure.

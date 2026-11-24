@@ -32,10 +32,10 @@
 
 // macOS and Windows have system fonts known to work well (Hiragino / Yu Gothic): the OS's fonts first, untouched.
 // Everywhere else the bundled BIZ UDPGothic serves ahead of them and every substitute gets the console's metrics.
-#if defined(__APPLE__) || defined(_WIN32)
+#if (defined(__APPLE__) && !PLAT_IOS) || defined(_WIN32)
 #define OS_FONTS_KNOWN 1
 #else
-#define OS_FONTS_KNOWN 0
+#define OS_FONTS_KNOWN 0  // (Linux; iOS: the system's font files aren't readable by an app)
 #endif
 
 typedef struct { uint64_t addr, size; } Font;
@@ -317,7 +317,7 @@ static void load_fonts(void) {
     if (!fonts[F_STD].addr && rt_resource("DejaVuSans.ttf", "third_party/fonts/DejaVu/DejaVuSans.ttf", bundled, sizeof bundled))
         load_one_checked(bundled, &fonts[F_STD], true);
     if (!fonts[F_STD].addr)  // (only a broken install: the app ships DejaVu Sans)
-        FATAL("no font for the game's text: import the Switch fonts in Settings (Game font), or reinstall LAS Recomp\n");
+        FATAL("no font for the game's text: import the Switch fonts in Settings (Game font), or reinstall ReTri\n");
     static const char *const type_names[N_FONT_TYPES] = {"Standard", "ChineseSimple", "ChineseSimpleExt",
                                                          "ChineseTraditional", "Korean", "NintendoExt"};
     for (int t = 1; t < N_FONT_TYPES; t++)  // (font_for: a type without its own font serves Standard's)

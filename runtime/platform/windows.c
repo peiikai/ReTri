@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <shellapi.h>
+#include <psapi.h>  // (K32GetProcessMemoryInfo: in kernel32, no psapi.lib)
 #include <timeapi.h>
 #include <io.h>
 #include <wchar.h>
@@ -154,6 +155,11 @@ static BOOL CALLBACK tsc_calibrate(PINIT_ONCE o, PVOID p, PVOID *c) {
     return TRUE;
 }
 #endif
+uint64_t plat_mem_used_bytes(void) {  // (private bytes: Task Manager's Memory column)
+    PROCESS_MEMORY_COUNTERS_EX pm = {.cb = sizeof pm};
+    return K32GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&pm, sizeof pm) ? pm.PrivateUsage : 0;
+}
+
 uint64_t plat_thread_cpu_ns(void) {
 #if defined(__x86_64__) || defined(_M_X64)
     InitOnceExecuteOnce(&tsc_once, tsc_calibrate, NULL, NULL);
@@ -297,7 +303,7 @@ void plat_thread_realtime(uint64_t period_ns) {
 int plat_thread_realtime_check(uint64_t period_ns) { (void)period_ns; return -1; }
 
 // ---- process
-// GUI launches keep their own append-only log; lasrecomp.log names the latest run, with five recent backups.
+// GUI launches keep their own append-only log; eowrecomp.log names the latest run, with five recent backups.
 // A launcher and the game it starts share one session, so another launch cannot truncate either writer.
 static char g_log_path[MAX_PATH], g_log_latest[MAX_PATH];
 static char g_log_tag[MAX_PATH + 16];
@@ -321,8 +327,8 @@ static int newest_log(const void *a, const void *b) {
     int time = CompareFileTime(&y->created, &x->created);
     return time ? time : strcmp(y->name, x->name);
 }
-static bool session_log_name(const char *name) {  // lasrecomp-backup-<filetime hex>-<pid>.log
-    if (strncmp(name, "lasrecomp-backup-", 17)) return false;
+static bool session_log_name(const char *name) {  // eowrecomp-backup-<filetime hex>-<pid>.log
+    if (strncmp(name, "eowrecomp-backup-", 17)) return false;
     const char *p = name + 17;
     while ((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || *p == '-') p++;
     return p > name + 17 && !strcmp(p, ".log");
@@ -340,7 +346,7 @@ static void keep_legacy_log(const char *dir) {
         ReadFile(old_file, old_tag, sizeof old_tag - 1, &got, NULL); CloseHandle(old_file);
     }
     char path[MAX_PATH];
-    snprintf(path, sizeof path, "%slasrecomp-backup-*.log", dir);
+    snprintf(path, sizeof path, "%seowrecomp-backup-*.log", dir);
     WIN32_FIND_DATAA data;
     HANDLE find = FindFirstFileA(path, &data);
     bool kept = false;
@@ -352,16 +358,16 @@ static void keep_legacy_log(const char *dir) {
         while (!kept && FindNextFileA(find, &data));
         FindClose(find);
     }
-    // The first launch after upgrading may only have the old lasrecomp.log; retain that report too.
+    // The first launch after upgrading may only have the old eowrecomp.log; retain that report too.
     if (!kept) {
         unsigned long long stamp = ((unsigned long long)old.ftCreationTime.dwHighDateTime << 32) | old.ftCreationTime.dwLowDateTime;
-        if (snprintf(path, sizeof path, "%slasrecomp-backup-%016llx-0.log", dir, stamp) < (int)sizeof path)
+        if (snprintf(path, sizeof path, "%seowrecomp-backup-%016llx-0.log", dir, stamp) < (int)sizeof path)
             CopyFileA(g_log_latest, path, TRUE);
     }
 }
 static void prune_logs(const char *dir) {
     char path[MAX_PATH];
-    if (snprintf(path, sizeof path, "%slasrecomp-backup-*.log", dir) >= (int)sizeof path) return;
+    if (snprintf(path, sizeof path, "%seowrecomp-backup-*.log", dir) >= (int)sizeof path) return;
     WIN32_FIND_DATAA data;
     HANDLE find = FindFirstFileA(path, &data);
     if (find == INVALID_HANDLE_VALUE) return;
@@ -388,7 +394,7 @@ static void prune_logs(const char *dir) {
     free(logs);
 }
 
-// NTFS can give the newest session both names, keeping lasrecomp.log current even after a crash. On filesystems
+// NTFS can give the newest session both names, keeping eowrecomp.log current even after a crash. On filesystems
 // without hard links, copy on exit instead. The unique session header identifies who owns the latest report;
 // creation times can collide for simultaneous launches. The startup mutex also covers this replacement.
 static void publish_log(void) {
@@ -409,20 +415,54 @@ static void publish_log(void) {
     ReleaseMutex(g_log_mutex);
 }
 
+// Command-line runs (plat_cli_begin, runtime/platform.h). The release exe is a GUI-subsystem program: started from a
+// console it gets no standard handles, so it attaches to the parent's console and writes there; an inherited pipe or
+// file (a script capturing it) is kept as it is. Either way the session log below takes stderr, as for the GUI launch.
+static HANDLE g_cli_out = INVALID_HANDLE_VALUE;
+static bool g_cli, g_cli_console, g_cli_attached;  // (attached: stderr never reaches that console)
+
+void plat_cli_begin(void) {
+    g_cli = true;
+    HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+    if (err && err != INVALID_HANDLE_VALUE && GetFileType(err) != FILE_TYPE_UNKNOWN) {
+        if (!DuplicateHandle(GetCurrentProcess(), err, GetCurrentProcess(), &g_cli_out, 0, FALSE, DUPLICATE_SAME_ACCESS))
+            g_cli_out = INVALID_HANDLE_VALUE;
+    } else if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        g_cli_attached = true;
+        g_cli_out = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                                OPEN_EXISTING, 0, NULL);
+    }
+    DWORD mode;
+    g_cli_console = g_cli_out != INVALID_HANDLE_VALUE && GetConsoleMode(g_cli_out, &mode);
+}
+
+bool plat_cli_write(const char *s, size_t n) {
+    if (g_cli_out == INVALID_HANDLE_VALUE || (!g_log_path[0] && !g_cli_attached)) return false;
+    while (n) {
+        DWORD w = 0;
+        if (!WriteFile(g_cli_out, s, (DWORD)n, &w, NULL) || !w) break;
+        s += w;
+        n -= w;
+    }
+    return true;
+}
+
+bool plat_cli_tty(void) { return g_cli_console && (g_log_path[0] || g_cli_attached); }
+
 static void log_to_file_without_console(void) {
     // An inherited pipe/file (tools, terminal) is already somewhere useful. Only the GUI launch needs redirecting.
     // A relaunched game must still join its GUI session and publish its fallback copy on exit.
     const char *inherited = getenv("LASRECOMP_LOG_FILE");
     bool fresh = !inherited || !*inherited;
     HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
-    if (fresh && err && err != INVALID_HANDLE_VALUE && GetFileType(err) != FILE_TYPE_UNKNOWN) return;
+    if (fresh && !g_cli && err && err != INVALID_HANDLE_VALUE && GetFileType(err) != FILE_TYPE_UNKNOWN) return;
     char dir[MAX_PATH];
     DWORD n = GetModuleFileNameA(NULL, dir, sizeof dir);
     if (!n || n >= sizeof dir) return;
     char *slash = strrchr(dir, '\\');
     if (!slash) return;
     slash[1] = 0;
-    if (snprintf(g_log_latest, sizeof g_log_latest, "%slasrecomp.log", dir) >= (int)sizeof g_log_latest) return;
+    if (snprintf(g_log_latest, sizeof g_log_latest, "%seowrecomp.log", dir) >= (int)sizeof g_log_latest) return;
     unsigned long long hash = 14695981039346656037ull;
     for (const unsigned char *p = (const unsigned char *)g_log_latest; *p; p++) hash = (hash ^ *p) * 1099511628211ull;
     char mutex[64]; snprintf(mutex, sizeof mutex, "Local\\LASRecomp.logs.%016llx", hash);
@@ -430,7 +470,7 @@ static void log_to_file_without_console(void) {
     if (!lock_logs()) return;
     FILETIME now; GetSystemTimeAsFileTime(&now);
     unsigned long long stamp = ((unsigned long long)now.dwHighDateTime << 32) | now.dwLowDateTime;
-    int used = fresh ? snprintf(g_log_path, sizeof g_log_path, "%slasrecomp-backup-%016llx-%lu.log", dir, stamp,
+    int used = fresh ? snprintf(g_log_path, sizeof g_log_path, "%seowrecomp-backup-%016llx-%lu.log", dir, stamp,
                                (unsigned long)GetCurrentProcessId())
                      : snprintf(g_log_path, sizeof g_log_path, "%s", inherited);
     HANDLE file = INVALID_HANDLE_VALUE;
@@ -463,7 +503,7 @@ static void log_to_file_without_console(void) {
         keep_legacy_log(dir);
         char next[MAX_PATH];
         // A shorter name than the session path, which was already checked above.
-        snprintf(next, sizeof next, "%slasrecomp-current-%016llx-%lu.tmp", dir, stamp, (unsigned long)GetCurrentProcessId());
+        snprintf(next, sizeof next, "%seowrecomp-current-%016llx-%lu.tmp", dir, stamp, (unsigned long)GetCurrentProcessId());
         bool staged = CreateHardLinkA(next, g_log_path, NULL) != 0;
         if (!staged) {
             // Keep the session header in the placeholder too; the full copy at exit preserves it.
@@ -493,8 +533,8 @@ static void require_cpu(void) {
 #else
     __builtin_cpu_init();
     if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma") && __builtin_cpu_supports("bmi2")) return;
-    MessageBoxA(NULL, "LAS Recomp needs a CPU with AVX2 (Intel Haswell / 2013 or newer, AMD Excavator / Zen or newer).",
-                "LAS Recomp", MB_ICONERROR | MB_OK);
+    MessageBoxA(NULL, "ReTri needs a CPU with AVX2 (Intel Haswell / 2013 or newer, AMD Excavator / Zen or newer).",
+                "ReTri", MB_ICONERROR | MB_OK);
     ExitProcess(1);
 #endif
 }
@@ -507,20 +547,7 @@ void plat_fatal_notice(void) {
     rt_crash_explain(text, sizeof text, g_log_path);
     if (!g_log_path[0]) return;
     fflush(stderr);
-    MessageBoxA(NULL, text, "LAS Recomp", MB_ICONERROR | MB_OK);
-}
-
-static DWORD WINAPI notice_thread(LPVOID text) {
-    MessageBoxA(NULL, text, "LAS Recomp", MB_ICONWARNING | MB_OK);
-    free(text);
-    return 0;
-}
-void plat_notice(const char *text) {
-    if (!g_log_path[0]) return;
-    char *copy = _strdup(text);
-    HANDLE t = copy ? CreateThread(NULL, 0, notice_thread, copy, 0, NULL) : NULL;
-    if (t) CloseHandle(t);
-    else free(copy);
+    MessageBoxA(NULL, text, "ReTri", MB_ICONERROR | MB_OK);
 }
 
 bool plat_module_name(uint64_t pc, char *out, size_t n) {
@@ -582,7 +609,7 @@ void plat_system_info(PlatSysInfo *si) {
 
 void plat_init(void) {
     // abort() (rt_fatal_trace, after the crash dialog) without the C runtime's own "Microsoft Visual C++ Runtime
-    // Library - abort() has been called" box and the Windows error report: the player sees only LAS Recomp's dialog
+    // Library - abort() has been called" box and the Windows error report: the player sees only ReTri's dialog
 #ifdef _WRITE_ABORT_MSG  // (MinGW's stdlib.h declares it with these flags)
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #endif
@@ -682,7 +709,7 @@ void plat_print_backtrace(void) {
         const char *s = plat_symbol(pc, &off);
         if (!s) s = rt_host_fn_name(pc, &off);
         if (s) fprintf(stderr, "  #%-2d %016llx %s+%llx\n", i, (unsigned long long)pc, s, (unsigned long long)off);
-        else fprintf(stderr, "  #%-2d %016llx lasrecomp+%llx\n", i, (unsigned long long)pc,
+        else fprintf(stderr, "  #%-2d %016llx eowrecomp+%llx\n", i, (unsigned long long)pc,
                      (unsigned long long)(pc - exe));
     }
 }
@@ -740,18 +767,7 @@ ssize_t pwrite(int fd, const void *buf, size_t n, off_t off) { return prw(fd, (v
 // ---- child processes
 typedef struct { HANDLE process, job; } WinProcess;
 
-// Control Flow Guard off for one child (plat_spawn_no_cfg), as a process mitigation policy: it wins over the
-// system-wide Exploit protection setting, which the exe's header (tools/pe_no_cfg.py) does not (#337)
-#ifndef PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY
-#define PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY 0x00020007
-#endif
-#ifndef PROCESS_CREATION_MITIGATION_POLICY_CONTROL_FLOW_GUARD_ALWAYS_OFF
-#define PROCESS_CREATION_MITIGATION_POLICY_CONTROL_FLOW_GUARD_ALWAYS_OFF (0x00000002ull << 40)
-#endif
-
-// no_cfg: NULL = a plain start; else *no_cfg = 0 when the child runs with CFG off, or the error that prevented it
-// (then it is started without the policy)
-static PlatProc spawn_child(const char *const argv[], const char *log_path, bool append_log, unsigned long *no_cfg) {
+PlatProc plat_spawn(const char *const argv[], const char *log_path, bool append_log) {
     static __thread char cmd[32768];
     cmd[0] = 0;
     for (int i = 0; argv[i]; i++) append_arg(cmd, sizeof cmd, argv[i]);
@@ -771,34 +787,7 @@ static PlatProc spawn_child(const char *const argv[], const char *log_path, bool
     MultiByteToWideChar(CP_UTF8, 0, argv[0], -1, wprog, MAX_PATH);
     for (wchar_t *p = wprog; *p; p++) if (*p == L'/') *p = L'\\';
     const wchar_t *app = GetFullPathNameW(wprog, MAX_PATH, wfull, NULL) ? wfull : NULL;
-    BOOL ok = FALSE;
-    if (no_cfg) {
-        *no_cfg = ERROR_NOT_SUPPORTED;
-        STARTUPINFOEXW six = {.StartupInfo = si};
-        six.StartupInfo.cb = sizeof six;
-        DWORD64 policy[2] = {PROCESS_CREATION_MITIGATION_POLICY_CONTROL_FLOW_GUARD_ALWAYS_OFF, 0};
-        SIZE_T size = 0;
-        InitializeProcThreadAttributeList(NULL, 1, 0, &size);
-        six.lpAttributeList = size ? (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(size) : NULL;
-        if (!six.lpAttributeList || !InitializeProcThreadAttributeList(six.lpAttributeList, 1, 0, &size)) {
-            *no_cfg = six.lpAttributeList ? GetLastError() : ERROR_NOT_ENOUGH_MEMORY;
-            free(six.lpAttributeList);
-            six.lpAttributeList = NULL;
-        } else if (!UpdateProcThreadAttribute(six.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY, policy,
-                                              sizeof policy, NULL, NULL)) {
-            *no_cfg = GetLastError();
-        } else {
-            ok = CreateProcessW(app, wcmd, NULL, NULL, TRUE,
-                                CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT, NULL, NULL,
-                                &six.StartupInfo, &pi);
-            *no_cfg = ok ? 0 : GetLastError();  // (older Windows: ERROR_INVALID_PARAMETER; or a policy refuses it)
-        }
-        if (six.lpAttributeList) {
-            DeleteProcThreadAttributeList(six.lpAttributeList);
-            free(six.lpAttributeList);
-        }
-    }
-    if (!ok) ok = CreateProcessW(app, wcmd, NULL, NULL, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+    BOOL ok = CreateProcessW(app, wcmd, NULL, NULL, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED, NULL, NULL, &si, &pi);
     if (!ok) fprintf(stderr, "[plat] could not start %s (error %lu)\n", argv[0], GetLastError());
     CloseHandle(log);
     if (!ok) return 0;
@@ -825,17 +814,6 @@ static PlatProc spawn_child(const char *const argv[], const char *log_path, bool
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
     return (PlatProc)child;
-}
-
-PlatProc plat_spawn(const char *const argv[], const char *log_path, bool append_log) {
-    return spawn_child(argv, log_path, append_log, NULL);
-}
-
-PlatProc plat_spawn_no_cfg(const char *const argv[], const char *log_path, bool append_log, unsigned long *error) {
-    unsigned long e = 0;
-    PlatProc p = spawn_child(argv, log_path, append_log, &e);
-    if (error) *error = e;
-    return p;
 }
 
 void plat_proc_kill(PlatProc p) {
@@ -866,12 +844,41 @@ int plat_proc_wait(PlatProc p, bool block) {
 // not redirects) are ordinary files and folders. w: a \\?\ path in a 32768-wide buffer, len its length; attr and
 // tag: its FindFirstFile attributes and reparse tag.
 static bool cloud_placeholder(DWORD tag) { return (tag & 0xFFFF0FFF) == 0x9000001A; }  // IO_REPARSE_TAG_CLOUD(_1.._F)
+// A read-only file's name removed without clearing the attribute: a hard link's attributes are its file's, and the
+// data folder's game files are hard links to the player's own (runtime/romfs_build.c) - clearing it there made their
+// files writable. Windows 10 1809 and later; false elsewhere (the caller clears it then).
+#ifndef FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE
+#define FILE_DISPOSITION_FLAG_DELETE 0x1
+#define FILE_DISPOSITION_FLAG_POSIX_SEMANTICS 0x2
+#define FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE 0x10
+typedef struct { DWORD Flags; } FILE_DISPOSITION_INFO_EX;
+#endif
+static bool delete_keep_attributes(const wchar_t *w) {
+    HANDLE h = CreateFileW(w, DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                           FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    FILE_DISPOSITION_INFO_EX d = {FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS |
+                                  FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE};
+    bool ok = SetFileInformationByHandle(h, (FILE_INFO_BY_HANDLE_CLASS)21 /* FileDispositionInfoEx */, &d, sizeof d);
+    CloseHandle(h);
+    return ok;
+}
+
 static bool remove_tree_w(wchar_t *w, size_t len, DWORD attr, DWORD tag) {
     bool dir = attr & FILE_ATTRIBUTE_DIRECTORY;
     if ((attr & FILE_ATTRIBUTE_REPARSE_POINT) && !cloud_placeholder(tag))  // junction / symlink: the link only
         return dir ? RemoveDirectoryW(w) != 0 : DeleteFileW(w) != 0;
+    if (!dir) {
+        // (attr is the folder entry's copy, which NTFS updates only for the name a change went through: a file made
+        // read-only through the player's own name still reads as writable here, and DeleteFileW is then refused)
+        if (!(attr & FILE_ATTRIBUTE_READONLY) && DeleteFileW(w)) return true;
+        if (delete_keep_attributes(w)) return true;
+        DWORD now = GetFileAttributesW(w);  // (the file's own; Windows before 10 1809: cleared to delete)
+        if (now != INVALID_FILE_ATTRIBUTES && (now & FILE_ATTRIBUTE_READONLY))
+            SetFileAttributesW(w, now & ~FILE_ATTRIBUTE_READONLY);
+        return DeleteFileW(w) != 0;
+    }
     if (attr & FILE_ATTRIBUTE_READONLY) SetFileAttributesW(w, attr & ~FILE_ATTRIBUTE_READONLY);
-    if (!dir) return DeleteFileW(w) != 0;
     bool ok = true;
     if (len + 3 >= 32768) return false;
     wcscpy(w + len, L"\\*");
@@ -947,23 +954,49 @@ static bool final_path(const wchar_t *p, wchar_t *out, DWORD n) {
 #endif
 
 // Under one of the OneDrive folders the environment names (personal, work / school), or a cloud file itself
-bool plat_onedrive_synced(const char *dir) {
+const char *plat_cloud_synced(const char *dir) {
     wchar_t w[MAX_PATH], d[1024], r[1024], v[1024];
-    if (MultiByteToWideChar(CP_UTF8, 0, dir, -1, w, MAX_PATH) <= 1 || !final_path(w, d, 1024)) return false;
+    if (MultiByteToWideChar(CP_UTF8, 0, dir, -1, w, MAX_PATH) <= 1 || !final_path(w, d, 1024)) return NULL;
     DWORD a = GetFileAttributesW(d);
     if (a != INVALID_FILE_ATTRIBUTES &&
         (a & (FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | FILE_ATTRIBUTE_PINNED | FILE_ATTRIBUTE_UNPINNED)))
-        return true;
+        return "OneDrive";
     static const wchar_t *const vars[] = {L"OneDrive", L"OneDriveConsumer", L"OneDriveCommercial"};
     for (int i = 0; i < 3; i++) {
         DWORD k = GetEnvironmentVariableW(vars[i], v, 1024);
         if (!k || k >= 1024 || !final_path(v, r, 1024)) continue;
         size_t l = wcslen(r);
         if (r[l - 1] == L'\\') l--;  // (a drive's root: "D:\")
-        if (!_wcsnicmp(d, r, l) && (!d[l] || d[l] == L'\\')) return true;
+        if (!_wcsnicmp(d, r, l) && (!d[l] || d[l] == L'\\')) return "OneDrive";
     }
-    return false;
+    return NULL;
+}
+
+// plat_on_close_request: taskkill without /F posts WM_CLOSE to the process's top-level windows, but not necessarily
+// SDL's: with a hidden window (--prepare) it reached the GPU driver's own window (NVIDIA's temp_d3d_window), which
+// ignores it. A message hook on every thread that owns one of our windows sees the WM_CLOSE whichever window it's for.
+static void (*g_close_fn)(void);
+static LRESULT CALLBACK close_hook(int code, WPARAM wp, LPARAM lp) {
+    MSG *m = (MSG *)lp;
+    if (code == HC_ACTION && wp == PM_REMOVE && m->message == WM_CLOSE && g_close_fn) {
+        g_close_fn();
+        m->message = WM_NULL;  // (the driver's window stays: the steps still use the device as they wind down)
+    }
+    return CallNextHookEx(NULL, code, wp, lp);
+}
+static BOOL CALLBACK close_hook_thread(HWND w, LPARAM lp) {
+    DWORD pid = 0, tid = GetWindowThreadProcessId(w, &pid), *seen = (DWORD *)lp;  // (seen[0]: how many)
+    if (pid != GetCurrentProcessId()) return TRUE;
+    for (DWORD i = 1; i <= seen[0]; i++) if (seen[i] == tid) return TRUE;
+    if (seen[0] < 31 && SetWindowsHookExW(WH_GETMESSAGE, close_hook, NULL, tid)) seen[++seen[0]] = tid;
+    return TRUE;
+}
+void plat_on_close_request(void (*fn)(void)) {
+    g_close_fn = fn;
+    DWORD seen[32] = {0};
+    EnumWindows(close_hook_thread, (LPARAM)seen);
 }
 
 // End the process at once, skipping DLL teardown (from an atexit handler, after flushing). Exit status 0.
 void plat_terminate(void) { publish_log(); TerminateProcess(GetCurrentProcess(), 0); }
+void plat_terminate_code(int code) { publish_log(); TerminateProcess(GetCurrentProcess(), (UINT)code); }

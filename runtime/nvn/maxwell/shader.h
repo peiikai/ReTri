@@ -62,6 +62,7 @@ typedef struct {
     char *msl;              // complete MSL or GLSL source (MSL entry "main0", GLSL "main"); NULL on failure
     uint32_t cbuf_mask;     // hardware constant buffers read
     uint32_t cbuf_size[18];
+    uint32_t cbuf_used[18]; // bytes read at fixed offsets (the block's declared end; 0 when indexed with a register)
     uint32_t cbuf_dynamic;  // cbufs indexed with a register: bind the whole buffer
     int ntex;
     ShaderTexture tex[64];
@@ -80,8 +81,14 @@ typedef struct {
                             // (c0 0x110 + 16 * i vertex, 0x510 + 16 * i fragment): the slots it actually uses
     bool uses_rscale;       // reads the resolution-scale table (fragment/compute buffer 18): float4 [0] = render
                             // target scale, [1 + i] = allocation scale of texture i
+    bool uses_ao_taps;      // (fragment) reads rscale[65].y, the AO blur's tap scale, or .z, AO Off (translate.c ao_grid_fix): 66 rows
     uint32_t local_mem;     // bytes of local memory
     uint32_t num_insts;
+    // (GLSL fragment, LARECOMP_VK_PUSH_CB=1) constant buffer words moved into push constants (pcw[k]: the word at byte
+    // push_off[k] of cbuf push_cb[k]): the most read, loops first - kept in fast uniform registers where a driver
+    // doesn't promote uniform buffer words itself (Mesa's PanVK)
+    uint8_t npush, push_cb[64];
+    uint16_t push_off[64], push_base;  // (push_base: the block's offset in the push range, bytes)
     char error[256];        // set when translation fails
 } ShaderInfo;
 
@@ -95,6 +102,10 @@ typedef struct {
 #define IMG_TEX_BASE 23
 #define IMG_SLOTS 8
 #define IMG_HANDLE_BUFFER 23
+// (GLSL compute, Vulkan) the same 8 slots as storage images (image2DArray, written without a format) at bindings
+// IMG_GLSL_BINDING.., their handles in a uniform buffer at IMG_GLSL_HANDLE_BINDING (uvec4[2]).
+#define IMG_GLSL_HANDLE_BINDING 22
+#define IMG_GLSL_BINDING 23
 #define SMAP_BUFFER_INDEX 22
 // (GLSL compute, Vulkan) the fast copy of a dispatch's storage buffers: its address table and its data
 #define GMAP_BUFFER_INDEX 20
@@ -131,12 +142,41 @@ extern bool maxwell_gmem_fs_miss;
 // in the lit fragment shaders' light loop (#462), while Mali-G610 (libmali g29p1) never finished building the
 // variables form's pipelines (#526).
 extern bool maxwell_glsl_stack_vars;
+extern bool maxwell_glsl_structured;  // (the backend's default for this GPU: LARECOMP_VK_STATIC_STACKS / _STRUCTURE override)
+extern bool maxwell_glsl_push;  // (the backend's default: c1 inlined + push constants; LARECOMP_VK_INLINE_C1 / _PUSH_CB override)
+// (GLSL) fmin / fmax / saturate as the GPU's own min / max / clamp instead of the helpers that test for NaN: for GPUs
+// whose min / max return the operand that isn't NaN and whose clamp to [0, 1] saturates NaN to 0 (Adreno, as D3D
+// requires). The backend's default (exec.c: Android); LARECOMP_VK_FAST_MINMAX=1 / =0 overrides.
+extern bool maxwell_glsl_fast_minmax;
+// (GLSL) compute image stores (SUST.B) translated: the backend's default where the device can write storage images
+// without a format (exec.c); LARECOMP_SUST=0 skips them. Off: skipped as unsupported stores.
+extern bool maxwell_glsl_image_stores;
+// (GLSL) fragment quad xor shuffles (SHFL.BFLY with lane mask 1 / 2 / 3) as the neighbour's value from fine
+// derivatives, and the lane as the pixel's place in its quad: for drivers without subgroup operations in fragment
+// shaders (Turnip on Adreno 6xx lists compute only; subgroupShuffleXor there hung the GPU). The backend's default
+// (exec.c); LARECOMP_VK_QUAD_DERIV overrides.
+extern bool maxwell_glsl_quad_deriv;
+// (GLSL) the fragment shaders' HSV recolour (Cosmetics colours: ltint[0].w < 0) behind the specialization constant
+// RECOLOUR (false unless the pipeline is built for it, exec.c): unused, its code still cost Turnip on an Adreno 650 40%
+// of the house's lit pass. The backend's default (exec.c: Adreno, Mali); LARECOMP_VK_TINT_BRANCH overrides.
+extern bool maxwell_glsl_tint_branch;
+#define RECOLOUR_SPEC_ID 100
+// The stage's compiler constants (c1: the bytes after its code), set by the caller around maxwell_translate (under its
+// lock). GLSL with LARECOMP_VK_INLINE_C1=1: statically indexed c1 reads become literals (no buffer load).
+extern const uint8_t *maxwell_const_data;
+extern uint32_t maxwell_const_size;
+// LARECOMP_VK_PUSH_CB: the fragment shader's push words start at maxwell_push_base (bytes: after the vertex shader's),
+// at most maxwell_push_cap words in all (set by the caller around maxwell_translate)
+extern uint32_t maxwell_push_base, maxwell_push_cap;
 // (GLSL / Vulkan) No heap import (panvk, Honeykrisp: no VK_EXT_external_memory_host, issue #483): every stage reaches
 // its storage buffers through the address table (GMap / GFast, as compute does), which points into copies of the
 // guest memory they cover (vulkan/exec.c gmir_). Accesses outside the table read 0 and drop their stores.
 extern bool maxwell_gmem_mirror;
 // Experimental (another game on the engine): RED and SUST.B are skipped instead of failing the shader.
 extern bool maxwell_skip_unsupported_stores;
+// Where the lit fragment shaders read the shadow map's texel size, in c4 (translate.c shadow_taps): 0x240, and 0x280 in
+// another game on the engine (EoW: its four compare taps are offset by c4[0x280], c4[0x284]).
+extern uint32_t maxwell_shadow_texel_off;
 // Lazy mode, vertex / fragment: the chunks under the draw's storage buffers (where the heap reads are) come as push
 // constants, GDirect { uvec4 gd[GMEM_DIRECT_MAX]; } (x = first word, y = words, 0: unused, z, w = device address), and
 // as storage buffers GDir<k> at GMEM_DIRECT_BINDING + k of the chunk set: an access in one is a compare and a plain

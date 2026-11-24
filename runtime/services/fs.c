@@ -21,6 +21,7 @@
 #include "../platform.h"
 #include "../game_addresses.h"
 #include "../romfs_build.h"
+#include "../ui/menu.h"
 
 #define FS_PATH_NOT_FOUND MAKE_RESULT(2, 1)
 #define FS_PATH_EXISTS MAKE_RESULT(2, 2)
@@ -28,6 +29,8 @@
 #define FS_NOT_EMPTY MAKE_RESULT(2, 8)
 
 const char *g_save_dir = "save";
+static _Atomic uint64_t g_mounts;  // save folder mounts (--load-save: the load began, runtime/hle/load_save.c)
+uint64_t fs_mount_count(void) { return g_mounts; }
 
 // ------------------------------------------------------------------ the base RomFS image
 // The game reads its data as one raw RomFS image. It's served from the player's romfs/ folder: the header and tables
@@ -430,8 +433,8 @@ static void rom_index(void) {
     }
     if (ov_n) LOG("[fs] randomizer: %d romfs files replaced\n", ov_n);
     if (ov_meta) { patches[npatches++] = (Patch){ov_meta_off, ov_meta_size, ov_meta}; }
-    // The game's own files (before a seed's added files; the crash dialog checks them), their sizes summed, and the
-    // files that aren't the game's named. Copies of the game code at the root (game_romfs_exefs_copy) are left out.
+    // The game's own files (before a seed's added files; the crash dialog checks them), their sizes summed (the files
+    // that aren't the game's left out: issue #553), and the files that aren't the game's named. Copies of the game code at the root (game_romfs_exefs_copy) are left out.
     char game_dir[1100] = "";
     size_t dl = g_romfs_dir ? strlen(g_romfs_dir) : 0;
     if (dl > 6 && dl - 6 < sizeof game_dir && !strcmp(g_romfs_dir + dl - 6, "/romfs"))
@@ -441,8 +444,8 @@ static void rom_index(void) {
     rt_romfs_bytes = 0;
     for (int i = 0; i < rom_nfiles; i++) {
         if (game_dir[0] && game_romfs_exefs_copy(game_dir, rom_files[i].path, rom_files[i].size)) { copies++; continue; }
-        rt_romfs_bytes += rom_files[i].size;  // (the game's sizes, not a seed's)
-        if (!game_romfs_check_file(check, rom_files[i].path, rom_files[i].size) && odd++ < 20)
+        // (the game's sizes, not a seed's)
+        if (!game_romfs_check_file(check, rom_files[i].path, rom_files[i].size, &rt_romfs_bytes) && odd++ < 20)
             LOG("[fs] romfs: not one of the game's files: %s (%llu bytes)\n", rom_files[i].path,
                 (unsigned long long)rom_files[i].size);
     }
@@ -495,8 +498,6 @@ static ssize_t romfs_read(uint8_t *dst, uint64_t size, uint64_t off) {
                     }
                     pthread_mutex_unlock(&g_ov_lock);
                 }
-                extern void enemy_random_filter(const char *host, uint64_t off, uint8_t *dst, uint64_t n);
-                if (r > 0) enemy_random_filter(ov[i].path, in, dst + done, (uint64_t)r);  // (enemy mode Random)
             }
             if (r < 0) r = 0;
             if ((uint64_t)r < n) memset(dst + done + r, 0, n - r);
@@ -653,10 +654,7 @@ static void save_failed(HostFs *fs, const char *what, const char *path, int erro
     static bool told;
     if (told) return;
     told = true;
-    char text[1400];
-    snprintf(text, sizeof text, "Your game could not be saved (the game may still say it was). Your previous save "
-             "is unchanged.\n\nMake sure this folder can be written to and the disk has free space:\n%s", fs->root);
-    plat_notice(text);
+    menu_save_failed(fs->root);  // (the menu's notice, in its look)
 }
 
 static void sync_dir_of(const char *path) {
@@ -712,7 +710,7 @@ static bool copy_file(const char *from, const char *to) {
 
 // A copy of the save file outside the save folder, deleted when closed: what the game writes when its working copy
 // can't be made. Writing over the committed file instead would put the only copy at risk (a crash, a full disk or a
-// failed write mid-save leaves it half-written, and a rando slot's flags sidecar would no longer match it).
+// failed write mid-save leaves it half-written).
 static int scratch_copy(const char *from) {
     int in = open(from, O_RDONLY);
     if (in < 0) return -1;
@@ -724,7 +722,7 @@ static int scratch_copy(const char *from) {
 #else
     char name[1100];
     const char *dir = getenv("TMPDIR");
-    snprintf(name, sizeof name, "%s/lasrecomp-save-XXXXXX", dir && *dir ? dir : "/tmp");
+    snprintf(name, sizeof name, "%s/eowrecomp-save-XXXXXX", dir && *dir ? dir : "/tmp");
     int fd = mkstemp(name);
     if (fd >= 0) unlink(name);
 #endif
@@ -758,36 +756,19 @@ static bool sync_save_file(const char *path) {
     return ok;
 }
 static bool commit_slot(const char *path) {
-    char pending[1200], flags[1200], flags_pending[1200];
+    char pending[1200];
     snprintf(pending, sizeof pending, "%s.pending", path);
-    snprintf(flags, sizeof flags, "%s.flagsx", path);
-    snprintf(flags_pending, sizeof flags_pending, "%s.flagsx.pending", path);
-    struct stat st;
-    bool has_flags = stat(flags_pending, &st) == 0;
-    if (!has_flags && errno != ENOENT) return false;
-    if (has_flags && !sync_save_file(flags_pending)) return false;
-    if (!stat(pending, &st)) {
-        if (!sync_save_file(pending) || replace_file(pending, path)) return false;
-        sync_dir_of(path);
-    } else if (errno != ENOENT || !has_flags) return false;
-    // A missing working copy with pending flags means the data rename already succeeded. Finish that pair
-    // on retry; never discard its flags or let a fresh mount read the new data with the old flags.
-    if (has_flags) {
-        if (replace_file(flags_pending, flags)) return false;
-        sync_dir_of(flags);
-    }
+    if (!sync_save_file(pending) || replace_file(pending, path)) return false;
+    sync_dir_of(path);
     return true;
 }
-// a save that won't be committed: its working copies go (the committed file and sidecar stay as they are)
+// a save that won't be committed: its working copy goes (the committed file stays as it is)
 static void drop_slot(const char *path) {
-    char pending[1200], flags_pending[1250];
+    char pending[1200];
     snprintf(pending, sizeof pending, "%s.pending", path);
-    snprintf(flags_pending, sizeof flags_pending, "%s.flagsx.pending", path);
     unlink(pending);
-    unlink(flags_pending);
 }
-// Commit always succeeds for the game (see save_failed). A save that failed is dropped whole. If only the sidecar's
-// rename failed (the data is already replaced), its working copy stays for the next mount to finish the pair.
+// Commit always succeeds for the game (see save_failed). A save that failed is dropped whole.
 static void commit(HostFs *fs) {
     extern void pace_hitch(const char *why);  // nvn/pace.c
     if (fs->npending) pace_hitch("a save commit");
@@ -798,40 +779,11 @@ static void commit(HostFs *fs) {
             save_failed(fs, "dropped the failed save", path, 0);
         } else if (!commit_slot(path)) {
             int error = errno;
-            char pending[1200];
-            struct stat st;
-            snprintf(pending, sizeof pending, "%s.pending", path);
-            if (!stat(pending, &st)) {
-                drop_slot(path);
-                save_failed(fs, "could not commit", path, error);
-            } else LOG("[save] committed %s, but not its flags sidecar yet (%s): the next mount finishes it\n", path,
-                       strerror(error));
+            drop_slot(path);
+            save_failed(fs, "could not commit", path, error);
         } else LOG("[save] committed %s\n", path);
     }
     fs->npending = 0;
-}
-// Recover pairs before dropping abandoned working copies: deleting the data copy first would make an
-// uncommitted sidecar look committed. No format change: existing .flagsx files still contain just flag bytes.
-static bool recover_save_flags(const char *root) {
-    DIR *d = opendir(root);
-    if (!d) return false;
-    struct dirent *e;
-    int error = 0;
-    while ((e = readdir(d))) {
-        size_t n = strlen(e->d_name);
-        if (n <= 15 || strcmp(e->d_name + n - 15, ".flagsx.pending")) continue;
-        char path[1200], pending[1250], flags_pending[1250];
-        snprintf(path, sizeof path, "%s/%.*s", root, (int)(n - 15), e->d_name);
-        snprintf(pending, sizeof pending, "%s.pending", path);
-        snprintf(flags_pending, sizeof flags_pending, "%s.flagsx.pending", path);
-        struct stat st;
-        if (!stat(pending, &st)) {
-            if (unlink(flags_pending)) { error = errno; break; }
-        } else if (errno != ENOENT || !commit_slot(path)) { error = errno; break; }
-    }
-    closedir(d);
-    if (error) errno = error;
-    return !error;
 }
 typedef struct { DIR *d; char path[1024]; int mode; } HostDir;
 
@@ -895,12 +847,8 @@ static void file(Service *s, IpcReq *req, IpcResp *resp) {
             LOG("[save] read %s off %lld size %lld -> guest %llx\n", f->path, (long long)off, (long long)size, (unsigned long long)b->addr);
             extern void save_editor_file_read(const char *path, uint64_t addr, int64_t off, int64_t size);
             save_editor_file_read(f->path, b->addr, off, n);
-            extern void flags_ext_save_read(const char *path, uint64_t addr, int64_t off, int64_t size);
-            flags_ext_save_read(f->path, b->addr, off, n);
             extern void dpad_items_save_read(const char *path, uint64_t addr, int64_t off, int64_t size);
             dpad_items_save_read(f->path, b->addr, off, n);  // (runtime/hle/dpad_items.c)
-            extern void weather_cycle_save_read(const char *path, uint64_t addr, int64_t off, int64_t size);
-            weather_cycle_save_read(f->path, b->addr, off, n);  // (runtime/nvn/weather_cycle.c)
         }
         OUT(int64_t, 0) = n < 0 ? 0 : n;
         resp_size(resp, 8);
@@ -920,13 +868,8 @@ static void file(Service *s, IpcReq *req, IpcResp *resp) {
             done += n;
         }
         if (!error && !f->scratch && strstr(f->path, "savedata")) {
-            extern bool flags_ext_save_written(const char *path, uint64_t addr, int64_t off, int64_t size);
-            errno = 0;
-            if (!flags_ext_save_written(f->path, a->addr, off, size)) error = errno ? errno : EIO;
-            extern void weather_cycle_save_written(const char *path, uint64_t addr, int64_t off, int64_t size);
-            if (!error) weather_cycle_save_written(f->path, a->addr, off, size);  // (runtime/nvn/weather_cycle.c)
             extern void dpad_items_save_written(const char *path, uint64_t addr, int64_t off, int64_t size);
-            if (!error) dpad_items_save_written(f->path, a->addr, off, size);  // (runtime/hle/dpad_items.c)
+            dpad_items_save_written(f->path, a->addr, off, size);  // (runtime/hle/dpad_items.c)
         }
         if (error && f->fs) file_failed(f, "write", error);
         else if (error) { errno = error; resp->result = errno_result(); }
@@ -1117,13 +1060,6 @@ static Service *open_host_fs(const char *sub) {
         if (g_live_mounts[i] && !strcmp(g_live_mounts[i]->root, fs->root)) other_live = true;
     if (fs->journaled && other_live) LOG("[save] %s is still mounted: its working copies are left alone\n", fs->root);
     if (fs->journaled && !other_live) {  // (a working copy left by a crash: never committed - dropped, as on the Switch)
-        if (!recover_save_flags(fs->root)) {
-            int error = errno;
-            pthread_mutex_unlock(&g_mount_lock);
-            free(fs);
-            errno = error;
-            return NULL;
-        }
         DIR *d = opendir(fs->root);
         struct dirent *e;
         while (d && (e = readdir(d))) {
@@ -1141,6 +1077,7 @@ static Service *open_host_fs(const char *sub) {
         if (!g_live_mounts[i]) { g_live_mounts[i] = fs, fs->live = true; break; }
     pthread_mutex_unlock(&g_mount_lock);
     LOG("[fs] mounted host directory %s\n", fs->root);
+    g_mounts++;
     Service *svc = service_new("IFileSystem", filesystem, fs);
     svc->on_close = fs_unmount;
     return svc;

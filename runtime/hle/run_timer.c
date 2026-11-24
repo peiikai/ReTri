@@ -1,4 +1,4 @@
-// Run timer (Gameplay tab "Timer", drawn by runtime/ui/race_overlay.mm) and LiveSplit auto-splitting (runtime/livesplit.c).
+// Run timer (General tab "Timer", drawn by runtime/ui/race_overlay.mm) and LiveSplit auto-splitting (runtime/livesplit.c).
 //
 // One run per attempt: it starts from 0:00 every time gameplay starts from the title's file select (a new file or a
 // loaded one) and lasts until the next such start, or a quit to the start screen / desktop (a reboot: RT_ON_RESET).
@@ -17,7 +17,6 @@
 
 #include "../hle.h"
 #include "../livesplit.h"
-#include "../rando.h"
 #include "../settings.h"
 
 extern int game_in_play(void);
@@ -88,14 +87,6 @@ static void finish_run(const char *why) {
     ls_gametime();
     livesplit_cmd("split");
     livesplit_cmd("pausegametime");
-    // the credits: a race seed's spoiler log opens from now on (runtime/ui/rando_tab.mm)
-    const char *dir = rando_seed_dir();
-    if (dir) {
-        char p[1100];
-        snprintf(p, sizeof p, "%s/race_done", dir);
-        FILE *f = fopen(p, "w");
-        if (f) { fprintf(f, "%s\n", t); fclose(f); }
-    }
 }
 
 // runtime/hle/movie.c: the title screen's movie opened (the title / file select is up)

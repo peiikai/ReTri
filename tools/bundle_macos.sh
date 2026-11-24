@@ -1,17 +1,17 @@
 #!/bin/bash
-# make app: build/LAS Recomp.app from <exe> (default build/mac15/lasrecomp). Contents/MacOS: the executable;
+# make app: build/ReTri.app from <exe> (default build/mac15/eowrecomp). Contents/MacOS: the executable;
 # Contents/Frameworks: every non-system dylib it loads (SDL3, FFmpeg; from build/deps, else Homebrew), load
-# paths rewritten to @rpath; Contents/Resources: the icon, the seed generator helper (build/helper/rando-gen, when
-# built: runtime/ui/rando_tab.mm generator_cmd) and what the start screen builds the game code with on the player's
-# machine (runtime/gamebuild.c): the generator helper (build/helper/lasgen), the compiler (build/zig, tools/fetch_zig.sh)
-# and the headers the code is compiled against (gamelib-src/). Ad-hoc signed. No game files, game code or fonts: the
+# paths rewritten to @rpath; Contents/Resources: the icon and what the start screen builds the game code with on the
+# player's machine (runtime/gamebuild.c, whose generator is in the executable): the compiler (build/zig,
+# tools/fetch_zig.sh) and the headers the code is compiled against (gamelib-src/); Contents/Frameworks/Sparkle.framework:
+# the updater (tools/fetch_sparkle.sh, runtime/ui/sparkle.mm), with the feed of this build's channel. Ad-hoc signed. No game files, game code or fonts: the
 # app keeps those in ~/Library/Application Support/<bundle id> (runtime/paths.h).
 # MACOS_MIN=<x.y>: LSMinimumSystemVersion, and every Mach-O inside must be built for it or older (else it fails and
 # lists them); without it the newest minimum found inside is used.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-EXE=${1:-build/mac15/lasrecomp}
-APP="build/LAS Recomp.app"
+EXE=${1:-build/mac15/eowrecomp}
+APP="build/ReTri.app"
 DEPS=$PWD/build/deps
 BUNDLE_ID=$(sed -n 's/^#define RT_BUNDLE_ID "\(.*\)"/\1/p' runtime/paths.h)
 TAG=$(sed -n 's/^#define LARECOMP_VERSION "\(.*\)"/\1/p' runtime/ui/launcher.mm)
@@ -22,11 +22,8 @@ read -r VERSION BUILD_NUMBER <<EOF_V
 $(tools/bundle_version.sh "$TAG" "$TEST_OF")
 EOF_V
 [ -n "$BUILD_NUMBER" ] || { echo "no bundle version for $TAG"; exit 1; }
-HELPER=build/helper/rando-gen
-GEN_HELPER=build/helper/lasgen
 ZIG=build/zig
 [ -x "$EXE" ] || { echo "no $EXE"; exit 1; }
-[ -x "$GEN_HELPER/lasgen" ] || { echo "no $GEN_HELPER (make gen-helper)"; exit 1; }
 [ -x "$ZIG/zig" ] || { echo "no $ZIG (tools/fetch_zig.sh)"; exit 1; }
 # the app must hold no game code: that's built on the player's machine (grep without -q: with pipefail, nm cut off
 # early would hide a match)
@@ -35,18 +32,38 @@ if nm "$EXE" | grep ' _f_70' >/dev/null; then echo "$EXE has game code linked in
 rm -rf "$APP"
 C="$APP/Contents"
 mkdir -p "$C/MacOS" "$C/Frameworks" "$C/Resources"
-cp "$EXE" "$C/MacOS/lasrecomp"
-strip -S "$C/MacOS/lasrecomp"  # (debug-map entries only: the symbols crash reports name functions by stay)
-if [ -x "$HELPER/rando-gen" ]; then cp -R "$HELPER" "$C/Resources/rando-gen"; else echo "note: no $HELPER (make rando-helper)"; fi
-cp -R "$GEN_HELPER" "$C/Resources/lasgen"
+cp "$EXE" "$C/MacOS/eowrecomp"
+strip -S "$C/MacOS/eowrecomp"  # (debug-map entries only: the symbols crash reports name functions by stay)
+# Sparkle: the framework as released (its own ad-hoc signatures kept: ditto), the feed of this build's channel, and
+# the update key's public half (runtime/update.cpp UPDATE_PUBLIC_KEY, hex there, base64 here). Until the key exists
+# (all zeros) the app gets no feed and Sparkle stays off.
+tools/fetch_sparkle.sh
+ditto build/sparkle/Sparkle.framework "$C/Frameworks/Sparkle.framework"
+cp build/sparkle/LICENSE "$C/Resources/Sparkle-LICENSE.txt"
+UPDATE_KEY=$(sed -n 's/^#define UPDATE_PUBLIC_KEY "\([0-9a-f]\{64\}\)"/\1/p' runtime/update.cpp)
+[ -n "$UPDATE_KEY" ] || { echo "no UPDATE_PUBLIC_KEY in runtime/update.cpp"; exit 1; }
+SPARKLE_KEYS=
+if [ "$UPDATE_KEY" != "$(printf '%064d' 0)" ]; then
+    case $TAG in
+        nightly-*) FEED=https://github.com/peiikai/ReTri/releases/download/nightly/appcast-macOS.xml ;;
+        *) FEED=https://github.com/peiikai/ReTri/releases/latest/download/appcast-macOS.xml ;;
+    esac
+    ED_KEY=$(printf '%s' "$UPDATE_KEY" | xxd -r -p | base64)
+    # (SUEnableAutomaticChecks false: Sparkle's own schedule off and no permission prompt; the app checks once at launch)
+    SPARKLE_KEYS="<key>SUFeedURL</key><string>$FEED</string>
+    <key>SUPublicEDKey</key><string>$ED_KEY</string>
+    <key>SUEnableAutomaticChecks</key><false/>
+    <key>SUVerifyUpdateBeforeExtraction</key><true/>"
+fi
 cp -R "$ZIG" "$C/Resources/zig"
 mkdir "$C/Resources/gamelib-src"
-cp runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/gamelib_entry.c runtime/hle/hle_symbols.txt \
-   "$C/Resources/gamelib-src/"
+cp runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/gamelib.h tools/gamelib_entry.c "$C/Resources/gamelib-src/"
 cp docs/icon/icon.icns "$C/Resources/icon.icns"
 cp docs/icon/icon_1024.png "$C/Resources/icon.png"  # (window / Dock icon at run time)
 cp third_party/fonts/Baloo2/Baloo2-SemiBold.ttf "$C/Resources/Baloo2-SemiBold.ttf"  # (start screen; OFL, README "License")
 cp third_party/fonts/Baloo2/OFL.txt "$C/Resources/Baloo2-OFL.txt"
+cp third_party/fonts/HyliaSerif/HyliaSerifBeta-Regular.otf "$C/Resources/"  # (start screen title; README "Credits")
+cp third_party/fonts/HyliaSerif/README.md "$C/Resources/HyliaSerif-README.md"
 cp third_party/fonts/DejaVu/DejaVuSans.ttf third_party/fonts/DejaVu/DejaVuSans-Bold.ttf "$C/Resources/"  # (last-resort fonts)
 cp third_party/fonts/DejaVu/LICENSE "$C/Resources/DejaVu-LICENSE.txt"
 
@@ -63,7 +80,7 @@ find_dep() {  # dep as referenced by (the original of) $2 -> a real file
 }
 deps_of() { otool -L "$1" | tail -n +2 | awk '{print $1}' | grep -v "^$(otool -D "$1" | tail -n +2 | head -1)\$" || true; }
 origin() { local s; s="$(dirname "$1")/.$(basename "$1").src"; if [ -f "$s" ]; then cat "$s"; else echo "$1"; fi; }
-queue="$C/MacOS/lasrecomp"
+queue="$C/MacOS/eowrecomp"
 copied=" "
 while [ -n "$queue" ]; do
     f=${queue%%|*}; [ "$queue" = "$f" ] && queue= || queue=${queue#*|}
@@ -84,8 +101,8 @@ while [ -n "$queue" ]; do
 done
 rm -f "$C/Frameworks"/.*.src
 rpaths() { otool -l "$1" | awk '/LC_RPATH/ {getline; getline; print $2}'; }
-for r in $(rpaths "$C/MacOS/lasrecomp"); do install_name_tool -delete_rpath "$r" "$C/MacOS/lasrecomp"; done
-install_name_tool -add_rpath "@executable_path/../Frameworks" "$C/MacOS/lasrecomp"
+for r in $(rpaths "$C/MacOS/eowrecomp"); do install_name_tool -delete_rpath "$r" "$C/MacOS/eowrecomp"; done
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$C/MacOS/eowrecomp"
 for f in "$C/Frameworks"/*.dylib; do  # (their own build rpaths, if any: point them at the bundle instead)
     for r in $(rpaths "$f"); do install_name_tool -delete_rpath "$r" "$f"; done
     install_name_tool -add_rpath "@loader_path" "$f" 2>/dev/null || true
@@ -114,10 +131,10 @@ cat > "$C/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
-    <key>CFBundleExecutable</key><string>lasrecomp</string>
+    <key>CFBundleExecutable</key><string>eowrecomp</string>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-    <key>CFBundleName</key><string>LAS Recomp</string>
-    <key>CFBundleDisplayName</key><string>LAS Recomp</string>
+    <key>CFBundleName</key><string>ReTri</string>
+    <key>CFBundleDisplayName</key><string>ReTri</string>
     <key>CFBundleIconFile</key><string>icon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
@@ -127,6 +144,7 @@ cat > "$C/Info.plist" <<EOF
     <key>LSArchitecturePriority</key><array><string>arm64</string></array>
     <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
     <key>NSHighResolutionCapable</key><true/>
+    $SPARKLE_KEYS
 </dict>
 </plist>
 EOF
@@ -134,12 +152,14 @@ printf 'APPL????' > "$C/PkgInfo"
 
 # ---- ad-hoc signature (Apple Silicon refuses to run unsigned code; the rewrites above invalidated the originals):
 # every Mach-O inside first, then the bundle
-while read -r f; do [ "$f" = "$C/MacOS/lasrecomp" ] || codesign -f -s - "$f" 2>/dev/null; done < <(machos)
+# (Sparkle.framework keeps its own signatures, made inside-out: re-signing its pieces here would leave its seal stale)
+while read -r f; do
+    case $f in "$C/MacOS/eowrecomp"|"$C/Frameworks/Sparkle.framework/"*) ;; *) codesign -f -s - "$f" 2>/dev/null ;; esac
+done < <(machos)
 codesign -f -s - "$APP"
-codesign --verify --strict "$APP"
-if find "$APP" -name 'lasgame*' | grep . >/dev/null; then echo "game code inside $APP"; exit 1; fi
-# no path of this machine inside (configure lines, debug paths, frozen Python's file names). Not on CI: its paths
-# name no one, and prebuilt wheels hold the CI runner's own (/Users/runner/...)
+codesign --verify --deep --strict "$APP"
+if find "$APP" -name 'eowgame*' | grep . >/dev/null; then echo "game code inside $APP"; exit 1; fi
+# no path of this machine inside (configure lines, debug paths). Not on CI: its paths name no one
 if [ "${CI:-}" != true ]; then
     case "$(basename "$HOME")" in runner|runneradmin) home=() ;; *) home=(-e "$HOME") ;; esac
     if grep -rlaF -e "$PWD" ${home[@]+"${home[@]}"} "$APP"; then echo "^ these hold a path of this machine"; exit 1; fi

@@ -8,15 +8,20 @@
 #include <string.h>
 
 #include "../rqueue.h"
+#include "../interp.h"
 #include "vk.h"
+#include "../bc.h"
 #include "record.h"
 #include "../astc.h"
 #include "../tex_hash.h"
 #include "../renderer.h"
 #include "../texpatch.h"
+#include "../../game_addresses.h"
+#include "../output_scale.h"
+#include "../../game_addresses.h"
 
 // ================================================================== formats
-typedef struct { VkFormat vf; uint8_t expand_rgb, alpha_one; } VkFmt;
+typedef struct { VkFormat vf; uint8_t expand_rgb, alpha_one, swap_rb; } VkFmt;
 
 // DEPTH24_STENCIL8 as itself where the GPU has it for everything the game does with depth (NVIDIA, Intel): half the
 // bytes of D32_SFLOAT_S8_UINT (4 instead of 8 per pixel) for every depth test, clear and copy - the game copies its
@@ -87,7 +92,8 @@ static VkFmt fmt_of(uint32_t f) {
     case 0x39: return (VkFmt){VK_FORMAT_R4G4B4A4_UNORM_PACK16};   // Metal ABGR4Unorm
     case 0x3A: return (VkFmt){VK_FORMAT_R5G6B5_UNORM_PACK16};     // Metal B5G6R5Unorm
     case 0x3B: return (VkFmt){VK_FORMAT_R5G5B5A1_UNORM_PACK16};   // Metal A1BGR5Unorm
-    case 0x3C: return (VkFmt){VK_FORMAT_R5G6B5_UNORM_PACK16};
+    case 0x3C: return (VkFmt){VK_FORMAT_R5G6B5_UNORM_PACK16, .swap_rb = 1};  // (as metal.m: NVN packs R / B the other way
+    // round; an EoW HUD mask, the hearts, has its fill in the channel read as blue. Swapped in the view's swizzle, other games)
     case 0x3D: return (VkFmt){VK_FORMAT_A2B10G10R10_UNORM_PACK32};
     case 0x3E: return (VkFmt){VK_FORMAT_A2B10G10R10_UINT_PACK32};
     case 0x3F: return (VkFmt){VK_FORMAT_B10G11R11_UFLOAT_PACK32};
@@ -186,6 +192,11 @@ static float g_al_x = 1, g_al_y = 1;   // the allocation scale: the size of scal
 void renderer_get_scale(float *sx, float *sy) { *sx = g_rs_x; *sy = g_rs_y; }
 void renderer_set_scale(float sx, float sy) { g_rs_x = sx; g_rs_y = sy; }
 void renderer_set_alloc_scale(float ax, float ay) { g_al_x = ax; g_al_y = ay; }
+// The tap scale of the ambient occlusion's own blurs: see metal.m renderer_ao_blur_scale.
+float renderer_ao_blur_scale(NvnTexture *t) {
+    TexBackend *b = t ? (TexBackend *)t->backend : NULL;
+    return b && b->ao && t->format == 0x1 && t->width == 480 ? b->sx : 0;
+}
 // The part of a scalable texture its contents occupy (Dynamic: the render scale over the allocation scale; 1 otherwise).
 void renderer_texture_fraction(NvnTexture *t, float *fx, float *fy) {
     TexBackend *b = t ? (TexBackend *)t->backend : NULL;
@@ -194,23 +205,45 @@ void renderer_texture_fraction(NvnTexture *t, float *fx, float *fy) {
 }
 uint64_t renderer_present_count(void);
 
-// The game's ambient occlusion stays at the Switch's size (issue #356): see metal.m tex_guest_sized_ao.
-static bool tex_guest_sized_ao(const NvnTexture *t) {
-    static int off = -1;
-    if (off < 0) off = getenv("LARECOMP_AO_SCALED") != NULL;
-    if (off) return false;
-    return t->format == 0x1 || (t->format == 0x35 && t->width <= 480);  // R8 unorm / D24S8, 16:9 (checked by the caller)
+// The game's ambient occlusion has a scale of its own (issue #356, #602): see metal.m tex_ao.
+static bool tex_ao(const NvnTexture *t) {
+    if (output_scale_ao(1) <= 0) return false;
+    // (R8 unorm / D24S8, 16:9: checked by the caller; EoW's AO depth is 704x396)
+    return t->format == 0x1 || (t->format == 0x35 && t->width <= (game_other() ? 704 : 480));
+}
+
+// The game's shadow map (one 2048x2048 depth-stencil, not 16:9, so the frame's scale never reaches it): its own scale,
+// output_scale_shadow(). Issue #602.
+static bool tex_shadow(const NvnTexture *t) {
+    return output_scale_is_shadow_map(t->target, t->samples, t->width, t->height, t->format, (t->flags & 8) != 0);
+}
+
+// EoW's rift map (output_scale_is_rift_map): its own scale, output_scale_rift_map() - the widescreen factor, 1 at 16:9.
+static bool tex_rift_map(const NvnTexture *t) {
+    return output_scale_is_rift_map(t->target, t->samples, t->width, t->height, t->format, (t->flags & 8) != 0);
 }
 
 static bool tex_scalable(const NvnTexture *t) {
+    if (tex_shadow(t) || tex_rift_map(t)) return true;  // (its scale can change in the menu: 1 at Default)
     static int off = -1;  // (per texture lookup: cached)
     if (off < 0) off = getenv("LARECOMP_NO_SCALE") != NULL;
     if (off) return false;
     if (t->target != 1 || t->samples > 1 || !(t->flags & 8) || t->width < 32 || t->height < 16) return false;
     float a = (float)t->width / (float)t->height;
     if (!(a > 1.74f && a < 1.81f)) return false;  // 16:9 (1920x1080 and its fractions, 704x396, 60x33...)
-    return !tex_guest_sized_ao(t);
+    // (another game: not the small ones, as metal.m - EoW rasterises its lights into a 64x36 grid whose cells the
+    // fragment shaders address by pixel; scaled, only some cells got their bits: interiors lit in patches, darker)
+    if (game_other() && t->width < 128) return false;
+    return true;
 }
+// EoW's 2D: the 1920x1080 targets its frame is composed and presented in (output_scale_2d).
+static bool tex_2d(const NvnTexture *t) { return game_other() && t->width == 1920 && t->height == 1080; }
+// The scale a scalable texture is allocated and drawn at: the ambient occlusion's own, else the frame's
+// (the AO: uniform, by the height's; EoW's 2D: a part of the frame's)
+static float tex_alloc_x(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); if (b->rift_map) return output_scale_rift_map(); return b->ao ? output_scale_ao(g_al_y) : b->two_d ? g_al_x * output_scale_2d() : g_al_x; }
+static float tex_alloc_y(const TexBackend *b) { if (b->shadow) return output_scale_shadow(); if (b->rift_map) return output_scale_rift_map(); return b->ao ? output_scale_ao(g_al_y) : b->two_d ? g_al_y * output_scale_2d() : g_al_y; }
+static float tex_draw_x(const TexBackend *b) { return b->two_d ? g_rs_x * output_scale_2d() : g_rs_x; }
+static float tex_draw_y(const TexBackend *b) { return b->two_d ? g_rs_y * output_scale_2d() : g_rs_y; }
 
 bool renderer_texture_first_write(NvnTexture *t) {
     TexBackend *b = t ? (TexBackend *)t->backend : NULL;
@@ -236,7 +269,7 @@ bool renderer_texture_frame_fresh(NvnTexture *t) {
     TexBackend *b = t ? (TexBackend *)t->backend : NULL;
     extern uint64_t renderer_exec_frame(void);
     uint64_t total_frames = renderer_exec_frame();  // (the frame being translated)
-    if (!b || !b->scalable || b->frame_cleared == total_frames + 1) return false;
+    if (!b || !b->scalable || b->shadow || b->rift_map || b->frame_cleared == total_frames + 1) return false;
     // LARECOMP_NO_FRAME_CLEAR skips the clear only while the contents cover the whole target: below 1x a frame draws
     // into part of it, and the rest would show what an earlier frame left there (issue #205: the upper part flickered)
     // (Dynamic: the contents cover the whole target only at the factor 1 - its render scale is the allocation's)
@@ -250,7 +283,7 @@ bool renderer_texture_level_fresh(NvnTexture *t) {
     static int keep = -1;
     if (keep < 0) keep = getenv("LARECOMP_KEEP_TARGETS") != NULL;
     if (!b || keep || b->level_gen == g_level_gen) return false;
-    if (!b->scalable) { b->level_gen = g_level_gen; return false; }
+    if (!b->scalable || b->shadow || b->rift_map) { b->level_gen = g_level_gen; return false; }
     bool fresh = b->level_gen != 0;
     b->level_gen = g_level_gen;
     return fresh;
@@ -332,12 +365,41 @@ VkFormat vk_view_format(TexBackend *b, VkFormat want) {
     return b->format;
 }
 
+// The bc.h kind a BC format decodes as (BC_NONE: not a BC format)
+static int bc_kind(VkFormat f) {
+    switch (f) {
+    case VK_FORMAT_BC1_RGB_UNORM_BLOCK: case VK_FORMAT_BC1_RGB_SRGB_BLOCK: return BC1_RGB;
+    case VK_FORMAT_BC1_RGBA_UNORM_BLOCK: case VK_FORMAT_BC1_RGBA_SRGB_BLOCK: return BC1_RGBA;
+    case VK_FORMAT_BC2_UNORM_BLOCK: case VK_FORMAT_BC2_SRGB_BLOCK: return BC2;
+    case VK_FORMAT_BC3_UNORM_BLOCK: case VK_FORMAT_BC3_SRGB_BLOCK: return BC3;
+    case VK_FORMAT_BC4_UNORM_BLOCK: return BC4_UNORM;
+    case VK_FORMAT_BC4_SNORM_BLOCK: return BC4_SNORM;
+    case VK_FORMAT_BC5_UNORM_BLOCK: return BC5_UNORM;
+    case VK_FORMAT_BC5_SNORM_BLOCK: return BC5_SNORM;
+    case VK_FORMAT_BC6H_UFLOAT_BLOCK: return BC6H_UFLOAT;
+    case VK_FORMAT_BC6H_SFLOAT_BLOCK: return BC6H_SFLOAT;
+    case VK_FORMAT_BC7_UNORM_BLOCK: case VK_FORMAT_BC7_SRGB_BLOCK: return BC7;
+    default: return BC_NONE;
+    }
+}
+
+// the game's textures alive and their memory (create_image / destroy_image; Show advanced information, renderer_hud)
+int g_vk_tex_live;
+uint64_t g_vk_tex_live_bytes;
+static void tex_count(TexBackend *b, int d) {
+    VmaAllocationInfo ai;
+    vmaGetAllocationInfo(g_vk.vma, b->mem, &ai);
+    g_vk_tex_live += d;
+    g_vk_tex_live_bytes = d > 0 ? g_vk_tex_live_bytes + ai.size : g_vk_tex_live_bytes > ai.size ? g_vk_tex_live_bytes - ai.size : 0;
+    if (g_vk_tex_live < 0) g_vk_tex_live = 0;
+}
+
 static void create_image(NvnTexture *t, TexBackend *b) {
     VkFmt mf = fmt_of(t->format);
-    b->ax = b->scalable ? g_al_x : 1;
-    b->ay = b->scalable ? g_al_y : 1;
-    b->sx = b->scalable ? g_rs_x : 1;
-    b->sy = b->scalable ? g_rs_y : 1;
+    b->ax = b->scalable ? tex_alloc_x(b) : 1;
+    b->ay = b->scalable ? tex_alloc_y(b) : 1;
+    b->sx = b->scalable ? (b->ao || b->shadow || b->rift_map ? b->ax : tex_draw_x(b)) : 1;
+    b->sy = b->scalable ? (b->ao || b->shadow || b->rift_map ? b->ay : tex_draw_y(b)) : 1;
     uint32_t tw = t->width ? t->width : 1, th = t->height ? t->height : 1;
     if (b->scalable) {
         tw = (uint32_t)lroundf(tw * b->ax); th = (uint32_t)lroundf(th * b->ay);
@@ -367,7 +429,10 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     VkFormat vf = mf.vf;
     VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
     b->astc_bw = b->astc_bh = 0;
-    if (!format_supports(vf, need)) {
+    b->cpu_bc = BC_NONE;
+    static int cpu_bc = -1;  // LARECOMP_VK_CPU_BC=1: BC formats decoded on the CPU although the driver lists them (tests)
+    if (cpu_bc < 0) { const char *e = getenv("LARECOMP_VK_CPU_BC"); cpu_bc = e && atoi(e); }
+    if (!format_supports(vf, need) || (cpu_bc && bc_kind(vf) != BC_NONE) || (g_vk.cpu_astc && vf >= VK_FORMAT_ASTC_4x4_UNORM_BLOCK && vf <= VK_FORMAT_ASTC_12x12_SRGB_BLOCK)) {
         bool astc = vf >= VK_FORMAT_ASTC_4x4_UNORM_BLOCK && vf <= VK_FORMAT_ASTC_12x12_SRGB_BLOCK;
         const FormatInfo *fi = t->layout.fmt;
         if (astc && fi && fi->bpb == 16) {  // desktop GPUs: decoded on the CPU into an RGBA8 image of the same colour space
@@ -375,7 +440,17 @@ static void create_image(NvnTexture *t, TexBackend *b) {
             b->astc_bh = fi->bh;
             b->astc_srgb = t->format >= 0x87;
             vf = b->astc_srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+        } else if ((b->cpu_bc = bc_kind(vf)) != BC_NONE && fi && fi->bw == 4 && fi->bh == 4 && fi->bpb == bc_block_bytes(b->cpu_bc)) {
+            // (Xclipse 940, driver 25.3.3: no BC4 / BC5 - the button glyphs and menu frames were never filled - nor BC7:
+            // house walls drew their raw blocks, #693)
+            static int nlog;
+            if (nlog++ < 20) LOG("[vk] format %d (nvn %#x) not supported: decoded on upload\n", vf, t->format);
+            vf = b->cpu_bc == BC4_SNORM || b->cpu_bc == BC5_SNORM ? VK_FORMAT_R8G8B8A8_SNORM
+                 : b->cpu_bc == BC6H_UFLOAT || b->cpu_bc == BC6H_SFLOAT ? VK_FORMAT_R16G16B16A16_SFLOAT
+                 : vf == VK_FORMAT_BC1_RGB_SRGB_BLOCK || vf == VK_FORMAT_BC1_RGBA_SRGB_BLOCK || vf == VK_FORMAT_BC2_SRGB_BLOCK ||
+                   vf == VK_FORMAT_BC3_SRGB_BLOCK || vf == VK_FORMAT_BC7_SRGB_BLOCK ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
         } else {
+            b->cpu_bc = BC_NONE;
             static int nlog;
             if (nlog++ < 20) LOG("[vk] format %d (nvn %#x) not supported: RGBA8 instead\n", vf, t->format);
             vf = VK_FORMAT_R8G8B8A8_UNORM;
@@ -385,6 +460,11 @@ static void create_image(NvnTexture *t, TexBackend *b) {
     VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (depthfmt) usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     else if (format_supports(vf, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)) usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    // (as metal.m's image_use) a texture the game registers as an image is written by compute stores (SUST.B: EoW's
+    // environment map); only those get storage usage, which costs some drivers their colour compression
+    b->want_storage = t->image_use;
+    if (t->image_use && !depthfmt && samples == 1 && format_supports(vf, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT))
+        usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     VkImageCreateFlags flags = 0;
     if (!depthfmt) flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;  // format views (NVN texture views, raw sRGB views)
     if (type == VK_IMAGE_TYPE_2D && layers >= 6 && tw == th && samples == 1) flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
@@ -427,7 +507,9 @@ static void create_image(NvnTexture *t, TexBackend *b) {
         depthfmt = false;
     }
     b->format = vf;
+    b->usage = ci.usage;
     b->width = tw; b->height = th; b->depth = depth; b->layers = layers; b->levels = levels; b->samples = samples;
+    tex_count(b, 1);
     b->aspect = depthfmt ? aspect_of(t->format) : VK_IMAGE_ASPECT_COLOR_BIT;
     b->base_type = type == VK_IMAGE_TYPE_1D ? (layers > 1 ? VK_IMAGE_VIEW_TYPE_1D_ARRAY : VK_IMAGE_VIEW_TYPE_1D)
                  : type == VK_IMAGE_TYPE_3D ? VK_IMAGE_VIEW_TYPE_3D
@@ -486,6 +568,7 @@ static uint32_t level_w(const TexBackend *b, uint32_t lv) { uint32_t v = b->widt
 static uint32_t level_h(const TexBackend *b, uint32_t lv) { uint32_t v = b->height >> lv; return v ? v : 1; }
 
 static void destroy_image(TexBackend *b) {
+    if (b->image && b->mem) tex_count(b, -1);
     views_forget(b);
     if (b->image || b->mem) defer((Dead){.img = b->image, .mem = b->mem});  // (never the same allocation twice)
     b->image = VK_NULL_HANDLE;
@@ -511,7 +594,8 @@ static void live_remove(TexBackend *b) {
 static TexBackend *tex_backend(NvnTexture *t) {
     TexBackend *b = t->backend;
     if (b) {
-        if (b->scalable && (b->ax != g_al_x || b->ay != g_al_y)) {  // output resolution changed: reallocate
+        if ((b->scalable && (b->ax != tex_alloc_x(b) || b->ay != tex_alloc_y(b))) ||  // output resolution changed: reallocate
+            (t->image_use && !b->want_storage)) {  // registered as an image after its first use: made again, writable
             destroy_image(b);
             create_image(t, b);
         }
@@ -520,6 +604,10 @@ static TexBackend *tex_backend(NvnTexture *t) {
     vk_collect_dead();
     b = calloc(1, sizeof *b);
     b->scalable = tex_scalable(t);
+    b->shadow = tex_shadow(t);
+    b->rift_map = !b->shadow && tex_rift_map(t);
+    b->ao = b->scalable && !b->shadow && !b->rift_map && tex_ao(t);
+    b->two_d = b->scalable && !b->shadow && !b->rift_map && !b->ao && tex_2d(t);
     create_image(t, b);
     t->backend = b;
     live_add(t, b);
@@ -528,6 +616,8 @@ static TexBackend *tex_backend(NvnTexture *t) {
 
 void backend_texture_destroyed(NvnTexture *t) {
     TexBackend *b = t->backend;
+    extern void interp_texture_destroyed(void);
+    interp_texture_destroyed();  // (frame interpolation: a texture the frame may have drawn with went away)
     if (b) {
         extern void vk_alias_texture_destroyed(NvnTexture *t);  // (exec.c copy aliases: a source's contents handed over)
         vk_alias_texture_destroyed(t);
@@ -602,6 +692,9 @@ static void upload_pending(TexBackend *b) {
 uint64_t prof_tex_checks, prof_tex_samples, prof_tex_full, prof_tex_full_bytes, prof_tex_dyn, prof_tex_watch_skips;
 static void upload_texture(NvnTexture *t, TexBackend *b) {
     if (!t->addr || t->target == 10) return;
+    // (a frame interpolation replay shows the frame's textures as it uploaded them: checked again there, it uploaded
+    // what the game had meanwhile written for the next frame - renderer.m upload_texture)
+    if (b->uploaded && g_interp_replaying) return;
     uint64_t frame = vk_frame_counter();
     if (b->uploaded && b->checked_frame == frame) return;
     if (b->uploaded && !b->dynamic && ((frame + ((uintptr_t)b >> 6)) & 7)) return;
@@ -661,7 +754,7 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
     if (b->tp > 0) b->tp_gen = texpatch_generation();
     b->data_hash = h;
     b->uploaded = true;
-    if (b->format != mf.vf && !b->astc_bw) return;  // unsupported format: nothing sensible to copy
+    if (b->format != mf.vf && !b->astc_bw && !b->cpu_bc) return;  // unsupported format: nothing sensible to copy
     slow_note_upload(total);
     VkCommandBuffer cb = vk_upload_cmd();
     uint32_t layers = t->layout.layers ? t->layout.layers : 1;
@@ -672,14 +765,16 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
     for (uint32_t layer = 0; layer < layers; layer++) {
         for (uint32_t lv = 0; lv < levels; lv++) {
             LevelLayout l = tegra_level(&t->layout, lv);
-            if (b->astc_bw) {  // blocks -> linear block rows -> RGBA8 texels
+            if (b->astc_bw || b->cpu_bc) {  // blocks -> linear block rows -> RGBA8 (BC6H: RGBA16F) texels
                 const uint8_t *src = (const uint8_t *)(uintptr_t)t->addr + layer * layer_size + l.offset;
-                uint8_t *blocks = malloc((uint64_t)l.wb * l.hb * 16);
-                if (linear) for (uint32_t y = 0; y < l.hb; y++) memcpy(blocks + (uint64_t)y * l.wb * 16, src + (uint64_t)y * t->stride, l.wb * 16);
-                else tegra_deswizzle(src, blocks, l.wb, l.hb, 1, 16, l.block_height_log2, l.block_depth_log2);
-                if (b->tp > 0 && layer == 0) texpatch_apply(b->tp - 1, lv, blocks, l.w, l.h, l.wb * 16);
-                VkSpan s = vk_transient((uint64_t)l.w * l.h * 4, 16);
-                astc_decode_ldr(blocks, l.w, l.h, b->astc_bw, b->astc_bh, b->astc_srgb, s.ptr);
+                uint32_t bpb = fi->bpb, brow = l.wb * bpb;
+                uint8_t *blocks = malloc((uint64_t)brow * l.hb);
+                if (linear) for (uint32_t y = 0; y < l.hb; y++) memcpy(blocks + (uint64_t)y * brow, src + (uint64_t)y * t->stride, brow);
+                else tegra_deswizzle(src, blocks, l.wb, l.hb, 1, bpb, l.block_height_log2, l.block_depth_log2);
+                if (b->tp > 0) texpatch_apply(b->tp - 1, layer, lv, blocks, l.w, l.h, brow);
+                VkSpan s = vk_transient((uint64_t)l.w * l.h * (b->cpu_bc ? bc_texel_bytes(b->cpu_bc) : 4), 16);
+                if (b->cpu_bc) bc_decode(b->cpu_bc, blocks, l.w, l.h, s.ptr);
+                else astc_decode_ldr(blocks, l.w, l.h, b->astc_bw, b->astc_bh, b->astc_srgb, s.ptr);
                 free(blocks);
                 VkBufferImageCopy rg = {.bufferOffset = s.off, .bufferRowLength = l.w, .bufferImageHeight = l.h,
                                         .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, lv, layer, 1},
@@ -700,7 +795,7 @@ static void upload_texture(NvnTexture *t, TexBackend *b) {
             } else {
                 tegra_deswizzle(src, lin, l.wb, l.hb, l.d, fi->bpb, l.block_height_log2, l.block_depth_log2);
             }
-            if (b->tp > 0 && layer == 0) texpatch_apply(b->tp - 1, lv, lin, l.w, l.h, row);
+            if (b->tp > 0) texpatch_apply(b->tp - 1, layer, lv, lin, l.w, l.h, row);
             if (expand) {  // RGB8 -> RGBA8
                 uint8_t *o = s.ptr;
                 uint64_t n = (uint64_t)l.wb * l.hb * l.d;
@@ -743,7 +838,7 @@ TexBackend *vk_tex(NvnTexture *t, bool for_render) {
 void renderer_mark_gpu_owned(NvnTexture *t) {
     TexBackend *b = tex_backend(t);
     b->gpu_owned = true;
-    if (b->scalable) { b->sx = g_rs_x; b->sy = g_rs_y; }
+    if (b->scalable && !b->ao && !b->shadow && !b->rift_map) { b->sx = tex_draw_x(b); b->sy = tex_draw_y(b); }
 }
 bool renderer_is_gpu_owned(NvnTexture *t) { return tex_backend(t)->gpu_owned; }
 void backend_pool_written(uint64_t addr, uint64_t size) { (void)addr; (void)size; }
@@ -843,6 +938,15 @@ VkImageView vk_image_view(TexBackend *b, VkImageViewType type, VkFormat fmt, uin
     prof_views_created++;
     VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = b->image, .viewType = type,
                                 .format = fmt, .components = sw, .subresourceRange = {aspect, lv0, nlv, ly0, nly}};
+    // (a storage image, NvnTexture.image_use) a view in a format that can't be a storage image (an sRGB twin) or with
+    // a swizzle leaves storage out of its usage: a storage view must have both
+    VkImageViewUsageCreateInfo vu = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO, .usage = b->usage & ~VK_IMAGE_USAGE_STORAGE_BIT};
+    bool ident = (sw.r == VK_COMPONENT_SWIZZLE_IDENTITY || sw.r == VK_COMPONENT_SWIZZLE_R) &&
+                 (sw.g == VK_COMPONENT_SWIZZLE_IDENTITY || sw.g == VK_COMPONENT_SWIZZLE_G) &&
+                 (sw.b == VK_COMPONENT_SWIZZLE_IDENTITY || sw.b == VK_COMPONENT_SWIZZLE_B) &&
+                 (sw.a == VK_COMPONENT_SWIZZLE_IDENTITY || sw.a == VK_COMPONENT_SWIZZLE_A);
+    if ((b->usage & VK_IMAGE_USAGE_STORAGE_BIT) && (!ident || !format_supports(fmt, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)))
+        vi.pNext = &vu;
     VkImageView v;
     if (vkCreateImageView(g_vk.dev, &vi, NULL, &v) != VK_SUCCESS) {
         static int nfail;
@@ -947,6 +1051,11 @@ VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool 
         return vk_image_view(b, type, fmt, lv0, 1, ly0, 1, IDENTITY, b->aspect);
     }
     VkImageAspectFlags aspect = b->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ? VK_IMAGE_ASPECT_DEPTH_BIT : b->aspect;
+    // (stencil mode, the texture's or its view's, 2D: the stencil, as renderer.m's X32_Stencil8 view - EoW's rifts read
+    // the bits the scene marks there, the shader as integers: exec.c stencil_slots_of, translate.c tex_is_stencil)
+    if (game_other() && (b->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) && want_textype == TEXTYPE_2D && b->samples == 1 &&
+        (v && (v->setmask & 16) ? v->ds_mode : t->ds_mode) == 1)
+        aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
     VkComponentMapping sw = IDENTITY;
     if (!(b->aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) && b->samples == 1) {
         const uint8_t *s = v && (v->setmask & 8) ? v->swizzle : t->swizzle;
@@ -955,6 +1064,8 @@ VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool 
         if (c[0] || c[1] || c[2] || c[3]) {  // never set: identity
             if (fmt_of(t->format).alpha_one)
                 for (int i = 0; i < 4; i++) if (c[i] == 5) c[i] = 1;
+            if (game_other() && fmt_of(t->format).swap_rb)  // (as renderer.m apply_swizzle)
+                for (int i = 0; i < 4; i++) c[i] = c[i] == 2 ? 4 : c[i] == 4 ? 2 : c[i];
             // NVN swizzle 0 zero, 1 one, 2..5 r,g,b,a == VkComponentSwizzle - 1
             sw = (VkComponentMapping){(VkComponentSwizzle)(c[0] + 1), (VkComponentSwizzle)(c[1] + 1), (VkComponentSwizzle)(c[2] + 1),
                                       (VkComponentSwizzle)(c[3] + 1)};
@@ -1010,6 +1121,24 @@ VkImageView vk_dummy_view(int textype) {
     b->layers = cube ? 6 : 1;
     views[textype] = vk_image_view(b, vt, b->format, 0, 1, 0, cube ? 6 : 1, IDENTITY, VK_IMAGE_ASPECT_COLOR_BIT);
     return views[textype];
+}
+
+VkImageView vk_dummy_storage_view(void) {
+    static TexBackend b;
+    static VkImageView view;
+    if (view) return view;
+    VkImageCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                            .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {1, 1, 1}, .mipLevels = 1, .arrayLayers = 1,
+                            .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                            .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT};
+    VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+    VK_CHECK(vmaCreateImage(g_vk.vma, &ci, &ai, &b.image, &b.mem, NULL));
+    vk_image_init_layout(vk_upload_cmd(), b.image, VK_IMAGE_ASPECT_COLOR_BIT);
+    b.format = VK_FORMAT_R8G8B8A8_UNORM;
+    b.usage = ci.usage;
+    b.levels = b.layers = 1;
+    view = vk_image_view(&b, VK_IMAGE_VIEW_TYPE_2D_ARRAY, b.format, 0, 1, 0, 1, IDENTITY, VK_IMAGE_ASPECT_COLOR_BIT);
+    return view;
 }
 
 // Depth compare (sampler*Shadow) needs a view whose format has SAMPLED_IMAGE_DEPTH_COMPARISON: the RGBA8 dummy above

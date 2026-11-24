@@ -169,13 +169,17 @@ typedef struct {
     AVPacket *pkt;
     bool have_pkt, eof;
     bool skippable;  // the launch opening (forced on the first launch, no save yet): A / B / + ends it
+    bool title;      // EoW's title movie (Press Any Button: --load-save, runtime/hle/load_save.c)
 } Extractor;
 
 static bool g_skip_held;           // ex_fill: A / B held at the last look
 static double g_skip_pressed_at;    // when they were pressed (0 = not yet)
 
+static _Atomic double g_title_fill_at;  // when EoW's title movie last read a packet (movie_title_playing)
+
 static void ex_fill(Extractor *e) {
     if (!e->fmt || !e->pkt) { e->eof = true; return; }
+    if (e->title && !e->eof) g_title_fill_at = av_gettime_relative() / 1e6;
     if (e->skippable && !e->eof) {
         // the game skips the opening with Plus (once a save exists); A and B do too (we press Plus for it)
         extern uint64_t input_buttons_now(void);
@@ -219,7 +223,7 @@ static void ex_set_data_source(Cpu *c) {
     if (e->fmt) avformat_close_input(&e->fmt);
     e->selected = 0;
     e->ntracks = 0;
-    e->have_pkt = e->eof = e->skippable = false;
+    e->have_pkt = e->eof = e->skippable = e->title = false;
     if (!path || !*path) { c->x[0] = 1; return; }
     // "rom:/region_common/movie/title.webm" -> extracted/romfs/region_common/movie/title.webm
     const char *rel = path && strstr(path, ":/") ? strstr(path, ":/") + 2 : path;
@@ -238,6 +242,7 @@ static void ex_set_data_source(Cpu *c) {
     if (!e->pkt) { avformat_close_input(&e->fmt); c->x[0] = 1; return; }
     // the opening at launch can always be skipped, vanilla and randomizer (with no save yet the game forces it)
     e->skippable = rel && strstr(rel, "movie/opening.webm");
+    e->title = rel && strstr(rel, "movie/rd000_Title.webm");
     if (e->skippable) g_skip_pressed_at = 0;  // (a press that ended the title's attract replay isn't for this one)
     if (rel && strstr(rel, "movie/ending.webm")) { extern void run_timer_ending_movie(void); run_timer_ending_movie(); }  // (the run's end)
     if (rel && strstr(rel, "movie/title.webm")) { extern void run_timer_title(void); run_timer_title(); }  // (a new attempt next)
@@ -354,6 +359,24 @@ static void movie_track(int kind, void *p, bool add) {
     for (int i = 0; i < MAX_MOVIE_OBJS; i++)
         if (g_movie_objs[kind][i] == (add ? NULL : p)) { g_movie_objs[kind][i] = add ? p : NULL; break; }
     pthread_mutex_unlock(&g_movie_lock);
+}
+
+// the launch opening playing, still skippable (the touch controls: a tap skips it - runtime/ui/mobile/touch_controls.mm)
+bool movie_opening_playing(void) {
+    bool r = false;
+    pthread_mutex_lock(&g_movie_lock);
+    for (int i = 0; i < MAX_MOVIE_OBJS && !r; i++) {
+        const Extractor *e = g_movie_objs[0][i];
+        if (e && e->skippable && !e->eof) r = true;
+    }
+    pthread_mutex_unlock(&g_movie_lock);
+    return r;
+}
+
+// EoW's title (its movie, Press Any Button) is up: the movie read a packet in the last half second
+bool movie_title_playing(void) {
+    double t = g_title_fill_at;
+    return t && av_gettime_relative() / 1e6 - t < 0.5;
 }
 
 static void ex_dtor(Cpu *c) {

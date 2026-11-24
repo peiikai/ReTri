@@ -6,6 +6,7 @@
 
 #include "../kernel.h"
 #include "nvn.h"
+#include "interp.h"
 #include "rqueue.h"
 
 void renderer_sync(void);
@@ -44,6 +45,8 @@ NVN(nvnDeviceBuilderGetFlags) { RET(G(uint32_t, A(0), 0)); }
 NVN(nvnDeviceInitialize) {
     extern bool maxwell_skip_unsupported_stores;
     maxwell_skip_unsupported_stores = game_other() != NULL;  // (experimental: see maxwell/shader.h)
+    extern uint32_t maxwell_shadow_texel_off;
+    maxwell_shadow_texel_off = game_other() ? 0x280 : 0x240;  // (maxwell/shader.h)
     static bool once;
     if (!once) {
         once = true;
@@ -300,7 +303,7 @@ int nvn_pool_flags_at(uint64_t addr) {
         if (addr >= pools[i].storage && addr < pools[i].storage + pools[i].size) return (int)pools[i].flags;
     return -1;
 }
-NVN(nvnMemoryPoolFinalize) { free(HOST(NvnPool, A(0))); SET_HOST(A(0), 0); }
+NVN(nvnMemoryPoolFinalize) { interp_free_begin(INTERP_FREE_POOL, HOST(NvnPool, A(0)) ? HOST(NvnPool, A(0))->size : 0); free(HOST(NvnPool, A(0))); SET_HOST(A(0), 0); interp_free_end(); }
 NVN(nvnMemoryPoolSetDebugLabel) { (void)c; }
 NVN(nvnMemoryPoolMap) { RET(HOST(NvnPool, A(0))->storage); }
 NVN(nvnMemoryPoolGetBufferAddress) { RET(HOST(NvnPool, A(0))->storage); }  // GPU address == CPU address
@@ -619,7 +622,7 @@ NVN(nvnSamplerInitialize) {
     SET_HOST(A(0), d);
     RET(1);
 }
-NVN(nvnSamplerFinalize) { free(HOST(NvnSamplerDesc, A(0))); SET_HOST(A(0), 0); }
+NVN(nvnSamplerFinalize) { interp_free_begin(INTERP_FREE_SAMPLER, 0); free(HOST(NvnSamplerDesc, A(0))); SET_HOST(A(0), 0); interp_free_end(); }
 NVN(nvnSamplerSetDebugLabel) { (void)c; }
 #define SMP HOST(NvnSamplerDesc, A(0))
 NVN(nvnSamplerGetMinMagFilter) { *(uint32_t *)AP(1) = SMP->min_filter; *(uint32_t *)AP(2) = SMP->mag_filter; }
@@ -724,7 +727,7 @@ NVN(nvnTexturePoolRegisterTexture) { register_texture(c); }
 NVN(nvnTexturePoolRegisterImage) {
     register_texture(c);
     NvnTexture *t = HOST(NvnTexture, A(2));
-    if (t && game_other() && getenv("LARECOMP_SUST") && atoi(getenv("LARECOMP_SUST"))) t->image_use = true;  // (as SUST.B)
+    if (t && game_other() && !(getenv("LARECOMP_SUST") && !atoi(getenv("LARECOMP_SUST")))) t->image_use = true;  // (as SUST.B)
     static int nlog;
     if (game_other() && nlog++ < 12)
         LOG("[images] RegisterImage id %d tex %p (%ux%u fmt %#x) view %s level %u\n", (int)A(1), (void *)t, t ? t->width : 0,
@@ -757,7 +760,7 @@ NvnDescPool *nvn_find_pool(NvnDescPool **reg, uint64_t guest_pool) {
 
 // ================================================================== programs
 NVN(nvnProgramInitialize) { SET_HOST(A(0), calloc(1, sizeof(NvnProgram))); RET(1); }
-NVN(nvnProgramFinalize) { free(HOST(NvnProgram, A(0))); SET_HOST(A(0), 0); }
+NVN(nvnProgramFinalize) { interp_free_begin(INTERP_FREE_PROGRAM, 0); free(HOST(NvnProgram, A(0))); SET_HOST(A(0), 0); interp_free_end(); }
 NVN(nvnProgramSetDebugLabel) { (void)c; }
 NVN(nvnProgramSetSampleShading) { (void)c; }
 NVN(nvnProgramSetSubroutineLinkage) { RET(1); }
@@ -846,6 +849,11 @@ NVN(nvnWindowSetPresentInterval) {  // (the game's 60 / 30 fps mode: 1 / 2; LARE
         LOG(")\n");
     }
     WIN->interval = (int)A(1);
+    // LARECOMP_KEEP_60=1 (test): frames paced at 60 whatever the game asks - its 30 fps mode then runs fast (two world
+    // steps a frame), but the GPU's time per frame at 60 shows whether a scene that took it to 30 fits 60 at full clock
+    static int keep60 = -1;
+    if (keep60 < 0) keep60 = getenv("LARECOMP_KEEP_60") != NULL;
+    if (keep60 && WIN->interval > 1) WIN->interval = 1;
     g_nvn_present_interval = WIN->interval;
 }
 NVN(nvnWindowSetCrop) { int *cr = WIN->crop; cr[0] = (int)A(1); cr[1] = (int)A(2); cr[2] = (int)A(3); cr[3] = (int)A(4); }
@@ -869,7 +877,12 @@ static void other_lag_cap(void) {
 }
 NVN(nvnWindowAcquireTexture) {
     NvnWindow *w = WIN;
-    if (game_other()) { extern void pace_other_cadence(void); pace_other_cadence(); }  // (pace.c)
+    if (game_other()) {
+        extern void pace_other_cadence(void);
+        extern void hud_eow_tick(void);
+        pace_other_cadence();  // (pace.c)
+        hud_eow_tick();        // (EoW's HUD on phones and tablets: runtime/hle/hud_eow.c)
+    }
     if (A(1)) sync_of(A(1))->signaled = 1;
     *(int32_t *)AP(2) = w->next;
     w->next = (w->next + 1) % (w->active ? w->active : 1);

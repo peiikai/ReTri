@@ -17,6 +17,9 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parent.parent
+MINIZ = ROOT/'build/miniz'  # (gamebuild.c's iOS kit code links runtime/zipfile.c: miniz, tools/fetch_miniz.sh)
+if not (MINIZ/'.fetched').exists():
+    subprocess.run(['bash', str(ROOT/'tools/fetch_miniz.sh')], check=True)
 BRIDGE = r'''
 #include "platform.h"
 #include <chrono>
@@ -36,22 +39,45 @@ extern "C" bool rt_resource(const char *,const char *dev,char *out,size_t n) {
     return std::filesystem::exists(std::filesystem::u8path(p)) && snprintf(out,n,"%s",p.c_str())<(int)n;
 }
 extern "C" bool rt_dev_mode() { return false; }
+extern "C" const char *rt_data_root() { return root.c_str(); }  // (the iOS kit cache; unused by GAMEBUILD_HOST)
+extern "C" bool plat_remove_tree(const char *d) { std::error_code ec; std::filesystem::remove_all(std::filesystem::u8path(d), ec); return !ec; }
+// (game_addresses.c: the fixture is LA's layout, no other game)
+extern "C" const void *game_other_of(const char *) { return nullptr; }
+extern "C" uint64_t game_other_sdk_base_of(const void *) { return 0x7004000000ull; }
 extern "C" uint64_t plat_now_ns() { return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 extern "C" void plat_sleep_until_ns(uint64_t t) { auto now=plat_now_ns(); if(t>now)std::this_thread::sleep_for(std::chrono::nanoseconds(t-now)); }
 extern "C" intptr_t plat_spawn(const char *const *a,const char *l,bool append) { return start_cb(a,l,append); }
-extern "C" intptr_t plat_spawn_no_cfg(const char *const *a,const char *l,bool append,unsigned long *e) { if(e)*e=0; return start_cb(a,l,append); }
 extern "C" int plat_proc_wait(intptr_t p,bool block) { return wait_cb(p,block); }
 extern "C" void plat_proc_kill(intptr_t p) { kill_cb(p); }
-'''
-GENERATOR = r'''
-import pathlib,sys,time
-name,source,base,out=sys.argv[1:5]
-out=pathlib.Path(out);out.mkdir(parents=True,exist_ok=True)
-for i in range(3):
-    (out/f'{name}_{i:03}.c').write_text(f'int {name}_{i:03}(void) {{ return {i}; }}\n')
-    print(f'{name}: progress {i+1}/3 files {i+1}',file=sys.stderr,flush=True)
-    time.sleep(.03)
-(out/f'{name}_table.c').write_text(f'int {name}_table(void) {{ return 3; }}\n')
+#include "gen/lasgen.h"
+#include <cstring>
+// The game code generator (runtime/gen/, in-process): a fixture writing three tiny files and a table per module
+static int gen_runs, gen_asm_dyn;
+extern "C" void test_gen_reset() { gen_runs = gen_asm_dyn = 0; }
+extern "C" int test_gen_runs() { return gen_runs; }
+extern "C" int test_gen_asm_dyn() { return gen_asm_dyn; }
+extern "C" void lasgen_defaults(LasgenOptions *o) { *o = LasgenOptions{}; o->simd = "asm"; }
+extern "C" bool lasgen_run(const LasgenOptions *o, char *why, size_t n) {
+    __atomic_add_fetch(&gen_runs, 1, __ATOMIC_SEQ_CST);
+    if (o->simd && !strcmp(o->simd, "asm") && o->dyn_base) __atomic_add_fetch(&gen_asm_dyn, 1, __ATOMIC_SEQ_CST);
+    std::filesystem::path out = std::filesystem::u8path(o->outdir);
+    std::filesystem::create_directories(out);
+    for (int i = 0; i <= 3; i++) {
+        if (o->cancel && *o->cancel) { snprintf(why, n, "%s: cancelled", o->name); return false; }
+        char f[64], line[128];
+        snprintf(f, sizeof f, i < 3 ? "%s_%03d.c" : "%s_table.c", o->name, i);
+        FILE *fp = fopen((out / f).u8string().c_str(), "w");
+        if (!fp) { snprintf(why, n, "%s: cannot write", o->name); return false; }
+        if (i < 3) fprintf(fp, "int %s_%03d(void) { return %d; }\n", o->name, i, i);
+        else fprintf(fp, "int %s_table(void) { return 3; }\n", o->name);
+        fclose(fp);
+        if (i == 3) break;
+        snprintf(line, sizeof line, "%s: progress %d/3 files %d", o->name, i + 1, i + 1);
+        o->log(o->ud, line);
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    }
+    return true;
+}
 '''
 
 with tempfile.TemporaryDirectory() as temporary:
@@ -68,22 +94,21 @@ with tempfile.TemporaryDirectory() as temporary:
     main = b'NSO0' + bytes(0x3c) + bytes.fromhex('0123456789abcdef') + bytes(0x18) + b'fixture main'  # (the build ID: the library id)
     (game/'exefs/main').write_bytes(main)
     (game/'exefs/sdk').write_bytes(b'fixture sdk')
-    generator = tmp/'generator.py'; generator.write_text(GENERATOR)
     cc = shlex.split(os.environ.get('CC','clang'))
     cxx = shlex.split(os.environ.get('CXX','clang++'))
     compiler = shutil.which(cc[0]); assert compiler
     relocated = tmp/'relocated'/Path(compiler).name
-    # The native helper receives its normal argv; the process bridge invokes the fixture script.
-    os.environ['LARECOMP_GEN'] = str(generator)
     os.environ['LARECOMP_CC'] = compiler
     if os.name == 'nt':
         stub=tmp/'stub.c'; stub.write_text('int fixture_export;\n')
-        subprocess.run(cc+[str(stub),'-shared','-Wl,--out-implib,'+str(resources/'build/lasrecomp.dll.a'),
+        subprocess.run(cc+[str(stub),'-shared','-Wl,--out-implib,'+str(resources/'build/eowrecomp.dll.a'),
                            '-o',str(tmp/'stub.dll')],check=True)
     objects=[]
-    for source in ('runtime/gamebuild.c',):
+    inc=tmp/'inc'; inc.mkdir()  # (the generator's embedded data: the Makefile makes these from the real files)
+    for name in ('hle_symbols.inc',): (inc/name).write_text('"fixture\\n"\n')
+    for source in ('runtime/gamebuild.c','runtime/zipfile.c',str(MINIZ/'miniz.c')):
         obj=tmp/(Path(source).stem+'.o'); objects.append(str(obj))
-        subprocess.run(cc+['-std=gnu11','-fPIC','-Iruntime','-DGAMELIB_ID="cache-fixture"',
+        subprocess.run(cc+['-std=gnu11','-fPIC','-w','-Iruntime','-I'+str(inc),'-I'+str(MINIZ),'-DGAMELIB_ID="cache-fixture"',
                            '-DGAMELIB_CFLAGS="-O0 -fPIC"','-DGAMELIB_SHARED="-shared"',
                            '-c',source,'-o',str(obj)],cwd=ROOT,check=True)
     bridge=tmp/'bridge.cpp'; bridge.write_text(BRIDGE)
@@ -99,7 +124,8 @@ with tempfile.TemporaryDirectory() as temporary:
     PROGRESS=ct.CFUNCTYPE(None,ct.c_double,ct.c_char_p)
     CANCEL=ct.CFUNCTYPE(ct.c_bool)
     class Options(ct.Structure):
-        _fields_=[('progress',PROGRESS),('jobs',ct.c_int),('cancelled',CANCEL)]
+        _fields_=[('progress',PROGRESS),('jobs',ct.c_int),('cancelled',CANCEL),
+                  ('target',ct.c_int),('ios_kit',ct.c_void_p)]  # (GAMEBUILD_HOST, no kit)
     processes={}; launched=[]; next_id=0; fail_compile=False; fail_link=False
     @SPAWN
     def spawn(args, log, append):
@@ -109,7 +135,6 @@ with tempfile.TemporaryDirectory() as temporary:
         launched.append(command.copy())
         # The relocated compiler has identical bytes; invoke the installed copy with its platform resources.
         if command[0] == str(relocated): command[0] = compiler
-        if command[0]==str(generator): command=[sys.executable,*command]
         elif (fail_compile and '-c' in command) or (fail_link and '-c' not in command):
             fail_compile=fail_link=False
             command=[sys.executable,'-c','import sys;print("synthetic failure");sys.exit(7)']
@@ -147,10 +172,10 @@ with tempfile.TemporaryDirectory() as temporary:
     library.gamebuild_run.restype=ct.c_bool
     why=ct.create_string_buffer(1024)
     def run():
-        launched.clear();why.value=b''
+        launched.clear();why.value=b'';library.test_gen_reset()
         return library.gamebuild_run(str(game).encode(),ct.byref(options),why,len(why))
     def compiles(): return [a for a in launched if '-c' in a]
-    def generators(): return [a for a in launched if a[0]==str(generator)]
+    def generators(): return [None]*library.test_gen_runs()  # (runs of the in-process generator)
     try:
         assert not run() and b'cancelled' in why.value,why.value
         assert (work/'in-progress').exists()
@@ -159,7 +184,7 @@ with tempfile.TemporaryDirectory() as temporary:
         assert run(),why.value
         assert not generators() and len(compiles())==10-saved
         assert not (work/'main').exists() and not (work/'sdk').exists() and not (work/'in-progress').exists()
-        output=next(p for p in game.glob('lasgame.*') if p.suffix!='.id')
+        output=next(p for p in game.glob('eowgame.*') if p.suffix!='.id')
         before=hashlib.sha256(output.read_bytes()).digest()
         (work/'main_000.o').write_bytes(b'corrupt')
         assert run(),why.value

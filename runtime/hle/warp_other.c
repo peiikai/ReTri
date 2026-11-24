@@ -3,9 +3,10 @@
 // A warp starts the game's own fast-travel event (start_map_warp: event/MapWarp.bfevfl with our level and locator as
 // its parameters), as the map screen does; the event's GameControl.RequestLevelJump fills the level's jump request
 // and the event system performs it when the event ends. Writing the request alone does nothing: the game reads it only
-// when an event ends (its processor, main+0x160f7e0, runs then). The request has LA's layout at another offset: level
-// at R+0x218 (length +0x258), locator at +0x260 (length +0x2a0), offset +0x2b0; tools/gen.py hooks the processor to
-// tell us where it is (rt_other_request_holder). The places come from the game's level files (warp_other_places).
+// when an event ends (its processor, OTHER(WARP_REQUEST_PROC), runs then). The request has LA's layout at another
+// offset: level at R+0x218 (length +0x258), locator at +0x260 (length +0x2a0), offset +0x2b0; runtime/gen/patches.cpp
+// hooks the processor to tell us where it is (rt_other_request_holder). The places come from the game's level files (warp_other_places).
+#include <math.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -16,10 +17,12 @@
 #include <string.h>
 
 #include "../hle.h"
+#include "../game_addresses.h"
 
 static volatile uint64_t g_loads;   // level files read (warp_other_file_read)
 static volatile uint64_t g_proc_runs;  // the request processor's runs (one per level change)
 static char g_loaded[64];           // the last level read
+static char g_current[64];          // the level the last level jump went to (the request at its processor's run)
 static volatile uint64_t g_req;     // the current level's request object
 static volatile uint64_t g_holder;  // the request processor's object (the request at +0x10)
 static volatile uint64_t g_owner, g_ctx;  // (its owner - the job queue - and context, at the last run)
@@ -32,12 +35,13 @@ void rt_other_request_obj(uint64_t r) {
     g_req = r;
 }
 
-// Generated code (tools/gen.py): the request processor is running with its object P; the request is at P+0x10.
+// Generated code (runtime/gen/patches.cpp eow_request): the request processor is running with its object P; the request is at P+0x10.
 void rt_other_request_holder(uint64_t p) {
     uint64_t r = *(const uint64_t *)(uintptr_t)(p + 0x10);
     g_proc_runs++;
     static uint64_t calls;
-    if (getenv("LARECOMP_LOG_WARP") && !(++calls & (calls - 1)))
+    calls++;
+    if (getenv("LARECOMP_LOG_WARP") && !(calls & (calls - 1)))
         LOG("[warp] processor run #%llu (holder %llx, request %llx, destination length %llu)\n", (unsigned long long)calls,
             (unsigned long long)p, (unsigned long long)r, r ? (unsigned long long)*(const uint64_t *)(uintptr_t)(r + 0x2a0) : 0ull);
     if (getenv("LARECOMP_LOG_WARP")) {
@@ -47,6 +51,13 @@ void rt_other_request_holder(uint64_t p) {
             (unsigned long long)*(const uint64_t *)(uintptr_t)(p + 0x18), (unsigned long long)*(const uint64_t *)(uintptr_t)(p + 0x20),
             (unsigned long long)*(const uint64_t *)(uintptr_t)(p + 0x28), (unsigned long long)*(const uint64_t *)(uintptr_t)(o + 0x200),
             (unsigned long long)*(const uint64_t *)(uintptr_t)(o + 0x218), (unsigned long long)*(const uint64_t *)(uintptr_t)(o + 0x220));
+    }
+    // (the request's level is where this jump goes - also back to a level still loaded, which no file read shows:
+    // the overworld after a cave)
+    if (r >= GUEST_LO && r < GUEST_HI) {
+        uint64_t ll = *(const uint64_t *)(uintptr_t)(r + 0x258);
+        const char *lv = (const char *)(uintptr_t)(r + 0x218);
+        if (ll > 0 && ll < 0x40 && strnlen(lv, 0x40) == ll) memcpy(g_current, lv, ll + 1);
     }
     if (r >= GUEST_LO && r < GUEST_HI) { g_holder = p; g_owner = *(const uint64_t *)(uintptr_t)(p + 8); g_ctx = *(const uint64_t *)(uintptr_t)(p + 0x20); rt_other_request_obj(r); }
 }
@@ -61,6 +72,170 @@ void warp_other_request(const char *level, const char *locator) {
 
 static void tour_frame(uint64_t frame);
 
+// (debug) LARECOMP_TRIGGER_DIR=<dir>: while a copy runs, files dropped in that folder act once, then are deleted.
+// "flags": "<save main.bin path> <section start hex> <byte.bit ...>" clears those bits of a save's flag bitfield in the
+// game's own copy (found in guest memory by the save section's first 64 bytes), so a fight already won comes back at
+// the next room entry. "capture": "<every N frames> <for M frames>" saves the window then to build/cap/frame_<n>.png.
+static char *trigger_take(const char *name) {
+    const char *d = getenv("LARECOMP_TRIGGER_DIR");
+    if (!d) return NULL;
+    char path[1024];
+    snprintf(path, sizeof path, "%s/%s", d, name);
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    char *b = calloc(1, 65536);
+    if (b) fread(b, 1, 65535, f);
+    fclose(f);
+    unlink(path);
+    return b;
+}
+static void trigger_flags(void) {
+    static int n;
+    if (++n % 30) return;  // (twice a second)
+    char *t = trigger_take("flags");
+    if (!t) return;
+    char save[512];
+    unsigned sec = 0;
+    int used = 0;
+    if (sscanf(t, "%511s %x%n", save, &sec, &used) == 2) {
+        FILE *f = fopen(save, "rb");
+        uint8_t key[64];
+        if (f && fseek(f, sec + 16, SEEK_SET) == 0 && fread(key, 1, 64, f) == 64) {
+            extern uint64_t kernel_heap_size(void);
+            uint8_t *h = (uint8_t *)(uintptr_t)HEAP_BASE, *end = h + kernel_heap_size() - 0x2000;
+            int hits = 0;
+            for (uint8_t *q = h; q < end; q += 4) {
+                if (memcmp(q, key, 64)) continue;
+                hits++;
+                const char *p = t + used;
+                unsigned off, bit;
+                int k, nb = 0;
+                while (sscanf(p, " %x.%u%n", &off, &bit, &k) == 2) { q[off] &= (uint8_t)~(1u << bit); p += k; nb++; }
+                LOG("[trigger] flags: cleared %d bits at %llx\n", nb, (unsigned long long)(uintptr_t)q);
+            }
+            LOG("[trigger] flags: %d copies of %s's flags found\n", hits, save);
+        } else LOG("[trigger] flags: can't read %s\n", save);
+        if (f) fclose(f);
+    }
+    free(t);
+}
+// "teleport": "<x> <y> <z> <r> <x2> <y2> <z2>" (or LARECOMP_TELEPORT_AT=<frame>:<same 7 numbers>): every float triple in
+// guest memory within r of x,y,z (Zelda's position and its copies, right after a warp to a spawn point) is moved by
+// (x2,y2,z2)-(x,y,z) - a place with no spawn point of its own. Ugly, debug only.
+static void teleport(const float *v) {
+    extern uint64_t kernel_heap_size(void);
+    uint8_t *h = (uint8_t *)(uintptr_t)HEAP_BASE, *end = h + kernel_heap_size() - 16;
+    int hits = 0;
+    float d[3] = {v[4] - v[0], v[5] - v[1], v[6] - v[2]}, r = v[3];
+    for (uint8_t *q = h; q < end; q += 4) {
+        float *f = (float *)q;
+        if (!(fabsf(f[1] - v[1]) <= 1.0f && fabsf(f[0] - v[0]) <= r && fabsf(f[2] - v[2]) <= r)) continue;
+        if (f[0] == 0 || f[2] == 0) continue;
+        for (int i = 0; i < 3; i++) f[i] += d[i];
+        hits++;
+        q += 8;
+    }
+    LOG("[trigger] teleport: %d triples moved by %.1f %.1f %.1f\n", hits, d[0], d[1], d[2]);
+}
+static void trigger_teleport(void) {
+    static long at = -1;
+    static float tv[7];
+    if (at < 0) {
+        const char *e = getenv("LARECOMP_TELEPORT_AT");
+        at = 0;
+        if (e && sscanf(e, "%ld:%f:%f:%f:%f:%f:%f:%f", &at, &tv[0], &tv[1], &tv[2], &tv[3], &tv[4], &tv[5], &tv[6]) != 8) at = 0;
+    }
+    extern uint64_t renderer_present_count(void);
+    if (at && (long)renderer_present_count() >= at) { at = 0; teleport(tv); }
+    static int n;
+    if (++n % 30) return;
+    char *t = trigger_take("teleport");
+    if (!t) return;
+    float v[7];
+    if (sscanf(t, "%f %f %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6]) == 7) teleport(v);
+    free(t);
+}
+// "hpsnap": "<x> <y> <z> <r>": keep a copy of 16 KB around every float triple near x,y,z (an actor's position and
+// its copies); "hpdiff": log the 32-bit words there that went down by 1-255 since (its health, after a hit);
+// "poke": "<hex address> <i32|f32|u16|u8> <value>". Ugly, debug only.
+typedef struct { uint8_t *at; uint8_t old[0x4000]; } HpWin;
+static HpWin *g_hpw;
+static int g_nhpw;
+static void trigger_hp(void) {
+    static int n;
+    if (++n % 30) return;
+    char *t = trigger_take("hpsnap");
+    if (t) {
+        float v[4];
+        if (sscanf(t, "%f %f %f %f", &v[0], &v[1], &v[2], &v[3]) == 4) {
+            extern uint64_t kernel_heap_size(void);
+            uint8_t *h = (uint8_t *)(uintptr_t)HEAP_BASE, *end = h + kernel_heap_size() - 0x2000;
+            free(g_hpw); g_hpw = NULL; g_nhpw = 0;
+            for (uint8_t *q = h + 0x2000; q < end && g_nhpw < 512; q += 4) {
+                float *f = (float *)q;
+                if (!(fabsf(f[0] - v[0]) <= v[3] && fabsf(f[1] - v[1]) <= 1.5f && fabsf(f[2] - v[2]) <= v[3])) continue;
+                uint8_t *w = (uint8_t *)((uintptr_t)(q - 0x2000) & ~(uintptr_t)0xf);
+                if (g_nhpw && w < g_hpw[g_nhpw - 1].at + 0x4000) continue;
+                g_hpw = realloc(g_hpw, sizeof *g_hpw * (size_t)(g_nhpw + 1));
+                g_hpw[g_nhpw].at = w;
+                memcpy(g_hpw[g_nhpw].old, w, 0x4000);
+                g_nhpw++;
+            }
+            LOG("[trigger] hpsnap: %d windows\n", g_nhpw);
+        }
+        free(t);
+    }
+    t = trigger_take("hpdiff");
+    if (t) {
+        int hits = 0;
+        for (int i = 0; i < g_nhpw; i++)
+            for (int o = 0; o < 0x4000; o += 4) {
+                int32_t a, b;
+                memcpy(&a, g_hpw[i].old + o, 4); memcpy(&b, g_hpw[i].at + o, 4);
+                float fa, fb;
+                memcpy(&fa, &a, 4); memcpy(&fb, &b, 4);
+                bool ints = a > 0 && a < 100000 && b >= 0 && a - b >= 1 && a - b <= 255;
+                bool flts = fa > 0 && fa < 100000 && fb >= 0 && fa - fb >= 0.25f && fa - fb <= 255 && fa == (int)fa && fb == (int)fb;
+                if ((ints || flts) && hits++ < 200)
+                    LOG("[trigger] hpdiff: %llx %s %d -> %d\n", (unsigned long long)(uintptr_t)(g_hpw[i].at + o), ints ? "i32" : "f32",
+                        ints ? a : (int)fa, ints ? b : (int)fb);
+            }
+        LOG("[trigger] hpdiff: %d candidates\n", hits);
+        free(t);
+    }
+    t = trigger_take("poke");
+    if (t) {
+        unsigned long long a;
+        char ty[8];
+        double val;
+        if (sscanf(t, "%llx %7s %lf", &a, ty, &val) == 3 && a >= HEAP_BASE) {
+            void *p = (void *)(uintptr_t)a;
+            if (!strcmp(ty, "i32")) { int32_t x = (int32_t)val; memcpy(p, &x, 4); }
+            else if (!strcmp(ty, "f32")) { float x = (float)val; memcpy(p, &x, 4); }
+            else if (!strcmp(ty, "u16")) { uint16_t x = (uint16_t)val; memcpy(p, &x, 2); }
+            else if (!strcmp(ty, "u8")) { uint8_t x = (uint8_t)val; memcpy(p, &x, 1); }
+            LOG("[trigger] poke %llx %s %g\n", a, ty, val);
+        }
+        free(t);
+    }
+}
+static void trigger_capture(uint64_t frame) {
+    static long every, until;
+    if (!(frame % 30)) {
+        char *t = trigger_take("capture");
+        if (t) {
+            long m = 0;
+            if (sscanf(t, "%ld %ld", &every, &m) == 2 && every > 0) { until = (long)frame + m; mkdir("build", 0755); mkdir("build/cap", 0755); }
+            LOG("[trigger] capture every %ld frames until %ld\n", every, until);
+            free(t);
+        }
+    }
+    if ((long)frame < until && !(frame % every)) {
+        extern char g_window_shot_request[256];
+        snprintf(g_window_shot_request, sizeof g_window_shot_request, "build/cap/frame_%06llu.png", (unsigned long long)frame);
+    }
+}
+
 // Render thread, once a frame: the test hooks queue warps (handed to the game by warp_other_game_tick).
 void warp_other_frame(uint64_t frame) {
     static long test_at = -1;  // (test) LARECOMP_WARP_AT=<frame>:<level>:<locator>
@@ -71,11 +246,13 @@ void warp_other_frame(uint64_t frame) {
         if (e && sscanf(e, "%ld:%63[^:]:%63s", &test_at, tl, tc) != 3) test_at = 0;
     }
     tour_frame(frame);
+    trigger_capture(frame);
     if (test_at && (long)frame == test_at) { warp_other_request(tl, tc); LOG("[warp] test warp queued at frame %llu (request %llx)\n", (unsigned long long)frame, (unsigned long long)g_req); }
 }
 
 // Game main thread, once per frame (input.c, the controller read): a queued warp is written into the request and
-// the game's request processor (main+0x160f7e0, its object: the request at +0x10) is run on it, as LA's warp does.
+// the game's request processor (OTHER(WARP_REQUEST_PROC), its object: the request at +0x10) is run on it, as LA's warp
+// does.
 // The request the processor ran with at the last load is that load's own (consumed); the level since registered a
 // new one of the same class. Found by its vtable: an object with the old request's, empty, at another address.
 static uint64_t find_current_request(uint64_t old) {
@@ -111,7 +288,8 @@ static int request_shaped(uint64_t r) {
 }
 static void scan_globals(void) {
     int hits = 0;
-    for (uint64_t g = 0x7003d00000ull; g < 0x7004400000ull && hits < 40; g += 8) {
+    // (main's data: from around the request processor's vtable up to the sdk)
+    for (uint64_t g = OTHER(WARP_REQUEST_PROC_VTABLE) & ~0xfffffull; g < game_sdk_base() && hits < 40; g += 8) {
         uint64_t v = ld(g);
         if (!in_heap(v, 0x80)) continue;
         uint64_t ss[2] = {v, in_heap(v, 0x30) ? ld(v + 0x28) : 0};
@@ -132,15 +310,16 @@ static void scan_globals(void) {
 }
 
 // Start the game's own fast-travel event (event/MapWarp.bfevfl, entry LevelWarpStartMenu) with our level and locator
-// as its parameters - the sequence main+0x256f0c0 (the map screen's warp) runs: load the flow file through the resource
-// manager ([main+0x40311d0]), the entry, the event's flags, a two-entry parameter list, then hand the event to the
-// event system (main+0x160c640 with [main+0x401a250]). The event's RequestLevelJump does the rest.
+// as its parameters - the sequence the map screen's warp runs (1.0.2: main+0x256f0c0): load the flow file through the
+// resource manager ([WARP_RES_MGR]), the entry, the event's flags, a two-entry parameter list, then hand the event to
+// the event system (WARP_EVENT_START with [WARP_EVENT_SYS]). The event's RequestLevelJump does the rest. The addresses
+// are the build's own (OTHER: game_addresses/eow_<version>.h).
 static void call(Cpu *c, uint64_t fn, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3) {
     c->x[0] = a0, c->x[1] = a1, c->x[2] = a2, c->x[3] = a3;
     guest_call(c, fn);
 }
 // Drop one strong reference through a shared-pointer control block, as the game's code does: the use count at +8;
-// at zero its vtable's +0x10 (dispose) and then main+0x27deed0 (the weak release).
+// at zero its vtable's +0x10 (dispose) and then SPTR_WEAK_RELEASE.
 static void sptr_release(Cpu *c, uint64_t ctrl) {
     if (!ctrl) return;
     uint64_t old = __atomic_fetch_sub((uint64_t *)(uintptr_t)(ctrl + 8), 1, __ATOMIC_ACQ_REL);
@@ -149,7 +328,7 @@ static void sptr_release(Cpu *c, uint64_t ctrl) {
     c->x[0] = ctrl;
     guest_call(c, *(uint64_t *)(uintptr_t)(vt + 0x10));
     c->x[0] = ctrl;
-    guest_call(c, 0x70027deed0ull);
+    guest_call(c, OTHER(SPTR_WEAK_RELEASE));
 }
 
 static bool g_kept_flow;
@@ -182,11 +361,11 @@ static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
     uint64_t saved[31], sp = c->sp, pc = c->pc;
     memcpy(saved, c->x, sizeof saved);
     bool ok = false;
-    call(c, 0x70026e7560ull, m + 0x140, *(uint64_t *)(uintptr_t)0x70040311d0ull, m + 0x100, 0);  // the flow file
+    call(c, OTHER(WARP_RES_LOAD), m + 0x140, *(uint64_t *)(uintptr_t)OTHER(WARP_RES_MGR), m + 0x100, 0);  // the flow file
     uint64_t res = q[0x140 / 8];
     static int nlog;
     if (res || nlog++ % 60 == 0) {
-        uint64_t mgr = *(uint64_t *)(uintptr_t)0x70040311d0ull;
+        uint64_t mgr = *(uint64_t *)(uintptr_t)OTHER(WARP_RES_MGR);
         LOG("[warp] event file %s: %llx (manager %llx, its +0x110 %llx / %llx)\n", path, (unsigned long long)res, (unsigned long long)mgr,
             mgr ? (unsigned long long)*(uint64_t *)(uintptr_t)(mgr + 0x110) : 0ull, mgr ? (unsigned long long)*(uint64_t *)(uintptr_t)(mgr + 0x118) : 0ull);
     }
@@ -200,23 +379,23 @@ static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
     }
     if (res || (q[0x150 / 8] && !alt)) {
         if (res) {
-            call(c, 0x700038eba0ull, res, 0, 0, 0);
-            call(c, 0x70006692e0ull, m + 0x150, m + 0x140, 0, 0);       // the flow
+            call(c, OTHER(WARP_RES_READY), res, 0, 0, 0);
+            call(c, OTHER(WARP_FLOW_OF_RES), m + 0x150, m + 0x140, 0, 0);       // the flow
             if (!alt && !kept_flow[0]) kept_flow[0] = q[0x150 / 8], kept_flow[1] = q[0x158 / 8], g_kept_flow = true;
         }
-        call(c, 0x700159f940ull, m + 0x160, m + 0x150, m + 0x110, 0);  // its entry: the event
+        call(c, OTHER(WARP_FLOW_ENTRY), m + 0x160, m + 0x150, m + 0x110, 0);  // its entry: the event
         uint64_t ev = q[0x160 / 8];
         LOG("[warp] flow %llx event %llx\n", (unsigned long long)q[0x150 / 8], (unsigned long long)ev);
         if (ev) {
-            call(c, 0x70015aa740ull, ev, 1, 0, 0);
-            call(c, 0x70015ad340ull, ev, 0, 0, 0);
+            call(c, OTHER(WARP_EVENT_FLAG_A), ev, 1, 0, 0);
+            call(c, OTHER(WARP_EVENT_FLAG_B), ev, 0, 0, 0);
             *(uint64_t *)(uintptr_t)(ev + 0x2f0) = 0xffffffffffffbffeull;
             *(uint32_t *)(uintptr_t)(ev + 0x2f8) = 0x40;
-            call(c, 0x70027adab0ull, m + 0x170, 2, 0, 0);  // the parameters
+            call(c, OTHER(WARP_PARAMS_NEW), m + 0x170, 2, 0, 0);  // the parameters
             uint64_t prm = q[0x170 / 8];
-            call(c, 0x70027ae400ull, prm, 0x70032e917eull, 5, m + 0x120);  // "level"
-            call(c, 0x70027ae400ull, prm, 0x70032d5c42ull, 7, m + 0x130);  // "locator"
-            call(c, 0x700160c640ull, m + 0x180, *(uint64_t *)(uintptr_t)0x700401a250ull, m + 0x160, m + 0x170);
+            call(c, OTHER(WARP_PARAMS_SET), prm, OTHER(WARP_STR_LEVEL), 5, m + 0x120);  // "level"
+            call(c, OTHER(WARP_PARAMS_SET), prm, OTHER(WARP_STR_LOCATOR), 7, m + 0x130);  // "locator"
+            call(c, OTHER(WARP_EVENT_START), m + 0x180, *(uint64_t *)(uintptr_t)OTHER(WARP_EVENT_SYS), m + 0x160, m + 0x170);
             LOG("[warp] map-warp event started (%llx)\n", (unsigned long long)q[0x180 / 8]);
             ok = true;
         }
@@ -231,6 +410,9 @@ static bool start_map_warp(Cpu *c, const char *level, const char *locator) {
 }
 
 void warp_other_game_tick(Cpu *c) {
+    trigger_flags();
+    trigger_teleport();
+    trigger_hp();
     if (g_pending && !getenv("LARECOMP_WARP_REQUEST_ONLY")) {  // the game's own fast-travel event
         pthread_mutex_lock(&g_lock);
         char lv[64], lc[64];
@@ -312,7 +494,7 @@ void warp_other_game_tick(Cpu *c) {
         memset((void *)(uintptr_t)R2, 0, 0x400);
         memcpy((void *)(uintptr_t)(R2 + 0x200), (void *)(uintptr_t)(r + 0x200), 0xc0);
         memset((void *)(uintptr_t)P, 0, 0x200);
-        *(uint64_t *)(uintptr_t)P = 0x7003dc6f98ull;
+        *(uint64_t *)(uintptr_t)P = OTHER(WARP_REQUEST_PROC_VTABLE);
         *(uint64_t *)(uintptr_t)(P + 8) = O;
         *(uint64_t *)(uintptr_t)(P + 0x10) = R2;
         *(uint64_t *)(uintptr_t)(P + 0x20) = g_ctx;
@@ -321,7 +503,7 @@ void warp_other_game_tick(Cpu *c) {
         c->x[0] = P;
         LOG("[warp] calling the request processor on job %llx (owner %llx, context %llx)\n", (unsigned long long)P,
             (unsigned long long)O, (unsigned long long)g_ctx);
-        guest_call(c, 0x700160f7e0ull);
+        guest_call(c, OTHER(WARP_REQUEST_PROC));
         memcpy(c->x, saved, sizeof saved);
         c->sp = sp, c->pc = pc;
         LOG("[warp] processor returned; owner queue index %llu count %llu\n", (unsigned long long)*(uint64_t *)(uintptr_t)(O + 0x218),
@@ -431,7 +613,10 @@ const char *warp_other_place_level(int i) { return i >= 0 && i < g_nplaces ? g_p
 const char *warp_other_place_locator(int i) { return i >= 0 && i < g_nplaces ? g_places[i].locator : ""; }
 
 // ---- level loads (fs.c: the first read of each romfs file)
-const char *warp_other_current_level(void) { return g_loaded; }
+// in play: a level registered its jump request (none on the title and the file select; --load-save, load_save.c)
+int warp_other_in_play(void) { return g_req != 0; }
+// The current level: where the last level jump went, else the last level file read
+const char *warp_other_current_level(void) { return g_current[0] ? g_current : g_loaded; }
 void warp_other_file_read(const char *path) {
     const char *p = strstr(path, "region_common/level/");
     if (!p) return;

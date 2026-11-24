@@ -3,64 +3,24 @@
 // The hookshot actor (ctor main+0xd7e780; states Attach / Shot / Return / Adhere / WaitToReturn) casts a ray each
 // frame of its Shot state (update main+0xd7ecc0). On a hit it reads the hit surface's attribute word (w23); bit
 // 0x4000 = hookshot target: the hook goes to Adhere ("HookshotPierce" effect) and Link's own state pulls him to it.
-// Without the bit it goes to Return ("HookshotHit" clink). tools/patches.py redirects that load here.
+// Without the bit it goes to Return ("HookshotHit" clink). runtime/gen/patches.cpp redirects that load here.
 //
-// On when the active seed was made with "hookshot-anything" (its logic counts on it), or with the Gameplay toggle.
+// On with the Gameplay toggle.
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "../hle.h"
-#include "../rando.h"
 #include "../settings.h"
+#include "hookshot_snap.h"
 
 #define HOOK_TARGET 0x4000u
-
-// a seed folder's settings.json says "hookshot-anything": true
-static int dir_has_it(const char *dir) {
-    char p[512];
-    snprintf(p, sizeof p, "%s/settings.json", dir);
-    FILE *f = fopen(p, "rb");
-    if (!f) return 0;
-    static char buf[1 << 16];
-    size_t n = fread(buf, 1, sizeof buf - 1, f);
-    buf[n] = 0;
-    fclose(f);
-    return strstr(buf, "\"hookshot-anything\": true") != NULL;
-}
-
-static int g_seed_on = -1;  // (per seed: read again after an in-place reboot)
-static int seed_on(void) {
-    if (g_seed_on < 0) {
-        const char *dir = rando_seed_dir();
-        g_seed_on = dir ? dir_has_it(dir) : 0;
-        LOG("[hookshot] hookshot anything %s by the seed\n", g_seed_on ? "ON" : "off");
-    }
-    return g_seed_on;
-}
-
-// The seed forces it on (the Gameplay toggle is greyed out then). On the start screen: the seed PLAY would start
-// (g_settings.rando_seed, kept up to date there), read from its folder - rando_seed_dir() would apply its patches
-// before the game is loaded.
-extern int g_start_screen;  // warp.c
-int rt_hookshot_seed_forced(void) {
-    if (!g_start_screen) return seed_on();
-    static char last[128] = "\x01";
-    static int on;
-    if (strcmp(last, g_settings.rando_seed)) {
-        snprintf(last, sizeof last, "%s", g_settings.rando_seed);
-        char dir[256];
-        snprintf(dir, sizeof dir, "rando/%s", g_settings.rando_seed);
-        on = g_settings.rando_seed[0] && dir_has_it(dir);
-    }
-    return on;
-}
 
 int rt_hookshot_anything(void) {
     const char *e = ENV("LARECOMP_HOOKSHOT_ANY");  // test: 1 / 0 forces it
     if (e) return atoi(e) != 0;
-    return g_settings.cheat_hookshot || seed_on();
+    return g_settings.cheat_hookshot;
 }
 
 // x0..: the Shot update's frame; attr = the hit surface's attribute word (sp+0x38)
@@ -71,6 +31,29 @@ uint32_t rt_hookshot_attr(Cpu *c, uint32_t attr) {
     }
     if (rt_hookshot_anything()) attr |= HOOK_TARGET;
     return attr;
+}
+
+// x19: Link's hookshot action, about to store its firing direction (q0 = x, y, z, flat). With 360-degree movement Link
+// can face a few degrees off a straight line, which sends the hook past the target he is lined up with (#647).
+void rt_hookshot_dir(Cpu *c) {
+    const char *e = ENV("LARECOMP_HOOKSHOT_8WAY");  // test: 1 / 0 forces it
+    if (!(e ? atoi(e) != 0 : g_settings.hookshot_8way)) return;
+    float d[3];
+    memcpy(d, &c->v[0], sizeof d);
+    float x = d[0], z = d[2];
+    hookshot_snap_8way(&d[0], &d[2]);
+    memcpy(&c->v[0], d, sizeof d);
+    // Link turns to match: his rotation is a pure yaw (x y z w) held twice in his transform component, read and written
+    // like his position (+0x80 / +0xb0). Only then: anything else is not the on-foot pose this assumes.
+    uint64_t player = LD64(c->x[19] + 0x210), pc = player ? LD64(player + 0x80) : 0;
+    if (pc) {
+        float *r0 = (float *)(uintptr_t)(pc + 0x90), *r1 = (float *)(uintptr_t)(pc + 0xc0);
+        if (fabsf(r1[0]) < 1e-3f && fabsf(r1[2]) < 1e-3f) {
+            hookshot_yaw_quat(d[0], d[2], &r1[1], &r1[3]);
+            r0[1] = r1[1], r0[3] = r1[3];
+        }
+    }
+    if (ENV("LARECOMP_HOOKSHOT_LOG")) LOG("[hookshot] dir (%.3f, %.3f) -> (%.3f, %.3f)\n", x, z, d[0], d[2]);
 }
 
 // ---- test hook: LARECOMP_HOOKSHOT_TOUR=<step>;<step>...  step = <Level>:<Locator>:<x>:<z>:<script>
@@ -95,7 +78,7 @@ void hookshot_tour_tick(uint64_t frame) {
     extern int game_in_play(void);
     extern void warp_request(const char *, const char *);
     extern int warp_busy(void);
-    extern uint64_t doorjump_player(uint64_t);
+    extern uint64_t player_find(uint64_t);  // player.c
     if (!game_in_play() || frame < 2700) return;
     char lv[64], loc[64], script[512] = "";
     float x, z;
@@ -104,7 +87,7 @@ void hookshot_tour_tick(uint64_t frame) {
     if (phase == 1) { if (!warp_busy()) { phase = 2; t0 = frame; } return; }
     if (phase == 2) {
         if (frame < t0 + 150) return;
-        uint64_t pc = doorjump_player(frame);
+        uint64_t pc = player_find(frame);
         if (!pc) return;
         float *pos = (float *)(uintptr_t)(pc + 0x80), *pos2 = (float *)(uintptr_t)(pc + 0xb0);
         pos[0] = pos2[0] = x;
@@ -115,7 +98,7 @@ void hookshot_tour_tick(uint64_t frame) {
         return;
     }
     long t = (long)(frame - t0);
-    uint64_t pc = doorjump_player(frame);
+    uint64_t pc = player_find(frame);
     static int tries;
     if (pc && t == 20) {  // the level's arrival (walk-in / fade) can put Link back at the start: place again
         const float *p = (const float *)(uintptr_t)(pc + 0x80);
@@ -149,4 +132,3 @@ void hookshot_tour_tick(uint64_t frame) {
     }
 }
 
-RT_ON_RESET(hookshot_reset) { g_seed_on = -1; }  // (seed switch)

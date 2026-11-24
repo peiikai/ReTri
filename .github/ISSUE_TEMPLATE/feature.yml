@@ -1,0 +1,11 @@
+name: Feature request
+description: An idea or improvement
+labels: ["enhancement", "status: needs triage"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What you'd like and why
+    validations:
+      required: true

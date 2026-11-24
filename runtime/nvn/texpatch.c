@@ -16,6 +16,11 @@
 // Plus / Minus = Menu / View, Options / Create. A button remapped on a Nintendo-style pad gets Nintendo letters; one
 // moved to a stick click / the d-pad gets LS / RS (L3 / R3) or an arrow. Stick glyphs stay. (The keyboard has no
 // glyphs of its own: keyboard bindings don't change the prompts.)
+//
+// Echoes of Wisdom (game_other): its prompt glyphs are ButtonA_00^w .. ButtonZR_00^w, ButtonPlus_00^w and
+// ButtonMinus_00^w (48x48 ASTC 4x4, GameMain.arc / Keep.arc: the HUD's item buttons and the menus' prompts), and
+// the button glyphs of Pictogram.bffnt (message text: one BC7 texture of 4 layers, the cells found through its own
+// CMAP, eow_sheet). The rest of this file (LA's tunic, hearts, bottle, Hero Mode icon) stays LA's.
 #include "../game_addresses.h"
 #include "texpatch.h"
 
@@ -28,9 +33,10 @@
 #include "../hle.h"
 #include "../input_bind.h"
 #include "../paths.h"
-#include "../rando.h"
+#include "../platform.h"
 #include "../settings.h"
 #include "astc.h"
+#include "bc.h"
 #include "recolour.h"
 #include "skin_face.h"
 #include "tegra.h"
@@ -39,10 +45,9 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../../third_party/imgui/imstb_truetype.h"
 
-enum { K_BC5, K_BC3, K_ASTC4, K_RGBA8, K_BC1 };
-enum { R_A = 1, R_B, R_X, R_Y, R_L, R_R, R_ZL, R_ZR, R_PLUS, R_MINUS, R_HERO, R_SHEET, R_BOTTLE, R_BOTTLE_MODEL, R_FAIRY_MODEL,
-       R_ITEM_CURSOR, R_TUNIC, R_TUNIC_RED, R_TUNIC_BLUE, R_HEART, R_POWDER_MODEL, R_DGN_MAP, R_MAP_MODEL, R_POWER_PIECE_MODEL,
-       R_SKIN };
+enum { K_BC5, K_BC3, K_ASTC4, K_RGBA8, K_BC1, K_BC7, K_OTHER /* identified only */ };
+enum { R_A = 1, R_B, R_X, R_Y, R_L, R_R, R_ZL, R_ZR, R_PLUS, R_MINUS, R_HERO, R_SHEET, R_TUNIC, R_TUNIC_RED, R_TUNIC_BLUE,
+       R_HEART, R_SKIN, R_TITLE_LOGO, R_FILE_FRAME };
 enum { STYLE_NINTENDO, STYLE_XBOX, STYLE_PS };
 // labels: R_A..R_MINUS = the button that role is on by default; or these
 enum { L_LS = 32, L_RS, L_DUP, L_DDOWN, L_DLEFT, L_DRIGHT, L_OTHER };
@@ -85,6 +90,15 @@ static uint64_t rd64(const uint8_t *p) { return rd32(p) | (uint64_t)rd32(p + 4) 
 static bool g_scanning_link;  // (Playerlink.bfres: its face maps are Link's skin)
 
 static int role_of(const char *name) {
+    if (game_other()) {  // (EoW: only its button glyphs)
+        static const struct { const char *prefix; int role; } e[] = {
+            {"ButtonA_", R_A}, {"ButtonB_", R_B}, {"ButtonX_", R_X}, {"ButtonY_", R_Y}, {"ButtonL_", R_L},
+            {"ButtonR_", R_R}, {"ButtonZL_", R_ZL}, {"ButtonZR_", R_ZR}, {"ButtonPlus_", R_PLUS}, {"ButtonMinus_", R_MINUS},
+        };
+        for (unsigned i = 0; i < sizeof e / sizeof *e; i++)
+            if (!strncmp(name, e[i].prefix, strlen(e[i].prefix))) return e[i].role;
+        return 0;
+    }
     // cosmetics: Link's skin (Cosmetics tab "Skin color"): his face's maps (eyes / mouth expressions, ears; the body
     // map's arms and hands are recoloured with the tunic map, tunic_apply)
     if (g_scanning_link && (!strncmp(name, "MI_eye_alb", 10) || !strncmp(name, "MI_mouth_alb", 12) ||
@@ -94,28 +108,15 @@ static int role_of(const char *name) {
         {"BtnA_", R_A}, {"BtnB_", R_B}, {"BtnX_", R_X}, {"BtnY_", R_Y}, {"BtnL_", R_L}, {"BtnR_", R_R},
         {"BtnZL_", R_ZL}, {"BtnZR_", R_ZR}, {"BtnPlus_", R_PLUS}, {"BtnMinus_", R_MINUS},
         {"Spicy_00^t", R_HERO},  // Ld_Spicy (StartUp.arc): the HUD's Hero Mode icon (the file select uses Spicy_00^f)
-        // the empty bottle's item icon and its 3D model's colour map (ItemBottle.bfres): identified only, never edited
-        // (the gold Escape Bottle's draws are tinted: runtime/hle/escape.c)
-        {"ItemBottle_00^w", R_BOTTLE}, {"MI_bottle_alb", R_BOTTLE_MODEL},
-        // the fairy's colour map (ItemFairy.bfres): boss / mini-boss souls are a fairy drawn evil red (runtime/hle/souls.c)
-        {"MI_fairy_alb", R_FAIRY_MODEL},
         // cosmetics: Link's tunics (recoloured on upload: green, and with a colour chosen the red / blue too, so the
         // Color Dungeon's tunics keep it - user 2026-10-11; the red map is also the recolour's mask)
         // and the hearts of Cm_HeartGauge (HUD, file select): Hp_00 = an empty heart (its own draw); each quarter of
         // a full one is one draw of Hp_01 (fill) + Hp_02 (frame, coloured by the layout's material) through the
         // Hp_04 mask; HeartUp = the life-up flash. Their draws are tinted.
         {"MI_body_alb.0", R_TUNIC}, {"MI_body_alb.1", R_TUNIC_RED}, {"MI_body_alb.2", R_TUNIC_BLUE},
-        // the Magic Powder sack's colour map (ItemMagicPowder.bfres; after the tunic's: same name prefix): held up as
-        // the Bomb Bag, tinted bomb blue then (runtime/hle/escape.c bomb_bag_tint)
-        {"MI_body_alb", R_POWDER_MODEL},
-        // the Hint Sheet (runtime/hle/hint_sheet.c): the dungeon map's UI icon (drawn in place of the first bottle's,
-        // texpatch_hint_icon) and its 3D model's colour map (ItemDungeonMap.bfres: Tarin's hand-over, tinted)
-        {"DgnMap_00^q", R_DGN_MAP}, {"MI_dungeonMap_alb", R_MAP_MODEL},
-        // the Piece of Power's colour map (ItemPowerPiece.bfres): Triforce pieces are one drawn gold (runtime/hle/triforce.c)
-        {"MI_powerPiece_alb", R_POWER_PIECE_MODEL},
         {"Hp_00^w", R_HEART}, {"Hp_01^w", R_HEART}, {"Hp_02^w", R_HEART}, {"HeartUp^w", R_HEART},
-        // the Items page's cursor brackets: identified only (hidden while the companion card has the cursor, pets.c)
-        {"ItemCursor_", R_ITEM_CURSOR},
+        // the title's logo (Tl_Title) and the file select's frame (Cm_FileOperate): which of them is on screen
+        {"Logo_00^f", R_TITLE_LOGO}, {"Logo_01^f", R_TITLE_LOGO}, {"MainFrameLT_03^w", R_FILE_FRAME},
     };
     for (unsigned i = 0; i < sizeof m / sizeof *m; i++)
         if (!strncmp(name, m[i].prefix, strlen(m[i].prefix))) return m[i].role;
@@ -155,8 +156,9 @@ static void scan_bntx(const uint8_t *b, size_t len, bool sheet) {
         uint64_t data = rd64(b + ptrs);
         if (data + size > len) continue;
         int kind = (fmt >> 8) == 0x1e ? K_BC5 : (fmt >> 8) == 0x1c ? K_BC3 : (fmt >> 8) == 0x2d ? K_ASTC4 :
-                   (fmt >> 8) == 0x0b ? K_RGBA8 : (fmt >> 8) == 0x1a ? K_BC1 : -1;
-        if (kind < 0 || (sheet && kind != K_RGBA8)) continue;
+                   (fmt >> 8) == 0x0b ? K_RGBA8 : (fmt >> 8) == 0x1a ? K_BC1 : (fmt >> 8) == 0x20 ? K_BC7 : -1;
+        if (kind < 0 && (role == R_TITLE_LOGO || role == R_FILE_FRAME)) kind = K_OTHER;  // (the logo: 0x09, never decoded)
+        if (kind < 0 || (sheet && kind != K_RGBA8 && kind != K_BC7)) continue;
         add_ref(role, kind, (fmt & 0xff) == 6, w, h, levels, b + data, size, name, rd32(t + 36) & 7);
     }
 }
@@ -179,7 +181,72 @@ static void scan_sarc(const char *rel) {
     free(d);
 }
 
+// EoW's Pictogram.bffnt: its TGLP's cells (cw x ch, a 1-pixel gap after each; rows from the bottom of the stored
+// sheet, as LA's) and the button glyphs' places, by the CMAP: U+E0E0 A, E0E1 B, E0E2 X, E0E3 Y, E0E4 L, E0E5 R,
+// E0E6 ZL, E0E7 ZR, E0EF / E0F0 the circled + / - (E0F1 / E0F2, the bare + / -, have no label to redraw)
+static struct {
+    int cw, ch, cols, rows, n;
+    struct { uint8_t role, layer; uint16_t cell; } g[10];
+} g_eow_sheet;
+
+static void eow_sheet(const uint8_t *f, size_t len) {
+    static const struct { uint32_t code; uint8_t role; } want[] = {
+        {0xE0E0, R_A}, {0xE0E1, R_B}, {0xE0E2, R_X}, {0xE0E3, R_Y}, {0xE0E4, R_L}, {0xE0E5, R_R},
+        {0xE0E6, R_ZL}, {0xE0E7, R_ZR}, {0xE0EF, R_PLUS}, {0xE0F0, R_MINUS},
+    };
+    if (len < 0x14 || memcmp(f, "FFNT", 4)) return;
+    int per = 0, glyph[10];
+    for (int i = 0; i < 10; i++) glyph[i] = -1;
+    size_t o = rd16(f + 6);
+    for (int blk = rd16(f + 0x10); blk > 0 && o + 0x1c <= len; blk--) {
+        uint32_t sz = rd32(f + o + 4);
+        if (sz < 8 || o + sz > len) break;
+        if (!memcmp(f + o, "TGLP", 4)) {
+            g_eow_sheet.cw = f[o + 8], g_eow_sheet.ch = f[o + 9];
+            g_eow_sheet.cols = rd16(f + o + 20), g_eow_sheet.rows = rd16(f + o + 22);
+            per = g_eow_sheet.cols * g_eow_sheet.rows;
+        } else if (!memcmp(f + o, "CMAP", 4)) {
+            uint32_t lo = rd32(f + o + 8), hi = rd32(f + o + 12);
+            int method = rd16(f + o + 16);
+            for (int i = 0; i < 10; i++) {
+                uint32_t c = want[i].code;
+                if (method == 0 && c >= lo && c <= hi) glyph[i] = rd16(f + o + 0x18) + (int)(c - lo);
+                else if (method == 1 && c >= lo && c <= hi && o + 0x1a + 2 * (c - lo) <= o + sz) {
+                    uint16_t g = rd16(f + o + 0x18 + 2 * (c - lo));
+                    if (g != 0xffff) glyph[i] = g;
+                } else if (method == 2) {
+                    uint32_t n = rd32(f + o + 0x18);
+                    for (uint32_t k = 0; k < n && o + 0x24 + 8 * k <= o + sz; k++)
+                        if (rd32(f + o + 0x1c + 8 * k) == c) glyph[i] = rd16(f + o + 0x20 + 8 * k);
+                }
+            }
+        }
+        o += sz;
+    }
+    if (!per) return;
+    for (int i = 0; i < 10; i++)
+        if (glyph[i] >= 0)
+            g_eow_sheet.g[g_eow_sheet.n++] = (typeof(g_eow_sheet.g[0])){want[i].role, (uint8_t)(glyph[i] / per),
+                                                                          (uint16_t)(glyph[i] % per)};
+    LOG("[texpatch] Pictogram.bffnt: %d button glyphs (cells %dx%d, %d x %d a layer)\n", g_eow_sheet.n, g_eow_sheet.cw,
+        g_eow_sheet.ch, g_eow_sheet.cols, g_eow_sheet.rows);
+}
+
 static void load_refs(void) {
+    if (game_other()) {  // Echoes of Wisdom: its button glyphs only
+        scan_sarc("region_common/ui/GameMain.arc");
+        scan_sarc("region_common/ui/Keep.arc");
+        size_t len;
+        uint8_t *f = read_all("region_common/ui/Pictogram.bffnt", &len);
+        if (f) {
+            eow_sheet(f, len);
+            for (size_t i = 0; g_eow_sheet.n && i + 8 < len; i += 4)
+                if (!memcmp(f + i, "BNTX\0\0\0\0", 8)) { scan_bntx(f + i, len - i, true); break; }
+            free(f);
+        }
+        LOG("[texpatch] %d known textures (button glyphs, pictogram sheet)\n", g_nrefs);
+        return;
+    }
     scan_sarc("region_common/ui/Game.arc");
     scan_sarc("region_common/ui/StartUp.arc");
     scan_sarc("regionUS/common/ui/GameRegionCommon.arc");
@@ -204,14 +271,8 @@ static void load_refs(void) {
             if (!memcmp(f + i, "BNTX\0\0\0\0", 8)) { scan_bntx(f + i, len - i, true); break; }
         free(f);
     }
-    LOG("[texpatch] %d known textures (button glyphs, pictogram sheet, Hero Mode icon, bottle icon / model, tunic, hearts)\n",
+    LOG("[texpatch] %d known textures (button glyphs, pictogram sheet, Hero Mode icon, tunic, hearts)\n",
         g_nrefs);
-}
-
-int texpatch_bottle_kind(int id) {
-    if (id < 0 || id >= g_nrefs) return 0;
-    return g_refs[id].role == R_BOTTLE ? 1 : g_refs[id].role == R_BOTTLE_MODEL ? 2 : g_refs[id].role == R_FAIRY_MODEL ? 3
-         : g_refs[id].role == R_POWDER_MODEL ? 4 : g_refs[id].role == R_MAP_MODEL ? 5 : g_refs[id].role == R_POWER_PIECE_MODEL ? 6 : 0;
 }
 
 int texpatch_heart_kind(int id) {
@@ -224,53 +285,153 @@ static int ref_of(int role) {
     return -1;
 }
 
-// A seed made with a tunic colour (older seeds: tools/rando/cosmetics.py) ships its own recoloured Playerlink.bfres:
-// its tunic map is recognised too, so the Cosmetics tab's colour wins over it. Read again when the seed changes
-// (seeds switch in place).
-static uint8_t *g_seed_tunic;
-static uint32_t g_seed_tunic_size;
-static char g_seed_tunic_dir[300] = "\1";
-static const uint8_t *seed_tunic(uint32_t *size) {
-    const char *dir = rando_seed_dir();
-    if (strcmp(dir ? dir : "", g_seed_tunic_dir)) {
-        strlcpy(g_seed_tunic_dir, dir ? dir : "", sizeof g_seed_tunic_dir);
-        free(g_seed_tunic);
-        g_seed_tunic = NULL;
-        char p[600];
-        size_t len;
-        uint8_t *f = NULL;
-        if (dir) snprintf(p, sizeof p, "%s/romfs/region_common/actor/Playerlink.bfres", dir), f = read_file(p, &len);
-        int n0 = g_nrefs;
-        for (size_t i = 0; f && i + 8 < len; i += 4)  // (a copy only differing from the game's adds a ref: taken out)
-            if (!memcmp(f + i, "BNTX\0\0\0\0", 8)) { scan_bntx(f + i, len - i, false); break; }
-        free(f);
-        for (int i = n0; i < g_nrefs; i++) {
-            if (g_refs[i].role == R_TUNIC && !g_seed_tunic) { g_seed_tunic = g_refs[i].data; g_seed_tunic_size = g_refs[i].size; }
-            else free(g_refs[i].data);
-        }
-        g_nrefs = n0;
-        if (g_seed_tunic) LOG("[texpatch] seed tunic map (%s)\n", dir);
-    }
-    *size = g_seed_tunic_size;
-    return g_seed_tunic;
-}
-
 static TexLayout g_tunic_layout;  // (the game's tunic texture: its levels' places in the map's data)
 static bool g_tunic_layout_ok;
-bool texpatch_is_item_cursor(int id) { return id >= 0 && id < g_nrefs && g_refs[id].role == R_ITEM_CURSOR; }
+
+static _Atomic uint64_t g_screen_seen[2];  // when the title's logo / the file select's frame was last drawn
+// ------------------------------------------------------------------ Echoes of Wisdom: the echo and item icons
+// The echoes' and items' icons (IconCopyActor.arc, IconItem.arc), known by a hash of their data as stored, so the
+// touch controls can show what's on Y (texpatch_eow_y_icon). Ids from TEXPATCH_EOW_ICON_BASE (identified only).
+#define TEXPATCH_EOW_ICON_BASE 2048
+typedef struct {
+    uint16_t w, h;
+    uint32_t size;
+    uint64_t hash;
+    char name[48];
+} EowIcon;
+static EowIcon *g_icons;
+static int g_nicons;
+static pthread_once_t g_icons_once = PTHREAD_ONCE_INIT;
+static _Atomic uint64_t *g_icon_seen;  // (per icon: when a draw last sampled it, plat_now_ns)
+static float (*g_icon_at)[2];          // (and where: the pane's position, layout units; NAN when not known)
+
+static uint64_t fnv64(const uint8_t *p, size_t n) {
+    uint64_t h = 1469598103934665603ull;
+    for (size_t i = 0; i < n; i++) h = (h ^ p[i]) * 1099511628211ull;
+    return h;
+}
+
+static void load_icons(void) {
+    static const char *const arcs[] = {"region_common/ui/IconCopyActor.arc", "region_common/ui/IconItem.arc"};
+    int cap = 0;
+    for (int a = 0; a < 2; a++) {
+        size_t len;
+        uint8_t *d = read_all(arcs[a], &len);
+        if (!d) continue;
+        if (len > 0x20 && !memcmp(d, "SARC", 4)) {
+            uint32_t data_off = rd32(d + 0xC);
+            uint16_t n = rd16(d + 0x1A);
+            const uint8_t *ent = d + 0x20, *names = d + 0x20 + 16 * n + 8;
+            for (uint16_t i = 0; i < n && ent + 16 * (i + 1) <= d + len; i++) {
+                uint32_t attr = rd32(ent + 16 * i + 4), st = rd32(ent + 16 * i + 8), e = rd32(ent + 16 * i + 12);
+                const char *nm = (attr >> 24) ? (const char *)names + (attr & 0xffffff) * 4 : "";
+                if ((const uint8_t *)nm >= d + len || strcmp(nm, "timg/__Combined.bntx") || data_off + e > len) continue;
+                const uint8_t *b = d + data_off + st;
+                size_t blen = e - st;
+                if (blen < 0x40 || memcmp(b, "BNTX", 4)) continue;
+                uint32_t count = rd32(b + 0x24);
+                uint64_t infos = rd64(b + 0x28);
+                for (uint32_t k = 0; k < count && infos + 8 * k + 8 <= blen; k++) {
+                    uint64_t brti = rd64(b + infos + 8 * k);
+                    if (brti + 0x90 > blen || memcmp(b + brti, "BRTI", 4)) continue;
+                    const uint8_t *t = b + brti + 16;
+                    uint64_t name_at = rd64(t + 80), ptrs = rd64(t + 96);
+                    if (name_at + 2 >= blen || ptrs + 8 > blen) continue;
+                    uint16_t nl = rd16(b + name_at);
+                    uint32_t size = rd32(t + 64);
+                    uint64_t data = rd64(b + ptrs);
+                    if (nl >= sizeof g_icons->name || name_at + 2 + nl > blen || data + size > blen) continue;
+                    if (g_nicons == cap) g_icons = realloc(g_icons, (size_t)(cap = cap ? cap * 2 : 128) * sizeof *g_icons);
+                    EowIcon *ic = &g_icons[g_nicons++];
+                    ic->w = (uint16_t)rd32(t + 20), ic->h = (uint16_t)rd32(t + 24), ic->size = size;
+                    ic->hash = fnv64(b + data, size);
+                    memcpy(ic->name, b + name_at + 2, nl);
+                    ic->name[nl] = 0;
+                }
+            }
+        }
+        free(d);
+    }
+    g_icon_seen = calloc(g_nicons ? g_nicons : 1, sizeof *g_icon_seen);
+    g_icon_at = calloc(g_nicons ? g_nicons : 1, sizeof *g_icon_at);
+    LOG("[texpatch] %d echo and item icons known\n", g_nicons);
+}
+
+static int eow_icon_identify(const NvnTexture *t, uint64_t total) {
+    pthread_once(&g_icons_once, load_icons);
+    uint64_t h = 0;
+    uint32_t hashed = 0;  // (the size hashed: icons of one size share it)
+    for (int i = 0; i < g_nicons; i++) {
+        const EowIcon *ic = &g_icons[i];
+        if (ic->w != t->width || ic->h != t->height || ic->size > total) continue;
+        if (hashed != ic->size) h = fnv64((const uint8_t *)(uintptr_t)t->addr, hashed = ic->size);
+        if (h == ic->hash) {
+            static int nlog;
+            if (nlog++ < 16) LOG("[texpatch] icon %s (%ux%u) uploaded\n", ic->name, ic->w, ic->h);
+            return TEXPATCH_EOW_ICON_BASE + i;
+        }
+    }
+    return -1;
+}
+
+// The icon on the HUD's Y (slot 0) or X (1) button. Where the HUD's buttons are known (runtime/hle/hud_eow.c), the
+// icon drawn there; else, for Y, the one icon the HUD draws in play. When none is (a cutscene) or the slot can't be
+// told (the echo list, the menus: many at once), the last one stays. NULL until one is seen.
+const char *texpatch_eow_slot_icon(int slot) {
+    extern bool hud_eow_slot_at(int slot, float *x, float *y);
+    static int last[2] = {-1, -1};
+    if (!g_icon_seen || slot < 0 || slot > 1) return NULL;
+    uint64_t now = plat_now_ns(), recent = 150000000ull;  // (a few frames; the render thread is a frame or two behind)
+    float sx, sy;
+    int one = -1, n = 0;
+    if (hud_eow_slot_at(slot, &sx, &sy)) {
+        for (int i = 0; i < g_nicons && n < 2; i++)
+            if (now - g_icon_seen[i] < recent && fabsf(g_icon_at[i][0] - sx) < 60 && fabsf(g_icon_at[i][1] - sy) < 60) one = i, n++;
+    } else if (slot == 0) {
+        for (int i = 0; i < g_nicons && n < 2; i++)
+            if (now - g_icon_seen[i] < recent) one = i, n++;
+    }
+    if (n == 1) last[slot] = one;
+    return last[slot] >= 0 ? g_icons[last[slot]].name : NULL;
+}
+const char *texpatch_eow_y_icon(void) { return texpatch_eow_slot_icon(0); }
+
+// texpatch_note_draw with the draw's vertex uniforms (a layout pane's: its position at [19], [23])
+void texpatch_note_draw_at(int id, const float *ui, uint64_t size) {
+    if (id >= TEXPATCH_EOW_ICON_BASE && id < TEXPATCH_EOW_ICON_BASE + g_nicons && g_icon_at) {
+        bool ok = ui && size >= 24 * 4;
+        g_icon_at[id - TEXPATCH_EOW_ICON_BASE][0] = ok ? ui[19] : NAN;
+        g_icon_at[id - TEXPATCH_EOW_ICON_BASE][1] = ok ? ui[23] : NAN;
+    }
+    texpatch_note_draw(id);
+}
+
+void texpatch_note_draw(int id) {
+    if (id >= TEXPATCH_EOW_ICON_BASE && id < TEXPATCH_EOW_ICON_BASE + g_nicons && g_icon_seen) {
+        g_icon_seen[id - TEXPATCH_EOW_ICON_BASE] = plat_now_ns();
+        return;
+    }
+    if (id < 0 || id >= g_nrefs) return;
+    int r = g_refs[id].role;
+    if (r == R_TITLE_LOGO || r == R_FILE_FRAME) g_screen_seen[r == R_FILE_FRAME] = plat_now_ns();
+}
+int texpatch_title_screen(void) {
+    uint64_t now = plat_now_ns(), recent = 300000000ull;  // (the render thread is a frame or two behind)
+    if (now - g_screen_seen[1] < recent) return 2;
+    if (now - g_screen_seen[0] < recent) return 1;
+    return 0;
+}
 
 int texpatch_identify(const NvnTexture *t) {
-    if (game_other()) return -1;  // (LA's textures only: another game on the engine may share hashes)
-    pthread_once(&g_once, load_refs);
-    if (!t->addr || t->depth > 1) return -1;
+    pthread_once(&g_once, load_refs);  // (another game on the engine: its own list, load_refs)
+    // (no 3D textures; a 2D array's layers come as its depth too: EoW's Pictogram sheet, 4 layers)
+    if (!t->addr || (t->depth > 1 && t->layout.layers != t->depth)) return -1;
     uint64_t total = tegra_total_size(&t->layout);
     for (int i = 0; i < g_nrefs; i++) {
         const Ref *r = &g_refs[i];
-        // (only the bottle model's and the tunic's maps have mip levels: compared in full, all levels)
+        // (only the tunic's and the skin's maps have mip levels: compared in full, all levels)
         bool tunic = r->role == R_TUNIC || r->role == R_TUNIC_RED || r->role == R_TUNIC_BLUE;
-        if (r->w != t->width || r->h != t->height || (r->role != R_POWDER_MODEL && r->role != R_MAP_MODEL &&
-            r->role != R_POWER_PIECE_MODEL &&
-            (t->levels > 1) != (r->role == R_BOTTLE_MODEL || r->role == R_FAIRY_MODEL || tunic || r->role == R_SKIN))) continue;
+        if (r->w != t->width || r->h != t->height || (t->levels > 1) != (tunic || r->role == R_SKIN)) continue;
         uint64_t n = r->size < total ? r->size : total;
         if (!memcmp((const void *)(uintptr_t)t->addr, r->data, n)) {
             static int nlog;
@@ -279,17 +440,7 @@ int texpatch_identify(const NvnTexture *t) {
             return i;
         }
     }
-    int tu = ref_of(R_TUNIC);
-    if (tu >= 0 && t->levels > 1 && t->width == g_refs[tu].w && t->height == g_refs[tu].h) {
-        uint32_t n;
-        const uint8_t *s = seed_tunic(&n);
-        if (s && n == g_refs[tu].size && n <= total && !memcmp((const void *)(uintptr_t)t->addr, s, n)) {
-            LOG("[texpatch] seed's tunic map uploaded\n");
-            g_tunic_layout = t->layout;
-            g_tunic_layout_ok = true;
-            return tu;
-        }
-    }
+    if (game_other()) return t->depth > 1 ? -1 : eow_icon_identify(t, total);  // (EoW: its echo and item icons; the rest LA's)
     int rc = recolour_identify(t, total);  // (Cosmetics recolours: identified only, runtime/nvn/recolour.c)
     return rc >= 0 ? TEXPATCH_RECOLOUR_BASE + rc : -1;
 }
@@ -309,6 +460,11 @@ static int prompt_style(void) {
     if (p == PROMPTS_XBOX) return STYLE_XBOX;
     if (p == PROMPTS_PLAYSTATION) return STYLE_PS;
     if (p == PROMPTS_NINTENDO) return STYLE_NINTENDO;
+#if PLAT_TOUCH
+    // (Auto: while the on-screen controls are up the player presses those - Switch letters - not the controller's)
+    extern bool touch_visible(void);  // runtime/ui/mobile/touch_controls.mm
+    if (touch_visible()) return STYLE_NINTENDO;
+#endif
     extern int input_pad_family(void);  // runtime/hle/input.c: the controller SDL reports
     int f = input_pad_family();
     return f == 1 ? STYLE_XBOX : f == 2 ? STYLE_PS : STYLE_NINTENDO;
@@ -473,14 +629,70 @@ static void astc_encode4(const uint8_t px[16][4], bool srgb, uint8_t *b) {
     }
 }
 
+// BC7 mode 6: one subset, RGBA endpoints of 7 bits + a shared low bit each, 4-bit weights (EoW's Pictogram sheet;
+// only the blocks we change are re-encoded, and those hold two colours and their blend)
+static void bc7_encode6(const uint8_t px[16][4], uint8_t *b) {
+    int bi = 0, bj = 0, bd = -1;
+    for (int i = 0; i < 16; i++)
+        for (int j = i + 1; j < 16; j++) {
+            int d = 0;
+            for (int k = 0; k < 4; k++) d += (px[i][k] - px[j][k]) * (px[i][k] - px[j][k]);
+            if (d > bd) { bd = d; bi = i; bj = j; }
+        }
+    int e[2][4], pb[2] = {0, 0};
+    for (int s = 0; s < 2; s++) {
+        const uint8_t *c = px[s ? bj : bi];
+        int best = 1 << 30;
+        for (int p = 0; p < 2; p++) {
+            int err = 0, q[4];
+            for (int k = 0; k < 4; k++) {
+                int v = (c[k] - p + 1) / 2;
+                q[k] = v < 0 ? 0 : v > 127 ? 127 : v;
+                err += ((q[k] << 1 | p) - c[k]) * ((q[k] << 1 | p) - c[k]);
+            }
+            if (err < best) { best = err; pb[s] = p; for (int k = 0; k < 4; k++) e[s][k] = q[k] << 1 | p; }
+        }
+    }
+    static const int w4[16] = {0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64};
+    int idx[16];
+    for (int i = 0; i < 16; i++) {
+        int best = 0, be = 1 << 30;
+        for (int q = 0; q < 16; q++) {
+            int err = 0;
+            for (int k = 0; k < 4; k++) {
+                int v = ((64 - w4[q]) * e[0][k] + w4[q] * e[1][k] + 32) >> 6;
+                err += (v - px[i][k]) * (v - px[i][k]);
+            }
+            if (err < be) { be = err; best = q; }
+        }
+        idx[i] = best;
+    }
+    if (idx[0] & 8) {  // (the first weight's top bit is implied 0: swap the endpoints)
+        for (int k = 0; k < 4; k++) { int t = e[0][k]; e[0][k] = e[1][k]; e[1][k] = t; }
+        int t = pb[0]; pb[0] = pb[1]; pb[1] = t;
+        for (int i = 0; i < 16; i++) idx[i] = 15 - idx[i];
+    }
+    memset(b, 0, 16);
+    put_bits(b, 0, 7, 0x40);  // mode 6: six 0 bits, then a 1
+    int at = 7;
+    for (int k = 0; k < 4; k++) { put_bits(b, at, 7, (uint32_t)e[0][k] >> 1); put_bits(b, at + 7, 7, (uint32_t)e[1][k] >> 1); at += 14; }
+    put_bits(b, at, 1, (uint32_t)pb[0]); put_bits(b, at + 1, 1, (uint32_t)pb[1]);
+    at += 2;
+    put_bits(b, at, 3, (uint32_t)idx[0]);
+    at += 3;
+    for (int i = 1; i < 16; i++, at += 4) put_bits(b, at, 4, (uint32_t)idx[i]);
+}
+
 // Level data <-> RGBA8 image (BC5: red, green -> R, G; alpha = green, the glyph's shape)
 static void decode_image(const Ref *r, const uint8_t *src, uint32_t row, uint8_t *img) {
     uint32_t W = r->w, H = r->h, bw = (W + 3) / 4, bh = (H + 3) / 4;
+    if (r->kind == K_OTHER) return;  // (identified only: its format isn't one of these)
     if (r->kind == K_RGBA8) { for (uint32_t y = 0; y < H; y++) memcpy(img + y * W * 4, src + y * row, W * 4); return; }
-    if (r->kind == K_ASTC4) {
+    if (r->kind == K_ASTC4 || r->kind == K_BC7) {
         uint8_t *blocks = malloc((size_t)bw * bh * 16);
         for (uint32_t y = 0; y < bh; y++) memcpy(blocks + y * bw * 16, src + y * row, bw * 16);
-        astc_decode_ldr(blocks, W, H, 4, 4, r->srgb, img);
+        if (r->kind == K_BC7) bc_decode(BC7, blocks, W, H, img);
+        else astc_decode_ldr(blocks, W, H, 4, 4, r->srgb, img);
         free(blocks);
         return;
     }
@@ -504,6 +716,7 @@ static void decode_image(const Ref *r, const uint8_t *src, uint32_t row, uint8_t
 
 static void encode_image(const Ref *r, const uint8_t *img, const uint8_t *dirty, uint8_t *dst, uint32_t row) {
     uint32_t W = r->w, H = r->h, bw = (W + 3) / 4, bh = (H + 3) / 4;
+    if (r->kind == K_OTHER) return;
     if (r->kind == K_RGBA8) { for (uint32_t y = 0; y < H; y++) memcpy(dst + y * row, img + y * W * 4, W * 4); return; }
     for (uint32_t by = 0; by < bh; by++)
         for (uint32_t bx = 0; bx < bw; bx++) {
@@ -523,6 +736,8 @@ static void encode_image(const Ref *r, const uint8_t *img, const uint8_t *dirty,
                 uint8_t a[16];
                 for (int i = 0; i < 16; i++) a[i] = px[i][3];
                 bc4_encode(a, b); bc1_encode4(px, b + 8);
+            } else if (r->kind == K_BC7) {
+                bc7_encode6(px, b);
             } else {
                 astc_encode4(px, r->srgb, b);
             }
@@ -857,7 +1072,7 @@ done:
 // ------------------------------------------------------------------ cosmetics (Cosmetics tab): tunic and heart colours
 // The colour rows share one palette (runtime/cosmetic_colour.h): the chosen colour is a target for the thing's typical
 // colour, reached by a hue / saturation / value change that keeps the shading.
-// Tunic: tools/rando/cosmetics.py's recolour (a seed option once, now live): where the green and red tunic maps differ
+// Tunic: the Cosmetics tab's recolour: where the green and red tunic maps differ
 // (cloth, cap, collar ring) the green pixels change (PIL HSV, 0-255) from the green tunic's typical colour (hue 145,
 // saturation 0.75, value 0.55 - its map reads 0.89 / 0.38, lit it looks paler and brighter) to the chosen one. Every
 // mip level is recoloured from the game's own green map, so a seed's own colour is replaced too; "Default" uploads
@@ -1132,9 +1347,10 @@ static void skin_apply(int id, uint32_t lv, uint8_t *blocks, uint32_t w, uint32_
 // = ZL, 'l' 13 / 'r' 15 = L / R (second style), 'z' 17 = ZR); 4 columns of 64x64 cells, rows from the bottom.
 static const int8_t k_sheet_roles[18] = {R_PLUS, R_MINUS, R_A, R_B, 0, 0, R_L, 0, R_R, 0, R_X, R_Y, R_ZL, R_L, 0, R_R, 0, R_ZR};
 
-void texpatch_apply(int id, uint32_t lv, uint8_t *blocks, uint32_t w, uint32_t h, uint32_t row) {
+void texpatch_apply(int id, uint32_t layer, uint32_t lv, uint8_t *blocks, uint32_t w, uint32_t h, uint32_t row) {
     if (id < 0 || id >= g_nrefs) return;
     const Ref *r = &g_refs[id];
+    if (layer && !(game_other() && r->role == R_SHEET)) return;  // (EoW's sheet: its button glyphs are on layer 2)
     if (r->role == R_TUNIC || r->role == R_TUNIC_RED || r->role == R_TUNIC_BLUE) {
         size_t n = (size_t)((h + 3) / 4 - 1) * row + (w + 3) / 4 * 8;  // (the level's blocks)
         uint8_t *orig = tunic_rgb() && skin_rgb() && row >= (w + 3) / 4 * 8 ? malloc(n) : NULL;
@@ -1146,9 +1362,7 @@ void texpatch_apply(int id, uint32_t lv, uint8_t *blocks, uint32_t w, uint32_t h
     }
     if (r->role == R_SKIN) { skin_apply(id, lv, blocks, w, h, row, false, !strncmp(r->name, "MI_mouth_alb", 12), NULL); return; }
     if (lv || r->w != w || r->h != h) return;
-    if (r->role == R_BOTTLE || r->role == R_BOTTLE_MODEL || r->role == R_FAIRY_MODEL || r->role == R_POWDER_MODEL ||
-        r->role == R_ITEM_CURSOR || r->role == R_DGN_MAP || r->role == R_MAP_MODEL || r->role == R_POWER_PIECE_MODEL ||
-        r->role == R_HEART) return;
+    if (r->role == R_HEART || r->role == R_TITLE_LOGO || r->role == R_FILE_FRAME) return;
     if (r->role == R_HERO) {  // fully transparent (BC5 blocks of zeros)
         if (hide_hero()) for (uint32_t y = 0; y < (h + 3) / 4; y++) memset(blocks + y * row, 0, (w + 3) / 4 * 16);
         return;
@@ -1165,7 +1379,14 @@ void texpatch_apply(int id, uint32_t lv, uint8_t *blocks, uint32_t w, uint32_t h
     uint8_t *img = malloc((size_t)w * h * 4), *dirty = calloc((size_t)bw * ((h + 3) / 4), 1);
     decode_image(r, blocks, row, img);
     int ach = r->kind == K_BC5 ? 1 : 3;
-    if (r->role == R_SHEET) {
+    if (r->role == R_SHEET && game_other()) {
+        int cw = g_eow_sheet.cw + 1, ch = g_eow_sheet.ch + 1;
+        for (int i = 0; i < g_eow_sheet.n; i++) {
+            int c = g_eow_sheet.g[i].cell, x0 = c % g_eow_sheet.cols * cw, y0 = (int)h - (c / g_eow_sheet.cols + 1) * ch;
+            if (g_eow_sheet.g[i].layer == layer && y0 >= 0 && x0 + cw <= (int)w && restyled(g_eow_sheet.g[i].role, style))
+                relabel(img, (int)w, x0, y0, cw, ch, ach, true, g_eow_sheet.g[i].role, style, dirty, bw);
+        }
+    } else if (r->role == R_SHEET) {
         for (int g = 0; g < (int)sizeof k_sheet_roles; g++) {
             int y0 = (int)h - (g / 4 + 1) * 64;
             if (k_sheet_roles[g] && y0 >= 0 && (g % 4 + 1) * 64 <= (int)w && restyled(k_sheet_roles[g], style))
@@ -1179,58 +1400,21 @@ void texpatch_apply(int id, uint32_t lv, uint8_t *blocks, uint32_t w, uint32_t h
     free(dirty);
 }
 
-// The Hint Sheet's icon (runtime/hle/hint_sheet.c): the dungeon map's (120 x 120) centred on a bottle-sized canvas
-// (144 x 144, as ItemBottle_00^w: the same pane draws it at the size the game draws its own item icons), RGBA8 sRGB,
-// made once from the user's own game files. The renderers sample it in place of the bottle icon for the Hint Sheet's
-// draws. NULL: the game files don't have it.
-NvnTexture *texpatch_hint_icon(void) {
-    static NvnTexture t;
-    static int state;  // 0 not made yet, 1 made, -1 none
-    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-    pthread_mutex_lock(&lock);
-    if (!state) {
-        state = -1;
-        pthread_once(&g_once, load_refs);
-        int i = ref_of(R_DGN_MAP);
-        if (i >= 0 && g_refs[i].kind == K_BC3) {
-            const Ref *r = &g_refs[i];
-            uint32_t bw = (r->w + 3) / 4, bh = (r->h + 3) / 4, S = 144;
-            uint8_t *lin = malloc((size_t)bw * bh * 16), *img = malloc((size_t)r->w * r->h * 4), *canvas = calloc((size_t)S * S, 4);
-            tegra_deswizzle(r->data, lin, bw, bh, 1, 16, r->bhl, 0);
-            decode_image(r, lin, bw * 16, img);
-            uint32_t ox = (S - r->w) / 2, oy = (S - r->h) / 2;
-            for (uint32_t y = 0; y < r->h; y++) memcpy(canvas + ((y + oy) * S + ox) * 4, img + y * r->w * 4, r->w * 4);
-            t.target = 1;  // (2D)
-            t.format = r->srgb ? 0x38 : 0x25;  // RGBA8 sRGB / unorm, as the map's own colour space
-            t.width = t.height = S;
-            t.depth = t.levels = 1;
-            t.layout = (TexLayout){.width = S, .height = S, .depth = 1, .layers = 1, .levels = 1, .fmt = nvn_format_info(t.format)};
-            tegra_layout_init(&t.layout);
-            uint64_t total = tegra_total_size(&t.layout);
-            uint8_t *mem = calloc(total, 1);
-            LevelLayout l0 = tegra_level(&t.layout, 0);
-            tegra_swizzle(canvas, mem, l0.wb, l0.hb, 1, 4, l0.block_height_log2, l0.block_depth_log2);
-            t.addr = (uint64_t)(uintptr_t)mem;
-            strlcpy(t.label, "HintSheetIcon", sizeof t.label);
-            free(lin), free(img), free(canvas);
-            state = 1;
-            LOG("[texpatch] Hint Sheet icon made from %s\n", r->name);
-        }
-    }
-    pthread_mutex_unlock(&lock);
-    return state > 0 ? &t : NULL;
-}
-
 // The game's own UI textures, by name (e.g. "MapMark_05^w"), decoded to RGBA8 (w x h, the texture's own colour
 // encoding) from the user's UI archives: out[i] NULL if it isn't there or its format isn't one of ours. Each archive is
 // read once for the whole list. The caller frees them; returns how many were found.
-// (Runtime-made icons for our overlays: runtime/ui/triforce_icons.mm, race_overlay.mm - nothing of the game ships.)
+// (Runtime-made icons for our overlays: runtime/ui/game_icons.mm, race_overlay.mm - nothing of the game ships.)
 int texpatch_ui_rgba_list(const char *const *want, int nwant, uint8_t **out, int *w_out, int *h_out) {
+    // (LA's archives, then EoW's echo and item icons (texpatch_eow_y_icon's names) and its HUD and menus
     static const char *const arcs[] = {"region_common/ui/Game.arc", "regionUS/common/ui/GameRegionCommon.arc",
-                                       "regionEU/common/ui/GameRegionCommon.arc", "region_common/ui/StartUp.arc"};
+                                       "regionEU/common/ui/GameRegionCommon.arc", "region_common/ui/StartUp.arc",
+                                       "region_common/ui/IconCopyActor.arc", "region_common/ui/IconItem.arc",
+                                       "region_common/ui/GameMain.arc"};
+    static const uint8_t astc_blocks[][3] = {{0x2d, 4, 4}, {0x2e, 5, 4}, {0x2f, 5, 5}, {0x30, 6, 5}, {0x31, 6, 6},
+                                             {0x32, 8, 5}, {0x33, 8, 6}, {0x34, 8, 8}};  // (format: block w, h)
     int found = 0;
     for (int i = 0; i < nwant; i++) out[i] = NULL;
-    for (int a = 0; a < 4 && found < nwant; a++) {
+    for (int a = 0; a < (int)(sizeof arcs / sizeof *arcs) && found < nwant; a++) {
         size_t len;
         uint8_t *d = read_all(arcs[a], &len);
         if (!d) continue;
@@ -1260,14 +1444,18 @@ int texpatch_ui_rgba_list(const char *const *want, int nwant, uint8_t **out, int
                     if (wi < 0 || ptrs + 8 > blen) continue;
                     uint32_t fmt = rd32(t + 12), w = rd32(t + 20), h = rd32(t + 24), size = rd32(t + 64);
                     uint64_t data = rd64(b + ptrs);
-                    int kind = (fmt >> 8) == 0x1c ? K_BC3 : (fmt >> 8) == 0x2d ? K_ASTC4 : -1;
+                    uint32_t xb = 4, yb = 4;
+                    int kind = (fmt >> 8) == 0x1c ? K_BC3 : -1;
+                    for (size_t q = 0; q < sizeof astc_blocks / sizeof *astc_blocks; q++)
+                        if (astc_blocks[q][0] == fmt >> 8) kind = K_ASTC4, xb = astc_blocks[q][1], yb = astc_blocks[q][2];
                     if (kind < 0 || data + size > blen) continue;
                     Ref r = {0, (uint8_t)kind, (uint8_t)((fmt & 0xff) == 6), 0, (uint16_t)w, (uint16_t)h, 1, size, NULL, ""};
-                    uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4;
+                    uint32_t bw = (w + xb - 1) / xb, bh = (h + yb - 1) / yb;
                     uint8_t *lin = calloc((size_t)bw * bh, 16);
                     tegra_deswizzle(b + data, lin, bw, bh, 1, 16, rd32(t + 36) & 7, 0);
                     out[wi] = malloc((size_t)w * h * 4);
-                    decode_image(&r, lin, bw * 16, out[wi]);
+                    if (kind == K_ASTC4) astc_decode_ldr(lin, w, h, xb, yb, r.srgb, out[wi]);
+                    else decode_image(&r, lin, bw * 16, out[wi]);
                     free(lin);
                     w_out[wi] = (int)w, h_out[wi] = (int)h;
                     found++;

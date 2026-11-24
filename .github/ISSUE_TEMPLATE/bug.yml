@@ -1,0 +1,33 @@
+name: Bug report
+description: Something doesn't work or looks wrong
+labels: ["bug", "status: needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: Don't attach game files, generated code or fonts. Screenshots and short clips are fine.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The VERSION, or the commit SHA if you built it yourself
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Device
+      description: Mac, PC, Linux, iPhone / iPad or Android; the chip or GPU, the OS version, and the window size or aspect ratio
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what happened, and what you expected. Say where in the game it was.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Attach eowrecomp.log from the data folder

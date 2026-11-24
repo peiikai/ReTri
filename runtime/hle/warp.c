@@ -6,7 +6,7 @@
 // performs the transition when it sees the pending request.
 //
 // R registers itself with its parent while a level loads (`str xR, [x8, #0x1c0]` at main+0x80c464 /
-// main+0x80d718); tools/patches.py hooks those stores to tell us where R is. A warp then writes the same
+// main+0x80d718); runtime/gen/patches.cpp hooks those stores to tell us where R is. A warp then writes the same
 // fields main+0x81b950 writes, from the presenter's per-frame callback.
 #include "../game_addresses.h"
 #include <math.h>
@@ -115,7 +115,7 @@ int warp_busy(void) { return g_pending; }  // a queued warp not applied yet (sha
 
 // A warp to a room with no arrival point of its own (the Warp tab's dungeon rooms): the jump goes to the nearest
 // arrival point of the level, then, once the level has loaded and settled, Link is moved onto a floor tile just inside
-// the room (the PlayerCollision position doorjump.c moves him by). The game sees him in that room and scrolls there,
+// the room (the PlayerCollision position: runtime/hle/player.c). The game sees him in that room and scrolls there,
 // as after a door jump.
 enum { PLACE_DELAY = 40, PLACE_TIMEOUT = 1500 };
 static int player_component_missing(void);
@@ -138,11 +138,11 @@ static void place_tick(uint64_t now) {
     if (g_loads == g_place_loads || now - g_load_frame < PLACE_DELAY || g_change || player_component_missing()) return;
     uint64_t ps = LD64(GA(PLAYER_STATUS_PTR));
     if (!ps || strncmp((const char *)(uintptr_t)ps, g_place_level, sizeof g_place_level)) return;
-    extern void doorjump_player_rescan(void);
-    extern uint64_t doorjump_player(uint64_t frame);
+    extern void player_rescan(void);
+    extern uint64_t player_find(uint64_t frame);  // (runtime/hle/player.c)
     static unsigned rescanned = ~0u;
-    if (rescanned != g_loads) rescanned = g_loads, doorjump_player_rescan();  // (a warp within the same level)
-    uint64_t pc = doorjump_player(now);
+    if (rescanned != g_loads) rescanned = g_loads, player_rescan();  // (a warp within the same level)
+    uint64_t pc = player_find(now);
     if (!pc) return;
     float *pos = (float *)(uintptr_t)(pc + 0x80), *pos2 = (float *)(uintptr_t)(pc + 0xb0);
     pos[0] = pos2[0] = g_place_pos[0];
@@ -701,8 +701,8 @@ static void pane_scan_tick(uint64_t frame) {
     if (at < 0 || (long)frame != at) return;
     extern uint64_t g_bt_first_x0;  // fnprof.c: x0 of the first LARECOMP_FNPROF_BT function hit (addr 0 = use it)
     if (!addr) addr = g_bt_first_x0;
-    if (addr == 1) { extern uint64_t chaos_dgnmap_obj(void); addr = chaos_dgnmap_obj(); }  // 1 = the dungeon map page
-    if (addr == 2) { extern uint64_t tracker_map_obj(void); addr = tracker_map_obj(); }  // 2 = the overworld map page
+    if (addr == 1) { extern uint64_t dgnmap_obj(void); addr = dgnmap_obj(); }  // 1 = the dungeon map page
+    if (addr == 2) { extern uint64_t map_page_obj(void); addr = map_page_obj(); }  // 2 = the overworld map page
     LOG("[pane] scanning from %llx\n", (unsigned long long)addr);
     if (!addr) return;
     static uint64_t seen[4096];
@@ -773,21 +773,10 @@ static void actor_scan_tick(uint64_t frame) {
 
 void give_item_tick(Cpu *c, uint64_t frame) {
     actor_scan_tick(frame);
-    { extern void miniboss_tick(Cpu *, uint64_t); miniboss_tick(c, frame); }
-    { extern void escape_tick(Cpu *, uint64_t); escape_tick(c, frame); }
-    { extern void hint_sheet_tick(Cpu *, uint64_t); hint_sheet_tick(c, frame); }  // (runtime/hle/hint_sheet.c)
-    { extern void rescue_tick(uint64_t); rescue_tick(frame); }  // (softlock rescues: runtime/hle/rescue.c)
     pane_scan_tick(frame);
-    { extern void doorjump_tick(uint64_t frame); doorjump_tick(frame); }
-    { extern void weather_player_tick(Cpu *, uint64_t frame); weather_player_tick(c, frame); }  // (after doorjump: Link found)
-    { extern void pot_regrow_tick(uint64_t frame); pot_regrow_tick(frame); }  // (after doorjump: Link found)
-    { extern void souls_tick(uint64_t frame); souls_tick(frame); }  // (boss / mini-boss souls: runtime/hle/souls.c)
-    { extern void triforce_tick(void); triforce_tick(); }  // (Triforce hunt: the get message's flags, triforce.c)
+    { extern void player_tick(uint64_t frame); player_tick(frame); }  // (LARECOMP_PLACE, LARECOMP_LOG_LINK: player.c)
+    { extern void weather_player_tick(Cpu *, uint64_t frame); weather_player_tick(c, frame); }
     { extern void hookshot_tour_tick(uint64_t frame); hookshot_tour_tick(frame); }
-    { extern void flags_ext_tick(void); flags_ext_tick(); }  // (game thread: flag gets / sets happen here too)
-    { extern void enemy_stairs_tick(void); enemy_stairs_tick(); }  // (after it: Armos stairs flags, enemy_random.c)
-    { extern void rt_powder_flag_tick(void); rt_powder_flag_tick(); }  // (found powder: keysanity.c)
-    { extern void silent_pickups_tick(uint64_t); silent_pickups_tick(frame); }  // (a silent Heart Container's refill)
     ptrscan_tick(frame);
     memdump_tick(frame);
     find_move_tick(frame);
@@ -902,7 +891,7 @@ void rt_log_resname(uint64_t p) {
     if (s) LOG("[resname] %.120s\n", s);
 }
 
-// (debug, tools/gen.py GEN_TRACE_STORE_OFF) every traced `str xT, [xN, #off]`: the values stored, with their site;
+// (debug, runtime/gen/patches.cpp GEN_TRACE_STORE_OFF) every traced `str xT, [xN, #off]`: the values stored, with their site;
 // rt_trace_dump shows which hold a level-jump request's strings (level at +0x218, length at +0x258)
 static struct { uint64_t pc, val; } g_tr[8192];
 static int g_ntr;

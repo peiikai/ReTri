@@ -3,7 +3,7 @@
 # save, in game. The menu opens with Back + Start.
 #  1. Every tab: Down through every row and past the bottom, then Up through every row and past the top onto the tab
 #     bar (STEPS presses each way, default 75).
-#  2. From every tab to every other tab, both ways (R / L, wrapping round) and every distance: a switch with the
+#  2. From every tab to every other tab, both ways (R / L, stopping at the first / last tab) and every distance: a switch with the
 #     shoulder buttons - half the cases after holding Down on the tab it leaves (the cursor deep in a scrolled page),
 #     half from the tab bar - then Down once and Up once.
 #  3. The menu closes and opens again (Home), then Down once.
@@ -13,7 +13,7 @@
 # Result: the checks and an OK / FAIL count; the log is build/run_shot_focus_sweep.log. A heavily loaded Mac (a few fps)
 # can show a held key's repeat as a step too many.
 cd "$(dirname "$0")/.."
-N=10  # tabs in game: Controls, Video, Audio, Gameplay, Cosmetics, Randomizer, Cheats, Warp, Save Editor, Quit
+N=9  # tabs in game: Controls, Video, Audio, Gameplay, Cosmetics, Cheats, Warp, Save Editor, Quit
 read -r END SPEC < <(python3 - "$N" "${STEPS:-75}" <<'EOF'
 import sys
 n, steps = int(sys.argv[1]), int(sys.argv[2])
@@ -34,10 +34,9 @@ case = 0
 for d in (1, -1):
     for k in range(1, n):
         for s in range(n):
-            # to tab s (the shorter way round)
-            r = (s - cur) % n
-            for _ in range(r if r <= n // 2 else n - r):
-                press("rshoulder" if r <= n // 2 else "lshoulder", gap=10)
+            # to tab s (no wrapping round)
+            for _ in range(abs(s - cur)):
+                press("rshoulder" if s > cur else "lshoulder", gap=10)
             if case % 2 == 0:  # deep in the page it leaves
                 press("dpad_down", gap=10)
                 ev.append(f"{f}:sdlpad:dpad_down:100"); f += 115
@@ -45,7 +44,7 @@ for d in (1, -1):
                 press("rshoulder" if d > 0 else "lshoulder", gap=10)
             press("dpad_down", gap=20)
             press("dpad_up", gap=20)
-            cur = (s + d * k) % n
+            cur = min(max(s + d * k, 0), n - 1)
             case += 1
 ev.append(f"{f}:sdlpad:guide:2"); f += 60  # close (Home)
 ev.append(f"{f}:sdlpad:guide:2"); f += 60  # open again

@@ -1,0 +1,81 @@
+# How ReTri works
+
+A one-page map of the code. CONTRIBUTING.md lists the files and how to build and test; this explains how the parts
+fit together. File names are on the current development branch.
+
+## From the game files to a running game
+
+1. **Game files.** The player picks a folder with their own extracted game files (`exefs/` and `romfs/`). The start
+   screen (`runtime/ui/launcher.mm`) checks the game version by the main program's build ID (Echoes of Wisdom 1.0.0, 1.0.1
+   and 1.0.2, `runtime/game_addresses/games.h`) and keeps the files in the data folder. Nothing from the game ships with the app.
+2. **Recompiling.** The generator (`runtime/gen/`, in the app; `make lasgen` builds it as a command-line tool) turns
+   the AArch64 code of
+   `exefs/main` and `exefs/sdk` into C, one C function per game function. Indirect calls go through a lookup table
+   from guest address to function (`runtime/dispatch.c`). FP and SIMD instructions become C helpers
+   (`runtime/simd.h`, `simd_fp.h`) that match the Switch CPU's results, fused multiply-add included.
+3. **Code patches.** While generating, `runtime/gen/patches.cpp` (EoW's: `build_other_patches`) changes or hooks
+   specific instructions. Every patch checks
+   the original instruction word first, so a wrong address or version fails the build instead of patching the wrong
+   thing. A hook site calls `rt_hook()` (`runtime/hle/hooks.c`), so what a hook does can change without rebuilding
+   the game code.
+4. **Building on the player's machine.** In a release, the start screen runs the generator (inside the app) and a
+   bundled compiler (zig) to build the game code library from the player's files (`runtime/gamebuild.c`). The pieces are
+   cached, so an update only rebuilds what changed. The C is split into files at fixed game addresses
+   (`runtime/gen/chunk_bounds.inc`), so a change to one function only rebuilds its own file. In a source checkout, `make gen` and `make` do the same.
+5. **Loading.** `runtime/loader.c` loads the game code library (`runtime/gamelib.c`) and binds its imports, host
+   (HLE) replacements first. `runtime/romfs_build.c` lays out the game's RomFS from the player's `romfs/` folder
+   without copying the data.
+
+## The host: standing in for the Switch
+
+- **Kernel** (`runtime/kernel.c`): threads, mutexes, condition variables, events and memory, mapped onto host
+  threads and memory. Guest threads are ordinary host threads.
+- **Services** (`runtime/services/`): file system and saves (`fs.c`), controllers (`hid_set.c`), audio, time,
+  accounts, applet messages and amiibo, enough for this game.
+- **HLE** (`runtime/hle/`): replacements for SDK functions (libc, heaps, input, movies) plus the game features that
+  hook into the game's code. EoW's are named `*_other` (`warp_other.c`, `rt_aspect_other` for wide windows,
+  `rt_other_fps_limit` in `runtime/nvn/pace.c`).
+- **Addresses**: Echoes of Wisdom's builds (1.0.0, 1.0.1, 1.0.2) are rows of `runtime/game_addresses/games.h`, each
+  with its own table (`eow_v1_0_x.h`, the same names in each), read through `OTHER(NAME)` by the runtime and by both
+  generators. So one source supports every game version. The `GA(NAME)` tables (`versions.h`, `patches_v1_0_*.h`,
+  `runtime_v1_0_*.h`) are LA's, from LAS Recomp, and EoW doesn't use them.
+
+## Graphics
+
+The game draws through NVN, the Switch's GPU API, with shaders compiled for the Switch GPU (Maxwell).
+
+1. **Recording** (`runtime/nvn/cmdbuf.c`, `objects.c`): the game's NVN calls are recorded into command lists, with
+   its textures, buffers and state.
+2. **Render thread** (`runtime/nvn/rqueue.c`): the lists are translated and run on a thread of our own, so the game
+   can start the next frame meanwhile.
+3. **Backends**: Metal on macOS, iPhone and iPad (`renderer.m`, `metal.m`) and Vulkan on Windows, Linux and Android
+   (`runtime/nvn/vulkan/`, with the Vulkan Memory Allocator). Each turns the recorded commands into its own render passes, pipelines and
+   draws.
+4. **Shaders** (`runtime/nvn/maxwell/translate.c`): one translator turns Maxwell shader code into Metal Shading
+   Language or GLSL for Vulkan. It's the most delicate part of the renderer: most GPU-specific bugs end up here.
+5. **Shader preparation** (`runtime/nvn/shader_prep.c`): on first launch the game's shader variants are found in
+   the player's files, translated and built into pipelines before play, so there are no compile hitches later. Only a
+   list of variant records ships (`shader_variants.txt`), never shader code.
+6. **Output** (`output_scale.c`, `pace.c`): resolution and dynamic resolution, the upscalers (MetalFX on Mac,
+   AMD FSR 1 on Windows and Linux), SMAA, and frame pacing, including the game's own drop to 30 fps when frames
+   don't fit 60. Frame Generation (`interp.c`, off by default) adds images between the game's frames.
+
+Per-GPU defaults in the Vulkan backend are listed in [vulkan-gpu-defaults.md](vulkan-gpu-defaults.md).
+
+## Menus and settings
+
+The overlay menu and the start screen use Dear ImGui (`runtime/ui/`, `third_party/imgui`). Settings live in
+`runtime/settings.c` and are saved in `larecomp.ini` in the data folder. Menu text is English in the code, with
+translation tables per language.
+
+## Left over from LAS Recomp
+
+ReTri is built on LAS Recomp, the Link's Awakening recompiler, and the runtime still holds some of LA's code: its
+address tables, patches and hooks, and the randomizer's seed plumbing (`runtime/rando.c`), which is off (`RANDO_ON` in
+`runtime/rando.h`). ReTri has no randomizer.
+
+## Debugging
+
+Most debug and test switches are environment variables: see [debug-hooks.md](debug-hooks.md). The log is
+`eowrecomp.log` in the data folder. A crash names the guest address (`main+0x...`), which `tools/sym.py` maps to
+the game's code.

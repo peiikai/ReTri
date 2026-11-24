@@ -27,8 +27,17 @@ uint32_t maxwell_gmem_chunk_shift;  // 0: one buffer for the whole heap (GLSL; s
 bool maxwell_gmem_lazy;
 bool maxwell_gmem_fs_miss;
 bool maxwell_glsl_stack_vars = true;
+bool maxwell_glsl_structured;  // static stacks + structured control flow by default (exec.c: Mali, Adreno)
+bool maxwell_glsl_fast_minmax;  // the GPU's min / max / clamp for fmin / fmax / saturate (exec.c: Android)
+bool maxwell_glsl_image_stores;  // compute SUST.B as storage image stores (exec.c: shaderStorageImageWriteWithoutFormat)
+bool maxwell_glsl_push;  // c1 inlined + push constants by default (exec.c: Mali, Adreno)
+bool maxwell_glsl_tint_branch;  // the recolour code behind a specialization constant (exec.c: Adreno, Mali)
+bool maxwell_glsl_quad_deriv;  // fragment quad xor shuffles through derivatives (exec.c: no subgroups in fragment shaders)
+const uint8_t *maxwell_const_data;
+uint32_t maxwell_const_size;
 bool maxwell_gmem_mirror;
 bool maxwell_skip_unsupported_stores;  // (shader.h)
+uint32_t maxwell_shadow_texel_off = 0x240;  // (shader.h)
 const uint8_t *maxwell_dbg_code;
 static bool g_dbg_now;  // (translating the LARECOMP_DBG_FS shader)
 uint32_t maxwell_dbg_pc;
@@ -121,9 +130,28 @@ typedef struct {
     int ipa_mul;   // its multiplier register (mode 1: the result is the "pass" value attr/w times this register)
     // GLSL (fields kept last: the MSL path's layout, including its out-of-range reg_used writes, is unchanged)
     bool glsl;               // emit Vulkan GLSL: dialect-specific constructs here, the rest via glsl_rewrite()
+    bool quad_used;          // (GLSL) a quad swap through derivatives was emitted: the qswap helpers go in the prelude
     bool uses_gmem_store;    // STG present: the gmem buffer is not readonly
+    uint32_t gatom_ops;      // (GLSL) RED / ATOM operations used (gatom_key bits): GMATOM_* functions in the prelude
     uint32_t cbuf_need[18];  // highest constant vec4 index + 1 per cbuf (array size of the GLSL block)
+    // GLSL, LARECOMP_VK_STATIC_STACKS: every SYNC / BRK / CONT's target resolved at translation time
+    // (static_stacks_resolve): the pops become plain jumps and the SSY / PBK / PCNT stacks go away
+    bool static_stacks;
+    bool structured;       // LARECOMP_VK_STRUCTURE: branches as nested if / else / do-while (ast_*), no pc state machine
+    int struct_vars;       // its goto flags g0.. (GotoElimination)
+    uint32_t *pop_target;  // per instruction word: the pc a SYNC / BRK / CONT goes to
+    bool ao_taps;          // the AO blur's taps follow rscale[65].y (ao_grid_fix)
+    bool shadow_tap[2];    // the shadow map's texel size (x, y) is read: shadow_taps
+    bool ao_pass;          // the AO pass: white while rscale[65].z > 0 (ao_grid_fix)
+    int lmem_words;        // the local memory array's size in words (lmem_size; MSL: always LMEM_WORDS)
+    // GLSL: each BRX whose jump table was read (brx_table_labels): its targets, so that static_stacks_resolve can walk
+    // through it and the structured program can branch on its value (struct_blocks)
+    struct BrxTab { size_t at; int n; uint32_t t[256]; bool ahead; } *brx;  // (ahead: struct_blocks' dispatch form)
+    int nbrx;
+    bool uses_brx_t;       // the structured program's brx_t<k> (a BRX's computed target), k < brx_vars
+    int brx_vars;
 } Ctx;
+typedef struct BrxTab BrxTab;
 
 static uint64_t bits(uint64_t w, int lo, int n) { return (w >> lo) & ((n == 64) ? ~0ull : ((1ull << n) - 1)); }
 static int64_t sbits(uint64_t w, int lo, int n) {
@@ -167,6 +195,17 @@ static const char *pred(Ctx *c, int p, bool neg, char *buf) {
 #define P(p, n) pred(c, (p), (n), alloca(16))
 
 static const char *cbuf_ref(Ctx *c, int idx, int64_t off, const char *dyn, char *buf) {
+    // c1, statically indexed (GLSL, LARECOMP_VK_INLINE_C1=1): the shader's own compiler constants never change, so the
+    // value itself instead of a uniform buffer load - which on Mesa's PanVK is a memory load every time (it keeps no
+    // uniform buffer words in the fast uniform registers, unlike ARM's driver), in the light loops too
+    static int inl = -1;
+    if (inl < 0) { const char *e = getenv("LARECOMP_VK_INLINE_C1"); inl = e ? atoi(e) != 0 : maxwell_glsl_push; }
+    if (inl && c->glsl && idx == 1 && !dyn && maxwell_const_data && off >= 0 && (off & 3) == 0 && off + 4 <= (int64_t)maxwell_const_size) {
+        uint32_t v;
+        memcpy(&v, maxwell_const_data + off, 4);
+        sprintf(buf, "0x%08xu", v);
+        return buf;
+    }
     c->info->cbuf_mask |= 1u << idx;
     if (idx == 0) {  // a storage buffer binding: which slot (any, when indexed with a register)
         if (dyn) c->info->ssbo_read = 0xFFFF;
@@ -176,6 +215,13 @@ static const char *cbuf_ref(Ctx *c, int idx, int64_t off, const char *dyn, char 
     if (off + 16 > (int64_t)c->info->cbuf_size[idx]) c->info->cbuf_size[idx] = (uint32_t)((off + 16 + 255) & ~255);
     if (dyn) c->info->cbuf_dynamic |= 1u << idx;
     if (!dyn && idx < 18 && off >= 0 && (uint32_t)(off >> 4) + 1 > c->cbuf_need[idx]) c->cbuf_need[idx] = (uint32_t)(off >> 4) + 1;
+    int64_t st = maxwell_shadow_texel_off;
+    if (!dyn && c->stage == STAGE_FRAGMENT && idx == 4 && (off == st || off == st + 4)) {  // (see shadow_taps)
+        int k = off != st;
+        c->shadow_tap[k] = true;
+        sprintf(buf, "stap%d", k);
+        return buf;
+    }
     if (dyn) sprintf(buf, "cbr(cb%d, (%s) + %lldu)", idx, dyn, (long long)off);
     else sprintf(buf, "cb%d[%lld][%lld]", idx, (long long)(off >> 4), (long long)((off >> 2) & 3));
     return buf;
@@ -633,6 +679,7 @@ static const char *uv2(Ctx *c, int slot, const char *x, const char *y, char *buf
 // reference or NULL, lod_kind 0 implicit / 1 level / 2 bias (lod), off: ivec2 texel offset or NULL.
 // GLSL offsets must be constants, so register offsets move the coordinates by offset / size of the level
 // (level 0 for implicit-LOD lookups). Non-fragment stages have no implicit LOD: level 0 (+ bias).
+static bool tex_is_stencil(const Ctx *c, int slot);
 static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, const char *layer, const char *dref,
                         int lod_kind, const char *lod, const char *off) {
     if (c->fail) { strcpy(out, "vec4(0.0f)"); return; }  // e.g. a type conflict: tex[slot] is not this lookup's type
@@ -676,6 +723,11 @@ static void glsl_sample(Ctx *c, char *out, int slot, const char *const *co, cons
         snprintf(P, sizeof P, "vec%d(%s, float(%s), %s)", n + 2, xs, layer, dref);
     } else {
         snprintf(P, sizeof P, "vec%d(%s, %s)", n + 1, xs, dref);
+    }
+    if (tex_is_stencil(c, slot) && n == 2 && !layer && !dref) {  // (as the MSL in emit_tex: the texel under the coordinate, its integer as is)
+        snprintf(out, 4096, "uintBitsToFloat(texelFetch(t%d, ivec2(clamp(%s, vec2(0.0f), vec2(0.99999f)) * vec2(textureSize(t%d, 0))), 0))",
+                 slot, xs, slot);
+        return;
     }
     char e[2000], ex[300] = "";
     if (extra) snprintf(ex, sizeof ex, ", %s", extra);
@@ -837,7 +889,7 @@ static void emit_texs(Ctx *c, uint64_t w, bool fetch) {
 // A texture the key names as a stencil read (ShaderKey.stencil_slots, by its handle's slot): a plain 2D texture of
 // integers - the depth / stencil buffer's stencil through a view (EoW's rifts read the bits the scene marks there)
 static bool tex_is_stencil(const Ctx *c, int slot) {
-    if (!c->key || c->glsl || !c->key->stencil_slots || slot < 0 || slot >= c->info->ntex) return false;
+    if (!c->key || !c->key->stencil_slots || slot < 0 || slot >= c->info->ntex) return false;
     const ShaderTexture *t = &c->info->tex[slot];
     int h = ((int)t->handle_offset - 0x20) / 8;
     return t->type == TEXTYPE_2D && !t->shadow && h >= 0 && h < 16 && (c->key->stencil_slots >> h & 1);
@@ -942,15 +994,109 @@ static void light_tiles_fix(Ctx *c, const uint64_t *code, size_t end, uint32_t p
     sp(&c->body, "    r%d = as_type<uint>(as_type<float>(r%d) * (as_type<float>(%s) * as_type<float>(%s) / as_type<float>(%s)));\n", d, d, a, h, w);  // (GLSL: as_type is rewritten)
 }
 
+// The game's ambient occlusion at High (runtime/nvn/output_scale.c output_scale_ao: its targets at up to twice the
+// Switch's size). The AO pass picks a sample rotation from a 4x4 table by pixel: x = uv / texel size, with the game's
+// texel size (1/480, 1/270), so at twice the size two pixels in a row shared a rotation and the pattern was 8 pixels
+// wide (issue #356). Its pixel index (pc 0x50: x, 0x58: y) is scaled by the render target's scale, rscale[0]: the real
+// pixel again, and the same value at the Switch's size. The rest of the pass stays in the game's units: its sample
+// radius (guest pixels times the texel size) is a distance in the image, and the depth it reads is snapped to a
+// 960x540 grid, the size of its depth input.
+// Its blur (a 9-tap Gaussian in 5 bilinear taps, the shader the bloom uses too) has its tap offsets from the vertex
+// shader, in uv of the Switch's size: spread twice as far in pixels, they missed rotations of the pattern and left it
+// as a crosshatch. For the two blurs of the AO itself the renderer sets rscale[65].y to the AO's scale
+// (renderer_ao_blur_scale; 0 for every other draw of this shader), and the offsets from the centre tap (v2) are
+// divided by it: the Switch's blur in pixels. The 240x135 level after it keeps the game's offsets (smooth by then).
+// Ambient occlusion Off: the renderer sets rscale[65].z for the AO pass and its output is 1 (unoccluded), so the
+// blurs after it and the composite that multiplies the scene by it change nothing.
+// EoW's AO pass is another shader (into a 704x396 R8 target cleared to 1, from the 1408x792 normals and a 704x396 copy
+// of the depth; two blurs and a 352x198 level follow, which the lit shaders read). It needs only Off: its pixel grid
+// comes from its texel size (c5[0x1a0], snapped with ceil to half texels), which lands on the pixel centres at twice the
+// size too, and its sample radius and blurs are in uv.
+// LARECOMP_AO_NO_GRID=1 (A/B): the game's own pixel grid at any AO scale.
+static void ao_grid_fix(Ctx *c, const uint64_t *code, size_t end, uint32_t pc) {
+    static int off = -1;
+    if (off < 0) off = getenv("LARECOMP_AO_NO_GRID") != NULL;
+    if (c->stage != STAGE_FRAGMENT) return;
+    // (EoW's: the texel size, uv, the normal and depth samples, then the pixel index: 1 / texel * uv * 2, ceil)
+    static const uint64_t eow[][2] = {{0x8, 0x4c98079406870005ull}, {0x10, 0xe003ff880ff7ff02ull}, {0x18, 0x4c98079406970007ull},
+                                      {0x28, 0xe003ff884ff7ff03ull}, {0x30, 0xd8420080a0370208ull}, {0x68, 0xd84000aff037020eull},
+                                      {0x70, 0x5080000000470500ull}, {0x78, 0x5080000000470701ull}, {0x88, 0x5c681c0000270000ull},
+                                      {0x90, 0x5c681c0000370104ull}, {0x98, 0x5ca8150000070a00ull}};
+    if (pc == 0x98 && end > 0x98 / 8) {
+        size_t i = 0;
+        while (i < sizeof eow / sizeof eow[0] && code[eow[i][0] / 8] == eow[i][1]) i++;
+        if (i == sizeof eow / sizeof eow[0]) {
+            c->uses_rscale = true;
+            c->ao_taps = c->ao_pass = true;  // (66 rows: [65].z is Off; [65].y is 0, its target isn't LA's 480 wide)
+            return;
+        }
+    }
+    static const uint64_t pass[][2] = {{0x8, 0x4c98079404c70005ull}, {0x18, 0x4c98079404d70009ull},
+                                       {0x30, 0x5080000000470505ull}, {0x38, 0x5080000000470909ull},
+                                       {0x50, 0x5c68100000470500ull}, {0x58, 0x5c68100000870901ull}};
+    if ((pc == 0x50 || pc == 0x58) && end > 0x58 / 8) {
+        for (size_t i = 0; i < sizeof pass / sizeof pass[0]; i++)
+            if (code[pass[i][0] / 8] != pass[i][1]) return;
+        int d = pc == 0x50 ? 0 : 1;  // (r0 = x, r1 = y)
+        c->uses_rscale = true;
+        c->ao_taps = c->ao_pass = true;  // (66 rows: [65].z is Off)
+        if (off) return;
+        sp(&c->body, "    r%d = as_type<uint>(as_type<float>(r%d) * rscale[0][%d]);\n", d, d, d);
+        return;
+    }
+    // (the ten IPAs: v1, v0, v2, v3, v4 x / y into r19 r21, r12 r13, r8 r9, r4 r5, r0 r1; then the first sample)
+    static const uint64_t blur[][2] = {{0x8, 0xe003ff890ff7ff13ull}, {0x10, 0xe003ff894ff7ff15ull}, {0x18, 0xe003ff880ff7ff0cull},
+                                       {0x28, 0xe003ff884ff7ff0dull}, {0x30, 0xe003ff8a0ff7ff08ull}, {0x38, 0xe003ff8a4ff7ff09ull},
+                                       {0x48, 0xe003ff8b0ff7ff04ull}, {0x50, 0xe003ff8b4ff7ff05ull}, {0x58, 0xe003ff8c0ff7ff00ull},
+                                       {0x68, 0xe003ff8c4ff7ff01ull}, {0x70, 0xd832008101571312ull}};
+    if (off || pc != 0x68 || end <= 0x70 / 8) return;
+    for (size_t i = 0; i < sizeof blur / sizeof blur[0]; i++)
+        if (code[blur[i][0] / 8] != blur[i][1]) return;
+    c->uses_rscale = true;
+    c->ao_taps = true;
+    static const int tap[4][2] = {{19, 21}, {12, 13}, {4, 5}, {0, 1}};
+    sp(&c->body, "    if (rscale[65][1] > 1.0f) {\n");
+    for (int i = 0; i < 4; i++)
+        for (int k = 0; k < 2; k++)
+            sp(&c->body, "      r%d = as_type<uint>(as_type<float>(r%d) + (as_type<float>(r%d) - as_type<float>(r%d)) / rscale[65][1]);\n",
+               tap[i][k], k ? 9 : 8, tap[i][k], k ? 9 : 8);
+    sp(&c->body, "    }\n");
+}
+
+// The game's shadow lookups (issue #602): four compare taps on its shadow map (a 2D array sampler, one layer), offset
+// by the texel size the game writes to its scene constants (c4[0x240]: 1/2048, 1/2048; EoW: c4[0x280], 1024x1024
+// layers, maxwell_shadow_texel_off). With the map at another size than the game's (output_scale_shadow) the taps
+// would stay that far apart in the map, so the edges would stay as wide as the Switch's at 2x to 4x, and the taps
+// would fall between texels at 0.5x. (EoW's at 4x: each edge a staircase of four steps.)
+// The texel size is divided by the map's scale, rscale[1 + slot].x: the real texel again, and the game's value at the
+// Switch's size. The reads go through a local set at the start, so a raw move of the constant is covered too. Without
+// a shadow array in the shader that constant is something else and is left alone.
+static void shadow_taps(Ctx *c, Str *s) {
+    int slot = -1;
+    for (int i = 0; i < c->info->ntex && slot < 0; i++)
+        if (c->info->tex[i].shadow && c->info->tex[i].type == TEXTYPE_2D_ARRAY) slot = i;
+    for (int k = 0; k < 2; k++) {
+        if (!c->shadow_tap[k]) continue;
+        if (slot >= 0 && c->uses_rscale)
+            sp(s, c->glsl ? "  uint stap%d = floatBitsToUint(uintBitsToFloat(cb4[%u][%d]) / rscale[%d][0]);\n"
+                          : "  uint stap%d = as_type<uint>(as_type<float>(cb4[%u][%d]) / rscale[%d][0]);\n",
+               k, maxwell_shadow_texel_off >> 4, k, slot + 1);
+        else
+            sp(s, "  uint stap%d = cb4[%u][%d];\n", k, maxwell_shadow_texel_off >> 4, k);
+    }
+}
+
 // A push / pop on stack `n` (ssy, pbk, pcnt). GLSL (maxwell_glsl_stack_vars, shader.h): 16 named variables, the
 // index masked; otherwise (and MSL) an array of 16.
 static void stack_push(Ctx *c, const char *n, uint32_t v) {
+    if (c->static_stacks) return;  // (its pops know their target)
     if (!c->glsl || !maxwell_glsl_stack_vars) { sp(&c->body, "    %s[%s_n++] = %uu;\n", n, n, v); return; }
     sp(&c->body, "    { uint i_ = (%s_n++) & 15u;", n);
     for (int k = 0; k < 16; k++) sp(&c->body, " %sif (i_ == %du) %s%d = %uu;", k ? "else " : "", k, n, k, v);
     sp(&c->body, " }\n");
 }
-static void stack_pop(Ctx *c, const char *n, bool keep) {  // keep: the top stays (CONT)
+static void stack_pop(Ctx *c, const char *n, bool keep, uint32_t pc) {  // keep: the top stays (CONT)
+    if (c->static_stacks) { sp(&c->body, "    pc = %uu; continue;\n", c->pop_target[pc / 8]); return; }
     if (!c->glsl || !maxwell_glsl_stack_vars) {
         sp(&c->body, keep ? "    pc = %s[%s_n - 1]; continue;\n" : "    pc = %s[--%s_n]; continue;\n", n, n);
         return;
@@ -958,6 +1104,37 @@ static void stack_pop(Ctx *c, const char *n, bool keep) {  // keep: the top stay
     sp(&c->body, keep ? "    { uint i_ = (%s_n - 1u) & 15u; pc = " : "    { uint i_ = (--%s_n) & 15u; pc = ", n);
     for (int k = 0; k < 15; k++) sp(&c->body, "i_ == %du ? %s%d : ", k, n, k);
     sp(&c->body, "%s15; } continue;\n", n);
+}
+
+// (GLSL) RED / ATOM on global memory. GLSL atomics take the buffer element itself, so each operation becomes a
+// function per heap layout (the prelude's GMATOM_<name>(word, value) -> old value) plus a statement on the compute
+// copy (gfast_). Keys: ATOM's op numbering (RED's is the same up to xor) with the signedness folded in.
+enum { GATOM_N = 11 };
+static const char *const gatom_name[GATOM_N] = {"add", "umin", "smin", "umax", "smax", "inc", "dec", "and", "or", "xor", "exch"};
+static int gatom_key(int op, bool sgn) {
+    switch (op) {
+    case 0: case 10: return 0;  // add, safeadd
+    case 1: return sgn ? 2 : 1;
+    case 2: return sgn ? 4 : 3;
+    case 3: return 5;
+    case 4: return 6;
+    case 5: return 7;
+    case 6: return 8;
+    case 7: return 9;
+    case 8: return 10;
+    default: return -1;
+    }
+}
+// The statement: res = the old value of lv, lv = op(lv, v). Signed min / max and INC / DEC (wrapping at v, as CUDA's
+// atomicInc / atomicDec) have no GLSL atomic on uint memory: a compare-and-swap loop.
+static void gatom_stmt(Str *b, int key, const char *res, const char *lv) {
+    static const char *const fn[GATOM_N] = {"atomicAdd", "atomicMin", NULL, "atomicMax", NULL, NULL, NULL,
+                                            "atomicAnd", "atomicOr", "atomicXor", "atomicExchange"};
+    if (fn[key]) { sp(b, "%s = %s(%s, v);", res, fn[key], lv); return; }
+    static const char *const nx[GATOM_N] = {[2] = "uint(min(int(o_), int(v)))", [4] = "uint(max(int(o_), int(v)))",
+                                            [5] = "o_ >= v ? 0u : o_ + 1u", [6] = "(o_ == 0u || o_ > v) ? v : o_ - 1u"};
+    sp(b, "{ uint o_ = %s; for (;;) { uint n_ = %s; uint r_ = atomicCompSwap(%s, o_, n_); if (r_ == o_) break; o_ = r_; } "
+          "%s = o_; }", lv, nx[key], lv, res);
 }
 
 static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
@@ -1001,11 +1178,11 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         c->uses_branches = true;
         stack_push(c, "pcnt", norm_target((int64_t)pc + 8 + sbits(w, 20, 24)));
     } else if (OPM(0xf0f8000000000000ull, 0xfff8000000000000ull)) {  // SYNC
-        stack_pop(c, "ssy", false);
+        stack_pop(c, "ssy", false, pc);
     } else if (OPM(0xe340000000000000ull, 0xfff0000000000000ull)) {  // BRK
-        stack_pop(c, "pbk", false);
+        stack_pop(c, "pbk", false, pc);
     } else if (OPM(0xe350000000000000ull, 0xfff0000000000000ull)) {  // CONT
-        stack_pop(c, "pcnt", true);
+        stack_pop(c, "pcnt", true, pc);
     } else if (OPM(0xf0f0000000000000ull, 0xfff8000000000000ull) || OPM(0x50b0000000000000ull, 0xfff8000000000000ull) ||
                OPM(0xef98000000000000ull, 0xfff8000000000000ull)) {
         // DEPBAR / NOP / MEMBAR
@@ -1810,19 +1987,19 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
             if (size < 4) {
                 static const char *const ext[] = {"(v >> sh) & 0xFFu", "uint(int(char((v >> sh) & 0xFFu)))", "(v >> sh) & 0xFFFFu",
                                                   "uint(int(short((v >> sh) & 0xFFFFu)))"};
-                if (d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      uint v = lmem[(la >> 2) & %du]; uint sh = (la & 3u) * 8u; r%d = %s;\n", LMEM_WORDS - 1, d, ext[size]); }
+                if (d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      uint v = lmem[(la >> 2) & %du]; uint sh = (la & 3u) * 8u; r%d = %s;\n", c->lmem_words - 1, d, ext[size]); }
             } else {
                 for (int k = 0; k < nw; k++)
-                    if (d != RZ && d + k < RZ) { c->reg_used[d + k] = 1; sp(&c->body, "      r%d = lmem[((la >> 2) + %du) & %du];\n", d + k, k, LMEM_WORDS - 1); }
+                    if (d != RZ && d + k < RZ) { c->reg_used[d + k] = 1; sp(&c->body, "      r%d = lmem[((la >> 2) + %du) & %du];\n", d + k, k, c->lmem_words - 1); }
             }
         } else {
             if (size < 4) {
                 uint32_t m = size < 2 ? 0xFFu : 0xFFFFu;
                 sp(&c->body, "      uint sh = (la & 3u) * 8u; uint i = (la >> 2) & %du; lmem[i] = (lmem[i] & ~(0x%xu << sh)) | ((%s & 0x%xu) << sh);\n",
-                   LMEM_WORDS - 1, m, R(d), m);
+                   c->lmem_words - 1, m, R(d), m);
             } else {
                 for (int k = 0; k < nw; k++)
-                    sp(&c->body, "      lmem[((la >> 2) + %du) & %du] = %s;\n", k, LMEM_WORDS - 1, R(d == RZ ? RZ : d + k));
+                    sp(&c->body, "      lmem[((la >> 2) + %du) & %du] = %s;\n", k, c->lmem_words - 1, R(d == RZ ? RZ : d + k));
             }
         }
         sp(&c->body, "    }\n");
@@ -1833,6 +2010,30 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         int pd = (int)bits(w, 48, 3);
         if (lane_local(c)) {
             set_reg(c, d, R(a));  // no SIMD-group functions in vertex functions: lane-local value
+        } else if (c->glsl && maxwell_glsl_quad_deriv && c->stage == STAGE_FRAGMENT && mode == 3 && bits(w, 28, 1) &&
+                   bits(w, 20, 5) >= 1 && bits(w, 20, 5) <= 3) {  // (maxwell_glsl_quad_deriv) lane xor 1 / 2 / 3: the
+            sprintf(t, "as_u(qswap%u(as_f(%s)))", (unsigned)bits(w, 20, 5), R(a));  // neighbour from fine derivatives
+            c->quad_used = true;
+            set_reg(c, d, t);
+        } else if (c->glsl && maxwell_glsl_quad_deriv && c->stage == STAGE_FRAGMENT) {
+            set_reg(c, d, R(a));  // (no subgroups in fragment shaders here) any other shuffle: the lane's own value
+        } else if (c->glsl && c->stage == STAGE_COMPUTE) {
+            // (as the Metal compute branch below: C's clamp and segment mask; a source lane out of range reads the
+            // lane's own value and clears Pd - EoW's reductions test Pd before adding.) Lanes are counted within a
+            // 32-lane warp, so a 64-wide subgroup (AMD) shuffles within its own half. Subgroups narrower than 32
+            // (some Intel compute) can't hold a warp: not handled.
+            char cb2[32];
+            const char *cv = bits(w, 29, 1) ? (sprintf(cb2, "%uu", (unsigned)bits(w, 34, 13)), cb2) : R((int)bits(w, 39, 8));
+            c->uses_lane = true;
+            sp(&c->body, "    { uint wl_ = lane & 31u, sb_ = %s & 31u, sc_ = %s, sg_ = (sc_ >> 8u) & 31u, mn_ = wl_ & sg_, "
+                         "mx_ = mn_ | (sc_ & 31u & ~sg_);\n", bv, cv);
+            static const char *const jx[] = {"mn_ | (sb_ & ~sg_)", "wl_ - sb_", "wl_ + sb_", "wl_ ^ sb_"};
+            sp(&c->body, "      uint j_ = %s; bool ok_ = %s;\n", jx[mode], mode == 1 ? "int(j_) >= int(mx_)" : "j_ <= mx_");
+            sp(&c->body, "      uint v_ = subgroupShuffle(%s, (lane & ~31u) | (ok_ ? j_ : wl_));\n", R(a));
+            set_reg(c, d, "v_");
+            if (pd != PT) { c->pred_used[pd] = 1; sp(&c->body, "    p%d = ok_;\n", pd); }
+            sp(&c->body, "    }\n");
+            pd = PT;
         } else if (c->glsl) {  // a quad xor (lane mask < 4) is the subgroup xor within the quad
             static const char *const fn[] = {"subgroupShuffle", "subgroupShuffleUp", "subgroupShuffleDown", "subgroupShuffleXor"};
             sprintf(t, "%s(%s, uint(%s))", fn[mode], R(a), bv);
@@ -1891,6 +2092,19 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
     p2r_done:;
     } else if (OPM(0xe250000000000000ull, 0xfff0000000000020ull)) {  // BRX reg + imm (relative)
         // computed targets can name a scheduling word; execution continues at the next slot (as for BRA)
+        int k = 0;
+        while (c->structured && k < c->nbrx && c->brx[k].at != pc / 8) k++;
+        if (c->structured && k < c->nbrx) {  // (the block's end: struct_blocks branches on brx_t<k>)
+            const BrxTab *t = &c->brx[k];
+            c->uses_brx_t = true;
+            sp(&c->body, "    { uint t = %uu + %s + 0x%08xu; if (((t >> 3) & 3u) == 0u) t += 8u;", pc + 8, R(a), (uint32_t)sbits(w, 20, 24));
+            if (t->ahead) {  // 1: no target of the table (the state machine's default: EXIT)
+                sp(&c->body, " brx_t%d = (", k);
+                for (int j = 0; j < t->n; j++) sp(&c->body, "%st == 0x%xu", j ? " || " : "", t->t[j]);
+                sp(&c->body, ") ? t : 1u; }\n");
+            } else
+                sp(&c->body, " brx_t%d = t; }\n", k);
+        } else
         sp(&c->body, "    { uint t = %uu + %s + 0x%08xu; if (((t >> 3) & 3u) == 0u) t += 8u; pc = t; continue; }\n", pc + 8, R(a),
            (uint32_t)sbits(w, 20, 24));
     } else if (OPM(0x50a0000000000000ull, 0xfff8000000000000ull)) {  // CSETP (zero/sign flags only)
@@ -1947,7 +2161,7 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         }
         sp(&c->body, "      }\n    }\n");
     } else if (!c->glsl && c->stage == STAGE_COMPUTE && OPM(0xeb20000000000000ull, 0xfff8000000000000ull) &&
-               getenv("LARECOMP_SUST") && atoi(getenv("LARECOMP_SUST"))) {  // (opt-in, LARECOMP_SUST=1: EoW's env-map stores came out as garbage - a mosaic)
+               !(getenv("LARECOMP_SUST") && !atoi(getenv("LARECOMP_SUST")))) {  // (LARECOMP_SUST=0: skipped)
         // SUST.B (Metal compute; Ryujinx InstSustB): formatted store of R[d..] (the Rgba mask's components, in order) at
         // R[a] (x), R[a+1] (y), R[a+2] (layer: 2D array / cube faces) into the image whose handle is R[c]
         int rgba = (int)bits(w, 20, 4), dim = (int)bits(w, 33, 3), hc = (int)bits(w, 39, 8);
@@ -1965,6 +2179,26 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         for (int i = 0; i < IMG_SLOTS; i++)  // (bounds-checked: Maxwell drops stores outside the image, Metal may fault)
             sp(&c->body, " if (h_ == imgh[%d]) { if (xy_.x < img%d.get_width() && xy_.y < img%d.get_height() && "
                          "l_ < img%d.get_array_size()) img%d.write(v_, xy_, l_); } else", i, i, i, i, i);
+        sp(&c->body, " {}\n    }\n");
+    } else if (c->glsl && c->stage == STAGE_COMPUTE && maxwell_glsl_image_stores && OPM(0xeb20000000000000ull, 0xfff8000000000000ull)) {
+        // SUST.B (GLSL, as the Metal one above): EoW's environment-map pass (72a4723000) blends its probe cubes into
+        // each face and level with these. Skipped, the map stayed black and metal (a chest's gold trim) went dull brown
+        // in shadow.
+        int rgba = (int)bits(w, 20, 4), dim = (int)bits(w, 33, 3), hc = (int)bits(w, 39, 8);
+        c->info->uses_images = true;
+        sp(&c->body, "    { uint h_ = %s; uvec2 xy_ = uvec2(%s, %s); uint l_ = %s;\n", R(hc), R(a),
+           dim >= 2 ? R(a + 1) : "0u", dim == 2 ? R(a + 1) : dim >= 4 ? R(a + 2) : "0u");
+        if (dim == 2) sp(&c->body, "      xy_.y = 0u;\n");  // (1D array: x, layer)
+        int k = 0;
+        char comp[4][64];
+        for (int ch = 0; ch < 4; ch++) {
+            if (rgba & (1 << ch)) sprintf(comp[ch], "uintBitsToFloat(%s)", R(d == RZ ? RZ : d + k++));
+            else strcpy(comp[ch], ch == 3 ? "1.0f" : "0.0f");
+        }
+        sp(&c->body, "      vec4 v_ = vec4(%s, %s, %s, %s);\n     ", comp[0], comp[1], comp[2], comp[3]);
+        for (int i = 0; i < IMG_SLOTS; i++)  // (bounds-checked: Maxwell drops stores outside the image)
+            sp(&c->body, " if (h_ == imgh[%d][%d]) { ivec3 s_ = imageSize(img%d); if (xy_.x < uint(s_.x) && xy_.y < uint(s_.y) && "
+                         "l_ < uint(s_.z)) imageStore(img%d, ivec3(xy_, l_), v_); } else", i / 4, i % 4, i, i);
         sp(&c->body, " {}\n    }\n");
     } else if (!c->glsl && OPM(0xed00000000000000ull, 0xff00000000000000ull) && bits(w, 49, 3) < 2) {
         // ATOM (Metal; Ryujinx InstAtom): R[d] = old value; atomic op of R[b] into global memory at R[a](:R[a+1] with
@@ -1995,6 +2229,42 @@ static void emit_insn(Ctx *c, uint64_t w, uint32_t pc) {
         }
         sp(&c->body, "      }\n");
         if (d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      r%d = old_;\n", d); }
+        sp(&c->body, "    }\n");
+    } else if (c->glsl && ((OPM(0xebf8000000000000ull, 0xfff8000000000000ull) && bits(w, 20, 3) < 2) ||  // RED
+                           (OPM(0xed00000000000000ull, 0xff00000000000000ull) && bits(w, 49, 3) < 2))) {  // ATOM
+        // RED / ATOM (GLSL; as the Metal ones above): 32-bit atomic op of R[b] into global memory at R[a](:R[a+1]
+        // with .E) + imm20; ATOM also returns the old value in R[d]. EoW builds its light grid with them (atomic ORs):
+        // skipped before, as other games' unsupported stores.
+        bool red = OPM(0xebf8000000000000ull, 0xfff8000000000000ull);
+        int op = red ? (int)bits(w, 23, 3) : (int)bits(w, 52, 4);
+        bool sgn = red ? bits(w, 20, 3) == 1 : bits(w, 49, 3) == 1;
+        int rb = red ? (int)(w & 0xff) : (int)bits(w, 20, 8);
+        int key = gatom_key(op, sgn);
+        if (key < 0) { fail(c, "%s op %d", red ? "red" : "atom", op); return; }
+        int64_t off = sbits(w, 28, 20);
+        bool e64 = bits(w, 48, 1);
+        c->info->uses_gmem = true;
+        c->uses_gmem_store = true;
+        c->info->uses_gmem_store = true;
+        c->gatom_ops |= 1u << key;
+        char addr[256];
+        if (a == RZ) sprintf(addr, "ulong(%lld)", (long long)off);
+        else if (e64) sprintf(addr, "((ulong(%s) << 32 | ulong(%s)) + ulong(%lld))", R(a + 1), R(a), (long long)off);
+        else sprintf(addr, "(ulong(%s) + ulong(%lld))", R(a), (long long)off);
+        sp(&c->body, "    { ulong ga = %s - 0x%llxul; uint old_ = 0u; uint v = %s;\n", addr,
+           (unsigned long long)maxwell_gmem_base, R(rb));
+        sp(&c->body, "      if (ga < 0x%llxul && (ga & 3ul) == 0ul) {\n", (unsigned long long)maxwell_gmem_size);
+        if (c->stage == STAGE_COMPUTE || maxwell_gmem_mirror) {  // (as LDG / STG: the dispatch's storage buffers in gfast_)
+            c->info->uses_gmem_map = true;
+            sp(&c->body, "        uint fw = %s(uint(ga));\n        if (fw != 0xFFFFFFFFu) ", maxwell_gmem_mirror ? "gfind" : "gfindw");
+            gatom_stmt(&c->body, key, "old_", "gfast_.w[fw]");
+            if (!maxwell_gmem_mirror) sp(&c->body, "\n        else old_ = GMATOM_%s(uint(ga >> 2), v);", gatom_name[key]);
+            sp(&c->body, "\n");
+        } else {
+            sp(&c->body, "        old_ = GMATOM_%s(uint(ga >> 2), v);\n", gatom_name[key]);
+        }
+        sp(&c->body, "      }\n");
+        if (!red && d != RZ) { c->reg_used[d] = 1; sp(&c->body, "      r%d = old_;\n", d); }
         sp(&c->body, "    }\n");
     } else if (maxwell_skip_unsupported_stores && (OPM(0xebf8000000000000ull, 0xfff8000000000000ull) ||  // RED
                                                    OPM(0xeb20000000000000ull, 0xfff8000000000000ull))) {  // SUST.B
@@ -2062,6 +2332,10 @@ static void glsl_rewrite(Ctx *c, Str *o, const char *src) {
         memcpy(id, p, n);
         id[n] = 0;
         p = e;
+        if (!strcmp(id, "lane") && c->stage == STAGE_FRAGMENT && maxwell_glsl_quad_deriv) {  // (the quad lane, from the pixel)
+            sp(o, "uint((int(gl_FragCoord.x) & 1) | ((int(gl_FragCoord.y) & 1) << 1))");
+            continue;
+        }
         if (!strcmp(id, "as_type") && *p == '<') {
             const char *gt = strchr(p, '>');
             if (!gt) { fail(c, "glsl: bad as_type"); return; }
@@ -2108,6 +2382,8 @@ static const char glsl_prelude[] =
     "#extension GL_KHR_shader_subgroup_basic : require\n"
     "#extension GL_KHR_shader_subgroup_shuffle : require\n"
     "#extension GL_KHR_shader_subgroup_shuffle_relative : require\n"
+    "#extension GL_KHR_shader_subgroup_vote : require\n"    // (VOTE)
+    "#extension GL_KHR_shader_subgroup_ballot : require\n"  // (VOTE's ballot)
     "#extension GL_EXT_texture_shadow_lod : require\n"
     "#define cbr(cb, off) cb[min((off) >> 4, uint(cb.length() - 1))][((off) >> 2) & 3u]\n"
     "uint as_u(float x) { return floatBitsToUint(x); }\n"
@@ -2182,12 +2458,92 @@ static bool glsl_early_tests(const Ctx *c) {
 }
 
 // Declarations + entry point around the (rewritten) body; mirrors the MSL assembly in maxwell_translate.
+// LARECOMP_VK_PUSH_CB=1 (vertex and fragment): the constant buffer words read most (statically indexed, cbufs 3+: the
+// game's own) move into push constants: fast uniform registers instead of a uniform buffer load each (Mesa's PanVK
+// keeps no uniform buffer words in fast uniforms; ARM's driver promotes them itself). A read's weight is how often it
+// may run: x8 per enclosing loop, x1/2 per enclosing if / else (predicated instructions included). The vertex shader
+// takes up to 16 words from push offset 0, the fragment shader the rest of the 64 (PanVK's 256 bytes) after it: the
+// caller sets maxwell_push_base / maxwell_push_cap around each translation.
+uint32_t maxwell_push_base, maxwell_push_cap = 64;
+static void push_promote(Ctx *c, Str *body) {
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("LARECOMP_VK_PUSH_CB"); on = e ? atoi(e) != 0 : maxwell_glsl_push; }
+    if (!on || (c->stage != STAGE_FRAGMENT && c->stage != STAGE_VERTEX) || !body->buf ||
+        (maxwell_gmem_lazy && c->info->uses_gmem)) return;
+    // LARECOMP_VK_PUSH_VS=0: none in vertex shaders (an A/B of the vertex words: the fragment budget stays 48 words)
+    static int vs_on = -1;
+    if (vs_on < 0) { const char *e = getenv("LARECOMP_VK_PUSH_VS"); vs_on = !e || atoi(e); }
+    if (c->stage == STAGE_VERTEX && !vs_on) return;
+    int vs_cap = (int)maxwell_push_cap < 32 ? (int)maxwell_push_cap / 2 : 16;  // (the vertex shader's share of the budget)
+    int cap = c->stage == STAGE_VERTEX ? vs_cap : (int)maxwell_push_cap - (vs_on ? (int)maxwell_push_base / 4 : vs_cap);
+    if (cap > 64) cap = 64;
+    if (cap <= 0) return;
+    enum { MAXW = 512, MAXD = 64 };
+    typedef struct { uint8_t cb; uint16_t off; double w; } PushWord;
+    PushWord words[MAXW];
+    char scope[MAXD];  // 'l' loop, 'c' if / else, '-' other
+    int nw = 0, nd = 0, loops = 0, conds = 0;
+    const char *b = body->buf, *line = b;
+    for (const char *p = b; *p; p++) {
+        if (*p == '\n') line = p + 1;
+        if (*p == '{') {
+            char k = '-';
+            const char *q = p;  // (what opens it: "do {", "if (...) {", "else {")
+            while (q > line && (q[-1] == ' ')) q--;
+            if (q - line >= 2 && !strncmp(q - 2, "do", 2)) k = 'l';
+            else if (strstr(line, "if (") && strstr(line, "if (") < p) k = 'c';
+            else if (q - line >= 4 && !strncmp(q - 4, "else", 4)) k = 'c';
+            if (nd < MAXD) scope[nd] = k;
+            nd++;
+            if (k == 'l') loops++; else if (k == 'c') conds++;
+            continue;
+        }
+        if (*p == '}') {
+            if (nd > 0) { nd--; if (nd < MAXD) { if (scope[nd] == 'l') loops--; else if (scope[nd] == 'c') conds--; } }
+            continue;
+        }
+        int cb, row, col, len = 0;
+        if (p[0] == 'c' && p[1] == 'b' && (p == b || !((p[-1] >= 'a' && p[-1] <= 'z') || (p[-1] >= '0' && p[-1] <= '9') || p[-1] == '_')) &&
+            sscanf(p, "cb%d[%d][%d]%n", &cb, &row, &col, &len) == 3 && len && cb >= 3 && cb < 18 && col < 4 && row < 4096) {
+            uint16_t off = (uint16_t)(row * 16 + col * 4);
+            double w = 1;
+            for (int d = 0; d < loops && d < 6; d++) w *= 8;
+            for (int d = 0; d < conds && d < 6; d++) w *= 0.5;
+            int i = 0;
+            while (i < nw && !(words[i].cb == cb && words[i].off == off)) i++;
+            if (i == nw && nw < MAXW) words[nw++] = (PushWord){(uint8_t)cb, off, 0};
+            if (i < nw) words[i].w += w;
+            p += len - 1;
+        }
+    }
+    if (!nw) return;
+    for (int i = 1; i < nw; i++)  // (by weight, heaviest first)
+        for (int j = i; j > 0 && words[j].w > words[j - 1].w; j--) { PushWord t = words[j]; words[j] = words[j - 1]; words[j - 1] = t; }
+    int n = nw < cap ? nw : cap;
+    Str o = {0};
+    for (const char *p = b; *p;) {
+        int cb, row, col, len = 0, k = -1;
+        if (p[0] == 'c' && p[1] == 'b' && (p == b || !((p[-1] >= 'a' && p[-1] <= 'z') || (p[-1] >= '0' && p[-1] <= '9') || p[-1] == '_')) &&
+            sscanf(p, "cb%d[%d][%d]%n", &cb, &row, &col, &len) == 3 && len) {
+            for (int i = 0; i < n; i++) if (words[i].cb == cb && words[i].off == row * 16 + col * 4) { k = i; break; }
+        }
+        if (k >= 0) { sp(&o, "pcw[%d]", k); p += len; }
+        else { sp(&o, "%c", *p); p++; }
+    }
+    free(body->buf);
+    *body = o;
+    c->info->npush = (uint8_t)n;
+    c->info->push_base = c->stage == STAGE_VERTEX ? 0 : (uint16_t)maxwell_push_base;
+    for (int i = 0; i < n; i++) c->info->push_cb[i] = words[i].cb, c->info->push_off[i] = words[i].off;
+}
+
 static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     ShaderInfo *info = c->info;
     const ShaderKey *key = c->key;
     int stage = c->stage;
     Str body = {0};
     glsl_rewrite(c, &body, c->body.buf ? c->body.buf : "");
+    push_promote(c, &body);
     if (info->uses_gmem && (info->cbuf_mask & (1u << GMEM_BUFFER_INDEX))) fail(c, "cbuf %d clashes with gmem", GMEM_BUFFER_INDEX);
     if (info->cbuf_mask >> 18) fail(c, "cbuf index out of range");
     for (int i = 0; i < info->ntex; i++)
@@ -2202,6 +2558,15 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     if (exact < 0) exact = getenv("LARECOMP_VK_EXACT_H2F") && atoi(getenv("LARECOMP_VK_EXACT_H2F")) != 0;
     sp(&s, "%s%s", !exact && (stage == STAGE_FRAGMENT || stage == STAGE_COMPUTE) ? glsl_h2f_native : glsl_h2f_exact,
        glsl_prelude_half);
+    if (c->quad_used)  // (maxwell_glsl_quad_deriv) the quad neighbour's value: v + its fine derivative, by the pixel's side
+        sp(&s, "float qswap1(float v) { float d = dFdxFine(v); return (int(gl_FragCoord.x) & 1) == 0 ? v + d : v - d; }\n"
+               "float qswap2(float v) { float d = dFdyFine(v); return (int(gl_FragCoord.y) & 1) == 0 ? v + d : v - d; }\n"
+               "float qswap3(float v) { return qswap2(qswap1(v)); }\n");
+    // (maxwell_glsl_fast_minmax) the GPU's own min / max / saturation for the code after here: Adreno, as D3D requires,
+    // returns the operand that isn't NaN from min / max and saturates NaN to 0 - the Maxwell semantics the helpers above
+    // spell out with NaN tests (two tests and selects each, ~40 in the lit pass's light loop: 1717 -> 1637
+    // instructions). From LASRecompAndroid by mamcjr (MIT).
+    if (maxwell_glsl_fast_minmax) sp(&s, "#define fmin min\n#define fmax max\n#define saturate(x) clamp((x), 0.0f, 1.0f)\n");
     for (int i = 0; i < 18; i++) {
         if (!(info->cbuf_mask & (1u << i))) continue;
         uint32_t n = info->cbuf_size[i] / 16;
@@ -2210,6 +2575,7 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         if (!n) n = 1;
         sp(&s, "layout(std140, set = %d, binding = %d) uniform CB%d { uvec4 cb%d[%u]; };\n", set, i, i, i, n);
     }
+    if (info->npush) sp(&s, "layout(push_constant) uniform PC { layout(offset = %u) uint pcw[%d]; };\n", info->push_base, info->npush);  // (push_promote)
     if (info->uses_gmem && !maxwell_gmem_chunk_shift) {
         sp(&s, "layout(std430, set = %d, binding = %d) %sbuffer GMem { uint w[]; } gmem_;\n", set, GMEM_BUFFER_INDEX,
            c->uses_gmem_store ? "" : "readonly ");
@@ -2217,6 +2583,12 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         if (c->uses_gmem_store)
             sp(&s, "#define GMW(i, v) gmem_.w[i] = (v)\n#define GMAND(i, m) atomicAnd(gmem_.w[i], m)\n"
                    "#define GMOR(i, m) atomicOr(gmem_.w[i], m)\n");
+        for (int k = 0; k < GATOM_N; k++)
+            if (c->gatom_ops & (1u << k)) {
+                sp(&s, "uint GMATOM_%s(uint i, uint v) { uint r = 0u; ", gatom_name[k]);
+                gatom_stmt(&s, k, "r", "gmem_.w[i]");
+                sp(&s, " return r; }\n");
+            }
     } else if (info->uses_gmem && !maxwell_gmem_lazy) {  // the heap in windows, one binding each, plain branches (shader.h)
         int n = maxwell_gmem_chunks(), ws = (int)maxwell_gmem_chunk_shift - 2, cs = GMEM_CHUNK_SET(stage);
         for (int k = 0; k < n; k++)
@@ -2238,6 +2610,18 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
                 sp(&s, "}\n");
             }
             sp(&s, "#define GMW(i, v) GMW_(i, v)\n#define GMAND(i, m) GMAND_(i, m)\n#define GMOR(i, m) GMOR_(i, m)\n");
+            for (int op = 0; op < GATOM_N; op++) {
+                if (!(c->gatom_ops & (1u << op))) continue;
+                sp(&s, "uint GMATOM_%s(uint i, uint v) { uint c = i >> %du, o = i & 0x%xu, r = 0u;\n", gatom_name[op], ws, (1u << ws) - 1);
+                for (int k = 0; k < n; k++) {
+                    char lv[32];
+                    snprintf(lv, sizeof lv, "gmem%d_.w[o]", k);
+                    sp(&s, "  if (c == %du) ", k);
+                    gatom_stmt(&s, op, "r", lv);
+                    sp(&s, "\n");
+                }
+                sp(&s, "  return r; }\n");
+            }
         }
     } else if (info->uses_gmem) {  // chunks imported lazily: a table of device addresses, buffer references (shader.h)
         int ws = (int)maxwell_gmem_chunk_shift - 2, cs = GMEM_CHUNK_SET(stage);
@@ -2299,6 +2683,21 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         }
         sp(&s, "#define GMR(i) GMR1(i)\n");
         if (c->uses_gmem_store) sp(&s, "#define GMW(i, v) GMW1(i, v)\n#define GMAND(i, m) GMAND1(i, m)\n#define GMOR(i, m) GMOR1(i, m)\n");
+        for (int op = 0; op < GATOM_N; op++) {  // (as the functions above: the draw's chunks, then the table)
+            if (!(c->gatom_ops & (1u << op))) continue;
+            sp(&s, "uint GMATOM_%s(uint i, uint v) { uint o, r = 0u;", gatom_name[op]);
+            if (direct)
+                for (int k = 0; k < GMEM_DIRECT_MAX; k++) {
+                    char lv[32];
+                    snprintf(lv, sizeof lv, "gdir%d_.w[o]", k);
+                    sp(&s, " o = i - gd[%d].x; if (o < gd[%d].y) { ", k, k);
+                    gatom_stmt(&s, op, "r", lv);
+                    sp(&s, " return r; }");
+                }
+            sp(&s, " uint c = GMC(i); o = GMO(i); uvec4 e = gchunk[c]; if (o < e.z) { GW p = GW((uint64_t(e.y) << 32) | uint64_t(e.x)); ");
+            gatom_stmt(&s, op, "r", "p.w[o]");
+            sp(&s, " return r; } gmiss(c, i); return 0u; }\n");
+        }
     }
     if (info->uses_gmem_map) {  // (compute) the dispatch's storage buffers, device-local: gmap[i] = heap offset, size, word
         sp(&s, "layout(std140, set = %d, binding = %d) uniform GMap { uvec4 gmap[%d]; };\n", set, GMAP_BUFFER_INDEX, GMAP_MAX + 1);
@@ -2315,17 +2714,24 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     }
     if (c->uses_rscale && stage != STAGE_VERTEX) {
         sp(&s, "layout(std140, set = %d, binding = 18) uniform RScale { vec4 rscale[%d]; };\n", set,
-           key && key->flip_x ? 66 : 65);  // ([65]: mirror mode's render target width)
+           (key && key->flip_x) || c->ao_taps ? 66 : 65);  // ([65]: mirror mode's render target width; .y: ao_grid_fix)
         info->uses_rscale = true;
+        info->uses_ao_taps = c->ao_taps;
     }
     bool tint = stage == STAGE_FRAGMENT && !dbg && (c->omap_target & 0x7) == 0x7 && (!key || key->rt_kind[0] == 0);
     if (tint) {
         sp(&s, "layout(std140, set = %d, binding = 19) uniform Tint { vec4 ltint[4]; };\n", set);
+        if (maxwell_glsl_tint_branch) sp(&s, "layout(constant_id = %d) const bool RECOLOUR = false;\n", RECOLOUR_SPEC_ID);
         info->uses_tint = true;
+    }
+    if (info->uses_images) {  // (SUST.B, compute) the bound images and their handles
+        sp(&s, "layout(std140, set = %d, binding = %d) uniform ImgH { uvec4 imgh[%d]; };\n", set, IMG_GLSL_HANDLE_BINDING, IMG_SLOTS / 4);
+        for (int i = 0; i < IMG_SLOTS; i++)
+            sp(&s, "layout(set = %d, binding = %d) uniform writeonly image2DArray img%d;\n", set, IMG_GLSL_BINDING + i, i);
     }
     for (int i = 0; i < info->ntex; i++) {
         ShaderTexture *t = &info->tex[i];
-        sp(&s, "layout(set = %d, binding = %d) uniform %s t%d;\n", set, 32 + i, glsl_sampler_type(t), i);
+        sp(&s, "layout(set = %d, binding = %d) uniform %s t%d;\n", set, 32 + i, tex_is_stencil(c, i) ? "usampler2D" : glsl_sampler_type(t), i);
         // size of level l as (width, height, depth or layers)
         switch (t->type) {
         case TEXTYPE_1D: sp(&s, "ivec3 tsize%d(int l) { return ivec3(textureSize(t%d, l), 1, 1); }\n", i, i); break;
@@ -2372,13 +2778,20 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     }
     for (int i = 0; i < 256; i++)
         if (c->reg_used[i]) sp(&s, "  uint r%d = 0u;\n", i);
+    shadow_taps(c, &s);
     for (int i = 0; i < 7; i++)
         if (c->pred_used[i]) sp(&s, "  bool p%d = false;\n", i);
     if (c->uses_cc) sp(&s, "  uint cc = 0u; bool ccz = false, ccs = false;\n");
-    if (c->uses_local) sp(&s, "  uint lmem[%d]; for (int li_ = 0; li_ < %d; li_++) lmem[li_] = 0u;\n", LMEM_WORDS, LMEM_WORDS);
+    if (c->uses_local) sp(&s, "  uint lmem[%d]; for (int li_ = 0; li_ < %d; li_++) lmem[li_] = 0u;\n", c->lmem_words, c->lmem_words);
     if (dbg) sp(&s, maxwell_dbg_pc == 0xffffffffu ? "  float dbgv = 1.0f;\n" : "  float dbgv = -1.0f;\n");
-    if (any_branch) {
-        if (maxwell_glsl_stack_vars) {
+    if (c->structured) {
+        for (int g = 0; g < c->struct_vars; g++) sp(&s, "  bool g%d = false;\n", g);
+        if (c->uses_brx_t) for (int k = 0; k < c->brx_vars; k++) sp(&s, "  uint brx_t%d = 0u;\n", k);
+        sp(&s, "%s", body.buf ? body.buf : "");
+    } else if (any_branch) {
+        if (c->static_stacks) {
+            sp(&s, "  uint pc = 8u;\n");  // (the pops jump to resolved targets: no stacks)
+        } else if (maxwell_glsl_stack_vars) {
             sp(&s, "  uint pc = 8u; uint ssy_n = 0u, pbk_n = 0u, pcnt_n = 0u;\n");
             static const char *const stk[] = {"ssy", "pbk", "pcnt"};
             for (int j = 0; j < 3; j++) {
@@ -2421,10 +2834,15 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
                 r++;
             }
         }
+        if (c->ao_pass) sp(&s, "  if (rscale[65][2] > 0.0f) c0 = vec4(1.0f);\n");  // (ambient occlusion Off: ao_grid_fix)
         if (tint)
             sp(&s, "  if (ltint[0].w > 0.0f) { vec3 g = c0.rgb; float l = dot(g, vec3(0.299f, 0.587f, 0.114f));\n"
                    "    c0.rgb = mix(g, ltint[0].rgb * pow(l, ltint[1].w) + ltint[1].rgb * l, ltint[0].w); }\n");
+        // (maxwell_glsl_tint_branch) the HSV recolour only in the pipelines built for it (RECOLOUR, exec.c): unused, its
+        // code still cost Turnip on an Adreno 650 40% of the house's lit pass (720p: 8.3 -> 5.0 ms without it)
+        if (tint && maxwell_glsl_tint_branch) sp(&s, "  if (RECOLOUR) { if (false) {}\n");
         if (tint) emit_recolour(&s, "c0", "vec3", "vec4");
+        if (tint && maxwell_glsl_tint_branch) sp(&s, "  }\n");
         if (c->omap_depth) {
             if (c->reg_used[r + 1]) sp(&s, "  gl_FragDepth = as_f(r%d);\n", r + 1);
             else sp(&s, "  gl_FragDepth = gl_FragCoord.z;\n");
@@ -2434,60 +2852,716 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
     info->msl = s.buf;
     info->attr_mask = c->in_attr_mask;
     info->out_mask = stage == STAGE_FRAGMENT ? c->omap_target : c->out_attr_mask;
+    for (int i = 0; i < 18; i++) info->cbuf_used[i] = (info->cbuf_dynamic & (1u << i)) ? 0 : c->cbuf_need[i] * 16;
     free(c->body.buf);
     free(c);
     return info;
 }
 
-// BRX (indirect branch, Vulkan / GLSL only): label just the targets its jump table can name. A BRX used to make every
+// BRX (indirect branch): label just the targets its jump table can name. A BRX used to make every
 // instruction a case of the dispatcher switch (any one may be a target): hundreds of cases falling into each other
 // inside the dispatcher loop. Suspected of what AMD's Windows driver never finishes building (issue #237: the dialogue
 // body text's vertex shader stayed "building", its draws skipped - Tarin's name showed, the message stayed blank).
+// Metal as well: EoW has BRX in many big shaders, and with every instruction a case Apple's compiler took minutes for
+// some (a cold start's shader preparation ran over 18 min on an M3 Max).
 // The compiler puts the table in the program's own constants (cb1, after the code: blob + const_offset), loaded into
 // the BRX register by an LDC c[0x1][Rx + table] shortly before: BRX Ra, imm goes to pc + 8 + table[k] + imm. Entries
 // are read until one isn't an instruction of this shader (the end of the table; a word past it that still looks like
 // one only adds a harmless case). False: not that shape (the register set some other way, no constants, nothing
 // valid) - the caller labels every instruction as before. LARECOMP_BRX_ALL_LABELS=1: always every instruction.
-static bool brx_table_labels(const uint8_t *code, size_t i, size_t end, const uint8_t *blob, size_t const_offset, uint8_t *label) {
-    static int all = -1;
-    if (all < 0) { const char *e = getenv("LARECOMP_BRX_ALL_LABELS"); all = e && atoi(e) != 0; }
-    if (all || const_offset >= 0x10000 || const_offset < 0x80) return false;  // (0x10000: no constants known)
+// The targets are kept (c->brx) for static_stacks_resolve and struct_blocks; LARECOMP_VK_STRUCTURE_BRX=0: not (such a
+// program keeps its stacks and the state machine, as it did before).
+// (brx_table_labels) how many registers an instruction may write from its destination field up: the loads with a
+// size (LDG LDL LDS LDC: 64 / 128-bit; ALD: its count), 4 for any other load or texture fetch (LD, TEX..), else 1
+static int brx_dst_regs(uint64_t w) {
+    uint64_t t13 = w & 0xfff8000000000000ull;
+    if (t13 == 0xeed0000000000000ull || t13 == 0xef40000000000000ull || t13 == 0xef48000000000000ull || t13 == 0xef90000000000000ull) {
+        int size = (int)bits(w, 48, 3);
+        return size == 5 ? 2 : size >= 6 ? 4 : 1;
+    }
+    if (t13 == 0xefd8000000000000ull) return (int)bits(w, 47, 2) + 1;
+    int top = (int)(w >> 56);
+    if ((top & 0xe0) == 0x80 || (top >= 0xc0 && top <= 0xdf)) return 4;
+    return 1;
+}
+// (brx_table_labels) the cb1 offset of the jump table the BRX at word i reads, -1 if not that shape; *from: the LDC's
+// word when it is more than 32 instructions back (else 0)
+static int64_t brx_table_ldc(const uint8_t *code, size_t i, size_t end, size_t *from_out) {
     uint64_t brx = ((const uint64_t *)code)[i];
     int ra = (int)bits(brx, 8, 8);
-    int64_t imm = sbits(brx, 20, 24);
-    if (ra == RZ) return false;
-    // the instruction that set ra: an LDC from cb1 within the few before, nothing else writing ra (or a branch) between
+    if (ra == RZ) return -1;
+    // the instruction that set ra: an LDC from cb1 before it, nothing else writing ra (or a branch) between. Within 32
+    // instructions as before; further back (LA's lmem vertex shaders load the table ~80 before the BRX) a write to
+    // ra by a wider load below it (brx_dst_regs) also counts, and no branch may land in between.
     int64_t table = -1;
-    for (size_t k = i, seen = 0; k-- > 0 && seen < 32;) {
+    size_t from = 0;
+    for (size_t k = i, seen = 0; k-- > 0 && seen < 256;) {
         if (k % 4 == 0) continue;  // (scheduling words)
         seen++;
         uint64_t w = ((const uint64_t *)code)[k];
         if ((w & 0xfff0000000000000ull) >= 0xe200000000000000ull && (w & 0xfff0000000000000ull) <= 0xe350000000000000ull)
-            return false;  // flow control between: not straight-line
+            return -1;  // flow control between: not straight-line
         if ((w & 0xfff8000000000000ull) == 0xef90000000000000ull && (int)bits(w, 0, 8) == ra) {  // LDC ra, c[idx][Rx + off]
-            if (bits(w, 36, 5) != 1 || bits(w, 48, 3) != 4) return false;  // (cb1, 32-bit)
+            if (bits(w, 36, 5) != 1 || bits(w, 48, 3) != 4) return -1;  // (cb1, 32-bit)
             table = (int64_t)bits(w, 20, 16);
+            from = seen > 32 ? k : 0;
             break;
         }
-        if ((int)bits(w, 0, 8) == ra) return false;  // (something else may write ra: unknown)
+        int d = (int)bits(w, 0, 8);
+        if (d == ra) return -1;  // (something else may write ra: unknown)
+        if (seen > 32 && d < ra && d + brx_dst_regs(w) - 1 >= ra) return -1;
+    }
+    if (table < 0) return -1;
+    for (size_t k = 0; from && k < end; k++) {  // (far: a branch into (LDC, BRX] would bring another ra)
+        uint64_t w = ((const uint64_t *)code)[k];
+        if (k % 4 == 0 || ((w & 0xfff0000000000020ull) != 0xe240000000000000ull && (w & 0xfff0000000000020ull) != 0xe290000000000000ull &&
+                           (w & 0xfff0000000000020ull) != 0xe2a0000000000000ull && (w & 0xfff0000000000020ull) != 0xe2b0000000000000ull))
+            continue;
+        int64_t t = norm_target((int64_t)k * 8 + 8 + sbits(w, 20, 24));
+        if (t > (int64_t)from * 8 && t <= (int64_t)i * 8) return -1;
+    }
+    *from_out = from;
+    return table;
+}
+static bool brx_table_labels(Ctx *c, const uint8_t *code, size_t i, size_t end, const uint8_t *blob, size_t const_offset, uint8_t *label) {
+    static int all = -1;
+    if (all < 0) { const char *e = getenv("LARECOMP_BRX_ALL_LABELS"); all = e && atoi(e) != 0; }
+    if (all || const_offset >= 0x10000 || const_offset < 0x80) return false;  // (0x10000: no constants known)
+    uint64_t brx = ((const uint64_t *)code)[i];
+    int64_t imm = sbits(brx, 20, 24);
+    size_t from = 0;
+    int64_t table = brx_table_ldc(code, i, end, &from);
+    // the table ends where another BRX's table starts (compiled switches' tables sit back to back in cb1: read on,
+    // the first one's walk takes the next one's entries as its own targets, which land in another switch)
+    int64_t limit = table + 4 * 256;
+    for (size_t k = 0; table >= 0 && k < end; k++) {
+        if (k % 4 == 0 || k == i || (((const uint64_t *)code)[k] & 0xfff0000000000000ull) != 0xe250000000000000ull) continue;
+        size_t f2;
+        int64_t t2 = brx_table_ldc(code, k, end, &f2);
+        if (t2 > table && t2 < limit) limit = t2;
     }
     if (table < 0) return false;
     const uint8_t *tab = blob + const_offset + table;
     uint8_t *mark = calloc(end + 4, 1);
+    BrxTab tab_ = {i, 0, {0}};
     int n = 0;
-    for (int k = 0; k < 256; k++) {
+    for (int k = 0; k < (limit - table) / 4; k++) {
         int32_t v;
         memcpy(&v, tab + 4 * k, 4);
         int64_t t = (int64_t)i * 8 + 8 + v + imm;
         if (t < 8 || (t & 7) || (size_t)(t / 8) >= end) break;
         t = norm_target(t);  // (as the BRX itself does at run time)
         if ((size_t)(t / 8) >= end) break;
+        if (!mark[t / 8]) tab_.t[tab_.n++] = (uint32_t)t;  // (each target once, in table order)
         mark[t / 8] = 1;
         n++;
     }
     if (n) for (size_t k = 0; k < end; k++) label[k] |= mark[k];
+    static int on = -1;
+    if (on < 0) { const char *e = getenv("LARECOMP_VK_STRUCTURE_BRX"); on = !e || atoi(e) != 0; }
+    if (n && on) {
+        for (int a = 1; a < tab_.n; a++)  // (ascending: the dispatch tests' order)
+            for (int b = a; b > 0 && tab_.t[b - 1] > tab_.t[b]; b--) { uint32_t x = tab_.t[b]; tab_.t[b] = tab_.t[b - 1]; tab_.t[b - 1] = x; }
+        tab_.ahead = tab_.t[0] / 8 > i;
+        c->brx = realloc(c->brx, (c->nbrx + 1) * sizeof *c->brx);
+        c->brx[c->nbrx++] = tab_;
+    }
     free(mark);
     return n > 0;
+}
+
+// LARECOMP_VK_STATIC_STACKS=1 (GLSL): the SSY / PBK / PCNT stacks only hold branch targets, and in compiled code
+// their contents at each instruction are the same on every path that reaches it. Walk every path from the entry
+// with the stacks' contents; where two paths meet (a label) they must agree. Then each SYNC / BRK / CONT has one
+// target, and the shader needs no stacks: 48 slots fewer, which spare the registers (or the stack memory) that
+// the driver's compiler otherwise spends on them. A BRX whose jump table was read goes on to each of its targets.
+// Returns false (keep the stacks) on anything else: any other indirect jump, a call / return, a stack over- or
+// underflow, or paths that disagree.
+// The three are one stack in the hardware (the CRS stack): a pop unwinds to the latest entry of its kind, and drops
+// the entries pushed after it (a BRK out of an SSY region leaves no SSY behind; CONT keeps its PCNT). The state
+// machine's separate stacks keep such an entry, which nothing pops again in compiled code.
+typedef struct { uint32_t n; uint32_t v[48]; uint8_t k[48]; } StackState;  // (no padding: compared with memcmp)
+static unsigned ss_why[8];  // (why a shader kept its stacks: the progress line)
+static const BrxTab *brx_tab(const BrxTab *brx, int nbrx, size_t i) {
+    for (int k = 0; k < nbrx; k++) if (brx[k].at == i) return &brx[k];
+    return NULL;
+}
+static bool static_stacks_resolve(const uint64_t *code, size_t end, const uint8_t *label, uint32_t *pop_target,
+                                  const BrxTab *brx, int nbrx) {
+    int why = 0;  // 1 jump to no label, 2 paths disagree, 3 overflow, 4 call / indirect, 5 pop of empty, 6 pop target differs
+    StackState *at = calloc(end + 1, sizeof *at);
+    uint8_t *seen = calloc(end + 1, 1);
+    size_t *work = malloc((end + 1) * sizeof *work);
+    size_t nwork = 0;
+    bool ok = true;
+#define ENQ(idx, st) do { size_t e_ = (idx); \
+        if (e_ >= end || !label[e_]) { ok = false; why = 1; break; } \
+        if (seen[e_]) { if (memcmp(&at[e_], (st), sizeof(StackState))) { ok = false; why = 2; } break; } \
+        seen[e_] = 1; at[e_] = *(st); work[nwork++] = e_; } while (0)
+    StackState s0 = {0};
+    ENQ(1, &s0);
+    while (ok && nwork) {
+        size_t i = work[--nwork];
+        StackState s = at[i];
+        for (bool first = true; ok; first = false, i++) {
+            if (i % 4 == 0) continue;
+            if (i >= end) break;                                   // past the last instruction: the end
+            if (!first && label[i]) { ENQ(i, &s); break; }        // falls into a label: a meeting point
+            uint64_t w = code[i];
+            uint64_t top12 = w & 0xfff0000000000000ull;
+            int pr = (int)bits(w, 16, 3);
+            bool prn = bits(w, 19, 1);
+            int k = top12 == 0xe290000000000000ull ? 0 : top12 == 0xe2a0000000000000ull ? 1 : top12 == 0xe2b0000000000000ull ? 2 : -1;
+            if (k >= 0 && !(w & 0x20)) {                           // SSY / PBK / PCNT: push (never predicated)
+                int nk = 0;
+                for (uint32_t j = 0; j < s.n; j++) nk += s.k[j] == k;
+                if (nk >= 16) { ok = false; why = 3; break; }
+                s.k[s.n] = (uint8_t)k;
+                s.v[s.n++] = norm_target((int64_t)(i * 8) + 8 + sbits(w, 20, 24));
+                continue;
+            }
+            if (pr == PT && prn) continue;                         // @!PT: never runs
+            bool guarded = !(pr == PT && !prn);
+            const BrxTab *bt = top12 == 0xe250000000000000ull && !(w & 0x20) ? brx_tab(brx, nbrx, i) : NULL;
+            if (bt) {                                              // BRX with a known table: each target
+                for (int k = 0; k < bt->n && ok; k++) ENQ(bt->t[k] / 8, &s);
+                if (!guarded) break;
+                continue;
+            }
+            if (top12 == 0xe200000000000000ull || top12 == 0xe210000000000000ull || top12 == 0xe250000000000000ull ||
+                top12 == 0xe260000000000000ull || top12 == 0xe270000000000000ull || top12 == 0xe280000000000000ull ||
+                top12 == 0xe310000000000000ull || top12 == 0xe320000000000000ull) { ok = false; why = 4; break; }  // JMP JMX BRX CAL PRET PLONGJMP LONGJMP RET
+            if ((w & 0xfff0000000000020ull) == 0xe240000000000000ull) {  // BRA
+                ENQ(norm_target((int64_t)(i * 8) + 8 + sbits(w, 20, 24)) / 8, &s);
+                if (!guarded) break;
+                continue;
+            }
+            if (top12 == 0xe300000000000000ull) { if (!guarded) break; continue; }  // EXIT
+            int pk = (w & 0xfff8000000000000ull) == 0xf0f8000000000000ull ? 0 : top12 == 0xe340000000000000ull ? 1 :
+                     top12 == 0xe350000000000000ull ? 2 : -1;      // SYNC / BRK / CONT
+            if (pk >= 0) {
+                int top = (int)s.n - 1;
+                while (top >= 0 && s.k[top] != pk) top--;
+                if (top < 0) { ok = false; why = 5; break; }
+                uint32_t tgt = s.v[top];
+                if (pop_target[i] && pop_target[i] != tgt) { ok = false; why = 6; break; }
+                pop_target[i] = tgt;
+                StackState t = s;
+                t.n = (uint32_t)(pk == 2 ? top + 1 : top);          // (CONT keeps the loop's entry; the unwound slots
+                for (uint32_t j = t.n; j < s.n; j++) { t.k[j] = 0; t.v[j] = 0; }  //  are cleared: states are compared whole)
+                ENQ(tgt / 8, &t);
+                if (!guarded) break;
+                continue;
+            }
+        }
+    }
+#undef ENQ
+    free(at); free(seen); free(work);
+    if (!ok) ss_why[why & 7]++;
+    return ok;
+}
+
+// LARECOMP_VK_STRUCTURE=1 (GLSL, with static stacks): the branches as structured code instead of the `switch (pc)`
+// state machine, so the driver's compiler sees where each value is live. A port of the scope nesting in Ryujinx's
+// shader translator (Ryujinx.Graphics.Shader/StructuredIr/StructuredProgramContext.cs, MIT, Copyright (c) Ryujinx
+// Team and Contributors): the blocks in program order; a block reached by a later block's branch opens a do-while
+// up to that block (whose branch condition is the loop's), and a forward branch that lands inside the current scope
+// opens an `if (!cond)` up to its target. Where Ryujinx would need a goto (its GotoElimination pass, not ported) the
+// shader keeps the state machine. EXIT is `break` out of the outer do { } while (false), through the loops via
+// exit_now. The instructions are emitted in the same order as by the state machine (same side effects).
+//
+// A BRX with a known table (c->brx) becomes blocks without instructions that branch on brx_t<k>, the target it
+// computed (0 while no dispatch is under way). All targets after the BRX (`ahead`, the usual compiled switch): the
+// BRX's block EXITs when the value is none of the targets (brx_t<k> = 1; the state machine's `default:`), then goes
+// to a test placed just before the first target; the test before each target but the last skips on to the next one
+// while brx_t<k> is past it, and each target's block clears brx_t<k>. So every case is an if in program order, and a
+// case that falls into the next one still does (the test sees 0). A table that names an earlier block: a chain of
+// compares after the BRX (`brx_t<k> == target` branches there; none: EXIT). The chain makes crossing gotos, which
+// GotoElimination nests in a loop that keeps every register live around it; the tests don't.
+enum { TERM_NONE, TERM_BRANCH, TERM_EXIT };
+enum { BRX_NONE, BRX_EQ, BRX_PAST, BRX_NOT_FOUND, BRX_ANY };  // SBlock.brx_test: brx_t<k> == / > cmp, == 1, != 0
+typedef struct {
+    size_t first, last;   // instruction words [first, last] (a BRX's tests: none, SIZE_MAX)
+    int term;             // TERM_*
+    int pr; bool prn;     // its predicate (PT, false: unconditional)
+    int target;           // TERM_BRANCH: block index
+    uint8_t brx_test;     // BRX_*: the condition is that test of brx_t<brx_k> (BRX_EQ: and the predicate)
+    bool vtarget;         // target is a block index already (a test's next test)
+    int brx_k;
+    uint32_t brx_cmp;
+} SBlock;
+static bool sb_always(const SBlock *b) { return b->pr == PT && !b->prn && !b->brx_test; }  // (an unconditional end)
+static SBlock sb_test(int test, int k, uint32_t cmp, int term) {
+    SBlock v = {SIZE_MAX, SIZE_MAX, term, PT, false, -1, (uint8_t)test, false, k, cmp};
+    return v;
+}
+// The blocks of a shader whose stacks were resolved (pop_target): false if one can't be described here.
+static bool struct_blocks(const uint64_t *code, size_t end, const uint8_t *label, const uint32_t *pop_target,
+                          const BrxTab *brx, int nbrx, SBlock **out, int *nout, int **blk_of_out) {
+    int *blk_of = malloc((end + 1) * sizeof *blk_of);
+    size_t extra = 0;
+    for (int k = 0; k < nbrx; k++) extra += (size_t)brx[k].n + 2;
+    SBlock *b = calloc(end + 2 + extra, sizeof *b);
+    int *pend = malloc((nbrx + 1) * sizeof *pend);  // per `ahead` BRX: the block whose branch goes to its next test
+    for (int k = 0; k < nbrx; k++) pend[k] = -1;
+    int nb = 0;
+    bool cut = true;  // the next instruction starts a block
+    for (size_t i = 0; i < end; i++) {
+        if (i % 4 == 0) { blk_of[i] = -1; continue; }
+        if (cut || label[i]) {
+            if (nb && b[nb - 1].first != SIZE_MAX) b[nb - 1].last = (i - 1) % 4 ? i - 1 : i - 2;  // (its last instruction, not a scheduling word)
+            for (int k = 0; k < nbrx; k++) {  // the tests before a target of an `ahead` BRX
+                if (!brx[k].ahead || pend[k] < 0) continue;
+                int j = 0;
+                while (j < brx[k].n && brx[k].t[j] != i * 8) j++;
+                if (j == brx[k].n) continue;
+                b[pend[k]].target = nb;
+                pend[k] = -1;
+                if (j + 1 < brx[k].n) { pend[k] = nb; b[nb] = sb_test(BRX_PAST, k, brx[k].t[j], TERM_BRANCH); b[nb].vtarget = true; nb++; }
+            }
+            b[nb] = (SBlock){i, i, TERM_NONE, PT, false, -1, BRX_NONE, false, -1, 0};
+            nb++;
+            cut = false;
+        }
+        blk_of[i] = nb - 1;
+        uint64_t w = code[i], top12 = w & 0xfff0000000000000ull;
+        int pr = (int)bits(w, 16, 3);
+        bool prn = bits(w, 19, 1);
+        bool is_bra = (w & 0xfff0000000000020ull) == 0xe240000000000000ull;
+        bool is_pop = (w & 0xfff8000000000000ull) == 0xf0f8000000000000ull || top12 == 0xe340000000000000ull ||
+                      top12 == 0xe350000000000000ull;
+        bool is_exit = top12 == 0xe300000000000000ull;
+        bool is_brx = top12 == 0xe250000000000000ull;
+        if (!is_bra && !is_pop && !is_exit && !is_brx) continue;
+        if (pr == PT && prn) continue;  // never runs
+        SBlock *k = &b[nb - 1];
+        if (is_brx) {  // the block ends at the BRX; then its tests
+            const BrxTab *t = (w & 0x20) ? NULL : brx_tab(brx, nbrx, i);
+            if (!t) { free(b); free(blk_of); free(pend); return false; }  // (no table: even unreachable, it can't be placed)
+            int kk = (int)(t - brx);
+            k->last = i;
+            if (t->ahead) {
+                k->term = TERM_EXIT; k->brx_test = BRX_NOT_FOUND; k->brx_k = kk;
+                pend[kk] = nb;
+                b[nb] = sb_test(BRX_ANY, kk, 0, TERM_BRANCH); b[nb].vtarget = true; nb++;
+            } else {
+                for (int j = 0; j < t->n; j++) {
+                    if (j) { b[nb] = sb_test(BRX_NONE, kk, 0, TERM_NONE); k = &b[nb++]; }
+                    k->pr = pr; k->prn = prn; k->term = TERM_BRANCH; k->target = (int)(t->t[j] / 8);
+                    k->brx_test = BRX_EQ; k->brx_k = kk; k->brx_cmp = t->t[j];
+                }
+                b[nb] = sb_test(BRX_NONE, kk, 0, TERM_EXIT); b[nb].pr = pr; b[nb].prn = prn; nb++;
+            }
+            cut = true;
+            continue;
+        }
+        k->pr = pr; k->prn = prn;
+        k->term = is_exit ? TERM_EXIT : TERM_BRANCH;
+        k->target = is_bra ? (int)(norm_target((int64_t)(i * 8) + 8 + sbits(w, 20, 24)) / 8) : is_pop ? (int)(pop_target[i] / 8) : -1;
+        cut = true;
+    }
+    if (nb && b[nb - 1].first != SIZE_MAX) b[nb - 1].last = (end - 1) % 4 ? end - 1 : end - 2;
+    bool ok = true;
+    for (int k = 0; k < nbrx; k++) if (pend[k] >= 0) ok = false;  // (a target never reached: not placed)
+    free(pend);
+    for (int k = 0; k < nb && ok; k++) {  // targets: word -> block (a target starts a block: it is a label)
+        if (b[k].term != TERM_BRANCH || b[k].vtarget) continue;
+        int w = b[k].target;
+        if (w < 0 || (size_t)w >= end || blk_of[w] < 0 || b[blk_of[w]].first != (size_t)w) ok = false;
+        else b[k].target = blk_of[w];
+    }
+    if (!ok) { free(b); free(blk_of); return false; }
+    *out = b; *nout = nb; *blk_of_out = blk_of;
+    return true;
+}
+// ---- the structured program (a port of Ryujinx.Graphics.Shader/StructuredIr: StructuredProgramContext's scope
+// nesting and GotoElimination, MIT, Copyright (c) Ryujinx Team and Contributors; "Taming Control Flow: A
+// Structured Approach to Eliminating Goto Statements", Erosa & Hendren). Built on block indices before any
+// instruction is emitted; the blocks' GLSL is emitted afterwards in program order (the same side effects) and
+// printed into the tree. EXIT is a goto to a label at the end of main.
+enum { A_MAIN, A_IF, A_ELSE, A_DOWHILE, A_CODE, A_ASSIGN, A_GOTO, A_BREAK, A_CONTINUE };
+typedef struct ANode ANode;
+struct ANode {
+    int kind;
+    ANode *parent, *prev, *next, *first, *last;
+    char *cond;    // IF / DOWHILE: the condition; ASSIGN: its value
+    int var;       // ASSIGN: g<var>
+    int block;     // CODE: the block
+    ANode *all;    // (every node, to free)
+};
+typedef struct { ANode *go, *label; char *cond; bool is_loop, uncond; } GotoStmt;
+typedef struct {
+    Ctx *c; SBlock *b; int nb;
+    ANode *main, *cur, *nodes;
+    struct { ANode *blk; int end, loop_end; } stack[256]; int depth;
+    int cur_end, loop_end;
+    uint8_t *loop_tail;
+    int **preds; int *npreds;
+    ANode **label_of;  // per block (+ the end): its goto variable's reset (the label), or NULL
+    int *var_of;
+    int nvars;
+    GotoStmt *gotos; int ngotos, capgotos;
+    bool fail;
+    Str *text;         // per block: its GLSL
+} Ast;
+
+static char *a_fmt(const char *fmt, ...) {
+    va_list ap, ap2; va_start(ap, fmt); va_copy(ap2, ap);
+    int n = vsnprintf(NULL, 0, fmt, ap); va_end(ap);
+    char *r = malloc(n + 1);
+    vsnprintf(r, n + 1, fmt, ap2); va_end(ap2);
+    return r;
+}
+static char *a_strdup(const char *s) { return a_fmt("%s", s); }
+static ANode *a_new(Ast *a, int kind) {
+    ANode *n = calloc(1, sizeof *n);
+    n->kind = kind; n->all = a->nodes; a->nodes = n;
+    return n;
+}
+static bool a_is_block(const ANode *n) { return n && (n->kind <= A_DOWHILE); }
+static void a_unlink(ANode *n) {
+    ANode *p = n->parent;
+    if (!p) return;
+    if (n->prev) n->prev->next = n->next; else p->first = n->next;
+    if (n->next) n->next->prev = n->prev; else p->last = n->prev;
+    n->parent = n->prev = n->next = NULL;
+}
+static void a_add(ANode *p, ANode *n) {  // append
+    n->parent = p; n->prev = p->last; n->next = NULL;
+    if (p->last) p->last->next = n; else p->first = n;
+    p->last = n;
+}
+static void a_add_first(ANode *p, ANode *n) {
+    n->parent = p; n->prev = NULL; n->next = p->first;
+    if (p->first) p->first->prev = n; else p->last = n;
+    p->first = n;
+}
+static void a_add_before(ANode *ref, ANode *n) {
+    ANode *p = ref->parent;
+    n->parent = p; n->next = ref; n->prev = ref->prev;
+    if (ref->prev) ref->prev->next = n; else p->first = n;
+    ref->prev = n;
+}
+static void a_add_after(ANode *ref, ANode *n) {
+    ANode *p = ref->parent;
+    n->parent = p; n->prev = ref; n->next = ref->next;
+    if (ref->next) ref->next->prev = n; else p->last = n;
+    ref->next = n;
+}
+static int a_level(const ANode *n) { int l = 0; for (; n; n = n->parent) l++; return l; }
+
+// conditions are GLSL text; the combinations keep a recognisable shape (Ryujinx compares its condition trees)
+static char *c_inverse(const char *s) {
+    size_t n = strlen(s);
+    if (n > 3 && s[0] == '!' && s[1] == '(' && s[n - 1] == ')') {  // !(x) -> x, when the parentheses are one group
+        int d = 0; bool one = true;
+        for (size_t i = 1; i < n; i++) { if (s[i] == '(') d++; else if (s[i] == ')') { d--; if (d == 0 && i != n - 1) one = false; } }
+        if (one) return a_fmt("%.*s", (int)(n - 3), s + 2);
+    }
+    if (!strcmp(s, "true")) return a_strdup("false");
+    if (!strcmp(s, "false")) return a_strdup("true");
+    return a_fmt("!(%s)", s);
+}
+static bool c_contains(const char *cond, const char *op, const char *x) {  // ContainsCondComb
+    char *pat = a_fmt(") %s (%s)", op, x);
+    bool r = strstr(cond, pat) != NULL;
+    free(pat); return r;
+}
+static void c_combine(char **cond, const char *op, const char *x) { char *n = a_fmt("(%s) %s (%s)", *cond, op, x); free(*cond); *cond = n; }
+
+static const char *a_pred(Ast *a, const SBlock *b, bool negate, char *buf) {  // the branch's condition (buf: 64)
+    switch (b->brx_test) {
+    case BRX_EQ:
+        if (b->pr == PT && !b->prn) snprintf(buf, 64, "brx_t%d %s 0x%xu", b->brx_k, negate ? "!=" : "==", b->brx_cmp);
+        else snprintf(buf, 64, "%s(%s && brx_t%d == 0x%xu)", negate ? "!" : "", pred(a->c, b->pr, b->prn, alloca(16)), b->brx_k, b->brx_cmp);
+        return buf;
+    case BRX_PAST: snprintf(buf, 64, negate ? "brx_t%d <= 0x%xu" : "brx_t%d > 0x%xu", b->brx_k, b->brx_cmp); return buf;
+    case BRX_NOT_FOUND: snprintf(buf, 64, "brx_t%d %s 1u", b->brx_k, negate ? "!=" : "=="); return buf;
+    case BRX_ANY: snprintf(buf, 64, "brx_t%d %s 0u", b->brx_k, negate ? "==" : "!="); return buf;
+    }
+    if (b->pr == PT && !b->prn) return negate ? "false" : "true";
+    snprintf(buf, 32, "%s", pred(a->c, b->pr, negate ? !b->prn : b->prn, alloca(16)));
+    return buf;
+}
+static void a_push(Ast *a, ANode *blk, int end) {
+    if (a->depth >= 256) { a->fail = true; return; }
+    a->stack[a->depth].blk = a->cur; a->stack[a->depth].end = a->cur_end; a->stack[a->depth].loop_end = a->loop_end; a->depth++;
+    a_add(a->cur, blk);
+    a->cur = blk; a->cur_end = end;
+    if (blk->kind == A_DOWHILE) a->loop_end = end;
+}
+static ANode *a_label(Ast *a, int bi) {  // GetGotoTempAsg: the variable for jumps to block bi, and its reset (the label)
+    if (a->label_of[bi]) return a->label_of[bi];
+    ANode *n = a_new(a, A_ASSIGN);
+    n->var = a->nvars++; n->cond = a_strdup("false");
+    a->label_of[bi] = n;
+    return n;
+}
+static void a_place_label(Ast *a, ANode *lab) { if (!lab->parent) a_add(a->cur, lab); }  // AddGotoTempReset
+static void a_goto(Ast *a, int target, const char *cond, bool is_loop, bool uncond) {
+    ANode *lab = a_label(a, target);
+    ANode *as = a_new(a, A_ASSIGN); as->var = lab->var; as->cond = a_strdup(cond); a_add(a->cur, as);
+    ANode *go = a_new(a, A_GOTO); a_add(a->cur, go);
+    if (a->ngotos == a->capgotos) { a->capgotos = a->capgotos ? a->capgotos * 2 : 16; a->gotos = realloc(a->gotos, a->capgotos * sizeof *a->gotos); }
+    a->gotos[a->ngotos++] = (GotoStmt){go, lab, a_fmt("g%d", lab->var), is_loop, uncond};
+}
+static void a_enter(Ast *a, int bi) {
+    while (a->depth && a->cur_end == bi) {
+        a->depth--; a->cur = a->stack[a->depth].blk; a->cur_end = a->stack[a->depth].end; a->loop_end = a->stack[a->depth].loop_end;
+    }
+    if (bi >= a->nb) return;
+    if (a->label_of[bi]) a_place_label(a, a->label_of[bi]);
+    // LookForDoWhileStatements: the predecessors at or after this block, latest first
+    bool done = false;
+    for (;;) {
+        int p = -1;
+        for (int k = 0; k < a->npreds[bi]; k++) {
+            int q = a->preds[bi][k];
+            if (q >= bi && q > p && !(done && a->loop_tail[q])) p = q;
+        }
+        if (p < 0) break;
+        if (p < a->cur_end && !done) {
+            char cb[64];
+            ANode *dw = a_new(a, A_DOWHILE); dw->cond = a_strdup(a_pred(a, &a->b[p], false, cb));
+            a_push(a, dw, p + 1);
+            a->loop_tail[p] = 1;
+            done = true;
+            continue;  // (the next one, if any, needs a goto)
+        }
+        a_place_label(a, a_label(a, bi));
+        break;
+    }
+    ANode *code = a_new(a, A_CODE); code->block = bi; a_add(a->cur, code);
+}
+static void a_leave(Ast *a, int bi) {
+    SBlock *b = &a->b[bi];
+    char cb[64];
+    if (b->term == TERM_EXIT) { a_goto(a, a->nb, a_pred(a, b, false, cb), false, sb_always(b)); return; }
+    if (b->term != TERM_BRANCH) return;
+    int tgt = b->target;
+    bool in_range = tgt < a->cur_end || (tgt == a->cur_end && tgt < a->loop_end);
+    bool is_loop = tgt <= bi;
+    if (in_range && !is_loop) {
+        ANode *ifb = a_new(a, A_IF); ifb->cond = a_strdup(a_pred(a, b, true, cb));
+        a_push(a, ifb, tgt);
+    } else if (!a->loop_tail[bi]) a_goto(a, tgt, a_pred(a, b, false, cb), is_loop, sb_always(b));
+}
+
+// ---- GotoElimination
+static bool g_directly_related(ANode *l, ANode *r, int ll, int rl) {
+    if (ll == rl) return false;
+    ANode *blk = ll > rl ? l : r, *other = ll > rl ? r : l;
+    int bl = ll > rl ? ll : rl, ol = ll > rl ? rl : ll;
+    while (bl >= ol) { if (blk == other) return true; blk = blk->parent; bl--; }
+    return false;
+}
+static bool g_indirectly_related(ANode *l, ANode *r, int ll, int rl) { return !(l == r || g_directly_related(l, r, ll, rl)); }
+static ANode *g_enclose(Ast *a, ANode *block, int type, const char *cond, ANode *first, ANode *last) {
+    if (first == last) return NULL;
+    char *c = cond ? (type == A_IF ? c_inverse(cond) : a_strdup(cond)) : NULL;
+    if (first && first->next == last && first->kind == type && a_is_block(first) &&
+        ((!c && !first->cond) || (c && first->cond && !strcmp(c, first->cond)))) { free(c); return first; }
+    ANode *nb = a_new(a, type); nb->cond = c;
+    if (!first) { a->fail = true; return NULL; }
+    a_add_before(first, nb);
+    while (first != last) {
+        if (!first) { a->fail = true; return nb; }
+        ANode *nx = first->next;
+        a_unlink(first); a_add(nb, first);
+        first = nx;
+    }
+    (void)block;
+    return nb;
+}
+static void g_single(Ast *a, GotoStmt *s, int kind) {  // EncloseSingleInst: if (g) break / continue
+    ANode *ifb = a_new(a, A_IF); ifb->cond = a_strdup(s->cond);
+    a_add_after(s->go, ifb);
+    a_add_first(ifb, a_new(a, kind));
+}
+static ANode *g_enclose_dowhile(Ast *a, GotoStmt *s, ANode *block, ANode *first) {
+    if (block->kind == A_DOWHILE && first == block->first) {
+        if (s->go->next || strcmp(block->cond, s->cond)) g_single(a, s, A_CONTINUE);
+        if (!c_contains(block->cond, "||", s->cond)) c_combine(&block->cond, "||", s->cond);
+        return block;
+    }
+    return g_enclose(a, block, A_DOWHILE, s->cond, first, s->go);
+}
+static int g_path(ANode *top, ANode *bottom, ANode **out, int max) {  // BackwardsPath: bottom up to (not) top
+    int n = 0;
+    for (ANode *b = bottom; b && b != top; b = b->parent) { if (n >= max) return -1; out[n++] = b; }
+    return n;
+}
+static void g_lift(Ast *a, GotoStmt *s) {
+    ANode *block = s->go->parent, *path[256];
+    int n = g_path(block, s->label->parent, path, 256);
+    if (n <= 0) { a->fail = true; return; }
+    ANode *lfs = path[n - 1];
+    if (lfs->kind == A_ELSE) { lfs = lfs->prev; if (!lfs || lfs->kind != A_IF) { a->fail = true; return; } }
+    ANode *nb = g_enclose_dowhile(a, s, block, lfs);
+    if (!nb) { a->fail = true; return; }
+    a_unlink(s->go); a_add_first(nb, s->go);
+    s->is_loop = false;
+}
+static void g_move_outward(Ast *a, GotoStmt *s, int g_level, int l_level) {
+    ANode *origin = s->go->parent, *block = origin, *loop = origin;
+    int loop_level = g_level;
+    while (loop_level > l_level && !a->fail) {
+        ANode *child = loop;
+        loop = loop->parent; loop_level--;
+        if (child->kind == A_DOWHILE) {
+            g_single(a, s, A_BREAK);
+            a_unlink(s->go); a_add_after(child, s->go);
+            block = loop; g_level = loop_level;
+        }
+    }
+    bool try_else = s->uncond && origin->kind == A_IF;
+    while (g_level > l_level && !a->fail) {
+        g_enclose(a, block, A_IF, s->cond, s->go->next, NULL);
+        a_unlink(s->go);
+        ANode *child = block;
+        if (child->next && child->next->kind == A_ELSE) child = child->next;
+        block = block->parent;
+        a_add_after(child, s->go);
+        g_level--;
+        if (try_else && child == origin) {
+            ANode *lb = s->label->parent;
+            ANode *last = block == lb && !s->is_loop ? s->label : NULL;
+            ANode *nb = g_enclose(a, block, A_ELSE, NULL, s->go->next, last);
+            if (nb) { a_unlink(s->go); a_add_after(nb, s->go); }
+        }
+    }
+}
+static void g_move_inward(Ast *a, GotoStmt *s) {
+    ANode *block = s->go->parent, *path[256];
+    int n = g_path(block, s->label->parent, path, 256);
+    if (n < 0) { a->fail = true; return; }
+    for (int k = n - 1; k >= 0 && !a->fail; k--) {
+        ANode *child = path[k], *last = child;
+        if (child->kind == A_IF) {
+            if (!c_contains(child->cond, "||", s->cond)) c_combine(&child->cond, "||", s->cond);
+        } else if (child->kind == A_ELSE) {
+            ANode *ifb = child->prev;
+            if (!ifb || ifb->kind != A_IF) { a->fail = true; return; }
+            char *inv = c_inverse(s->cond);
+            if (!c_contains(ifb->cond, "&&", inv)) c_combine(&ifb->cond, "&&", inv);
+            free(inv);
+            last = ifb;
+        }
+        g_enclose(a, block, A_IF, s->cond, s->go->next, last);
+        a_unlink(s->go); a_add_first(child, s->go);
+        block = child;
+    }
+}
+static void g_eliminate(Ast *a) {
+    for (int k = a->ngotos - 1; k >= 0 && !a->fail; k--) {
+        GotoStmt *s = &a->gotos[k];
+        if (!s->label->parent) { a->fail = true; return; }
+        ANode *gb = s->go->parent, *lb = s->label->parent;
+        int gl = a_level(gb), ll = a_level(lb);
+        if (g_indirectly_related(gb, lb, gl, ll)) {
+            ANode *dr = gb; int drl = gl;
+            do { dr = dr->parent; drl--; if (!dr) { a->fail = true; return; } } while (!g_directly_related(dr, lb, drl, ll));
+            g_move_outward(a, s, gl, drl);
+            gb = dr; gl = drl;
+            if (s->go->prev && s->go->prev->kind == A_ELSE) {
+                ANode *eb = s->go->prev;
+                lb = s->label->parent; ll = a_level(lb);
+                if (!g_indirectly_related(eb, lb, gl + 1, ll)) s->is_loop = true;
+            }
+        }
+        if (a->fail) return;
+        if (g_directly_related(gb, lb, gl, ll)) {
+            if (gl > ll) g_move_outward(a, s, gl, ll);
+            else { if (s->is_loop) g_lift(a, s); if (!a->fail) g_move_inward(a, s); }
+        }
+        if (a->fail) return;
+        gb = s->go->parent;
+        if (s->is_loop) g_enclose_dowhile(a, s, gb, s->label);
+        else g_enclose(a, gb, A_IF, s->cond, s->go->next, s->label);
+        a_unlink(s->go);
+    }
+}
+static void a_print(Ast *a, ANode *n, Str *o, int ind) {
+    for (; n && !a->fail; n = n->next) {
+        switch (n->kind) {
+        case A_CODE: { Str *t = &a->text[n->block]; if (t->buf) sp(o, "%s", t->buf); break; }
+        case A_ASSIGN: sp(o, "%*sg%d = %s;\n", ind, "", n->var, n->cond); break;
+        case A_BREAK: sp(o, "%*sbreak;\n", ind, ""); break;
+        case A_CONTINUE: sp(o, "%*scontinue;\n", ind, ""); break;
+        case A_IF: sp(o, "%*sif (%s) {\n", ind, "", n->cond); a_print(a, n->first, o, ind + 2); sp(o, "%*s}\n", ind, ""); break;
+        case A_ELSE: sp(o, "%*selse {\n", ind, ""); a_print(a, n->first, o, ind + 2); sp(o, "%*s}\n", ind, ""); break;
+        case A_DOWHILE: sp(o, "%*sdo {\n", ind, ""); a_print(a, n->first, o, ind + 2); sp(o, "%*s} while (%s);\n", ind, "", n->cond); break;
+        default: a->fail = true;  // (a goto left over)
+        }
+    }
+}
+static void ast_free(Ast *a) {
+    if (!a) return;
+    for (ANode *n = a->nodes, *nx; n; n = nx) { nx = n->all; free(n->cond); free(n); }
+    for (int k = 0; k < a->ngotos; k++) free(a->gotos[k].cond);
+    for (int k = 0; k <= a->nb; k++) { free(a->preds[k]); free(a->text[k].buf); }
+    free(a->gotos); free(a->preds); free(a->npreds); free(a->loop_tail); free(a->label_of); free(a->var_of); free(a->text); free(a);
+}
+// The structured program of the blocks, or NULL (then the state machine)
+static Ast *ast_build(Ctx *c, SBlock *b, int nb) {
+    Ast *a = calloc(1, sizeof *a);
+    a->c = c; a->b = b; a->nb = nb;
+    a->main = a->cur = a_new(a, A_MAIN);
+    a->cur_end = a->loop_end = nb;
+    a->loop_tail = calloc(nb + 1, 1);
+    a->preds = calloc(nb + 1, sizeof *a->preds); a->npreds = calloc(nb + 1, sizeof *a->npreds);
+    a->label_of = calloc(nb + 1, sizeof *a->label_of); a->var_of = calloc(nb + 1, sizeof *a->var_of);
+    a->text = calloc(nb + 1, sizeof *a->text);
+    for (int k = 0; k < nb; k++) {
+        int succ[2], ns = 0;
+        bool falls = !(b[k].term != TERM_NONE && sb_always(&b[k]));
+        if (falls && k + 1 < nb) succ[ns++] = k + 1;
+        if (b[k].term == TERM_BRANCH) succ[ns++] = b[k].target;
+        for (int j = 0; j < ns; j++) {
+            int t = succ[j];
+            a->preds[t] = realloc(a->preds[t], (a->npreds[t] + 1) * sizeof(int));
+            a->preds[t][a->npreds[t]++] = k;
+        }
+    }
+    for (int k = 0; k < nb && !a->fail; k++) { a_enter(a, k); a_leave(a, k); }
+    a_enter(a, nb);
+    if (a->label_of[nb]) a_add(a->main, a->label_of[nb]);  // the end (EXIT's label)
+    if (!a->fail) g_eliminate(a);
+    for (ANode *n = a->nodes; n && !a->fail; n = n->all) if (n->kind == A_GOTO && n->parent) a->fail = true;
+    if (a->fail) { ast_free(a); return NULL; }
+    return a;
+}
+
+// GLSL: the size of the local memory array (words: a power of two, at most LMEM_WORDS; the accesses wrap at it as
+// they did at LMEM_WORDS). The array is the shader's stack on drivers that keep it in memory, and stack is costly
+// there: PanVK gives each command buffer that uses a shader with a stack over 512 B its own buffer of stack x threads
+// x cores (38 MB on an RK3588 for the fixed 1 KB). The size covers every immediate address (RZ + offset). A
+// register-indexed access is bounded by the SPH's local memory size (low + high: the guest compiler's own per-thread
+// need) in graphics stages; compute (no SPH here) and a size of 0 keep LMEM_WORDS, as does a negative immediate.
+static int lmem_size(const uint64_t *code, size_t end, const uint8_t *sph) {
+    uint64_t need = 0;
+    bool indexed = false;
+    for (size_t i = 0; i < end; i++) {
+        if (i % 4 == 0) continue;
+        uint64_t w = code[i];
+        if ((w & 0xfff8000000000000ull) != 0xef40000000000000ull && (w & 0xfff8000000000000ull) != 0xef50000000000000ull) continue;
+        int size = (int)bits(w, 48, 3);
+        int64_t off = sbits(w, 20, 24);
+        if ((int)bits(w, 8, 8) != RZ) { indexed = true; continue; }
+        if (off < 0) return LMEM_WORDS;  // (wraps to a high address)
+        uint64_t e = (uint64_t)off + (size == 5 ? 8 : size >= 6 ? 16 : 4);
+        if (e > need) need = e;
+    }
+    if (indexed) {
+        uint32_t lo = 0, hi = 0;
+        if (sph) { memcpy(&lo, sph + 4, 4); memcpy(&hi, sph + 8, 4); }
+        uint64_t declared = (uint64_t)(lo & 0xFFFFFFu) + (hi & 0xFFFFFFu);  // (low + high local memory size, bytes)
+        if (!declared) return LMEM_WORDS;
+        if (declared > need) need = declared;
+    }
+    int words = 1;
+    while (words < LMEM_WORDS && (uint64_t)words * 4 < need) words *= 2;
+    return words;
 }
 
 ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, const ShaderKey *key) {
@@ -2519,6 +3593,7 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
         if (w == 0 && i > 4) break;
         end = i + 1;
     }
+    c->lmem_words = c->glsl ? lmem_size((const uint64_t *)code, end, stage == STAGE_COMPUTE ? NULL : sph) : LMEM_WORDS;
     // collect branch targets (labels)
     uint8_t *label = calloc(end + 4, 1);
     label[1] = 1;
@@ -2538,12 +3613,38 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
         }
         if ((w & 0xfff0000000000000ull) == 0xe250000000000000ull) {  // BRX: its jump table's targets, else any instruction
             any_branch = true;
-            if (!c->glsl || !brx_table_labels(code, i, end, blob, max_size, label)) memset(label, 1, end);
+            if (!brx_table_labels(c, code, i, end, blob, max_size, label)) memset(label, 1, end);
         }
         if ((w & 0xfff8000000000000ull) == 0xf0f8000000000000ull || (w & 0xfff0000000000000ull) == 0xe340000000000000ull ||
             (w & 0xfff0000000000000ull) == 0xe350000000000000ull)
             any_branch = true;
         (void)is_branch_target_op;
+    }
+    if (any_branch && c->glsl) {
+        static int ss = -1;
+        if (ss < 0) { const char *e = getenv("LARECOMP_VK_STATIC_STACKS"); ss = e ? atoi(e) != 0 : maxwell_glsl_structured; }
+        if (ss) {
+            c->pop_target = calloc(end + 1, sizeof *c->pop_target);
+            c->static_stacks = static_stacks_resolve((const uint64_t *)code, end, label, c->pop_target, c->brx, c->nbrx);
+            static unsigned ss_yes, ss_no;  // (a progress line now and then: how many shaders lost their stacks)
+            if (c->static_stacks) ss_yes++; else ss_no++;
+            if ((ss_yes + ss_no) % 500 == 0)
+                fprintf(stderr, "[shader] static stacks: %u branchy shaders resolved, %u kept their stacks (no label %u, paths disagree %u, overflow %u, call / indirect %u, empty pop %u, pop target %u)\n", ss_yes, ss_no, ss_why[1], ss_why[2], ss_why[3], ss_why[4], ss_why[5], ss_why[6]);
+        }
+    }
+    Ast *plan = NULL; SBlock *sblk = NULL; int nsblk = 0; int *blk_of = NULL; Str saved_body = {0};
+    if (c->static_stacks) {
+        static int st = -1;
+        if (st < 0) { const char *e = getenv("LARECOMP_VK_STRUCTURE"); st = e ? atoi(e) != 0 : maxwell_glsl_structured; }
+        if (st && struct_blocks((const uint64_t *)code, end, label, c->pop_target, c->brx, c->nbrx, &sblk, &nsblk, &blk_of)) {
+            plan = ast_build(c, sblk, nsblk);
+            c->structured = plan != NULL;
+            if (plan) c->struct_vars = plan->nvars;
+        }
+        static unsigned st_yes, st_no;
+        if (st) { if (c->structured) st_yes++; else st_no++;
+            if ((st_yes + st_no) % 500 == 0)
+                fprintf(stderr, "[shader] structured: %u shaders, %u kept the state machine\n", st_yes, st_no); }
     }
     // translate
     bool dbg = maxwell_dbg_code && blob == maxwell_dbg_code && stage == STAGE_FRAGMENT;
@@ -2554,10 +3655,33 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
     for (size_t i = 0; i < end && !c->fail; i++) {
         if (i % 4 == 0) continue;
         uint32_t pc = (uint32_t)(i * 8);
+        if (c->structured) {
+            int bi = blk_of[i];
+            if (sblk[bi].first == i) {  // (the block's GLSL on its own; a target of an `ahead` BRX: its dispatch is over)
+                saved_body = c->body; c->body = (Str){0};
+                for (int k = 0; k < c->nbrx; k++)
+                    for (int j = 0; j < c->brx[k].n && c->brx[k].ahead; j++)
+                        if (c->brx[k].t[j] == pc) { sp(&c->body, "    brx_t%d = 0u;\n", k); c->uses_brx_t = true; }
+            }
+            uint64_t w_ = ((const uint64_t *)code)[i], t12_ = w_ & 0xfff0000000000000ull;
+            bool flow_ = (w_ & 0xfff0000000000020ull) == 0xe240000000000000ull || t12_ == 0xe300000000000000ull ||
+                         (w_ & 0xfff8000000000000ull) == 0xf0f8000000000000ull || t12_ == 0xe340000000000000ull ||
+                         t12_ == 0xe350000000000000ull;
+            if (!flow_) {
+                if (annotate) sp(&c->body, "    // pc %x: %016llx\n", pc, (unsigned long long)w_);
+                emit_insn(c, w_, pc);
+                light_tiles_fix(c, (const uint64_t *)code, end, pc);
+                ao_grid_fix(c, (const uint64_t *)code, end, pc);
+            }
+            if (sblk[bi].last == i) { plan->text[bi] = c->body; c->body = saved_body; }
+            info->num_insts++;
+            continue;
+        }
         if (any_branch && label[i]) sp(&c->body, "  case %uu:\n", pc);
         if (annotate) sp(&c->body, "    // pc %x: %016llx\n", pc, (unsigned long long)((const uint64_t *)code)[i]);
         emit_insn(c, ((const uint64_t *)code)[i], pc);
         light_tiles_fix(c, (const uint64_t *)code, end, pc);
+        ao_grid_fix(c, (const uint64_t *)code, end, pc);
         if (dbg && pc == maxwell_dbg_pc) {
             int rr = maxwell_dbg_reg % 1000, half = maxwell_dbg_reg / 1000;  // +1000: low f16, +2000: high f16
             c->reg_used[rr] = 1;
@@ -2567,6 +3691,17 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
         info->num_insts++;
     }
     free(label);
+    if (plan) {  // the tree, the blocks' GLSL in it
+        if (!c->fail) a_print(plan, plan->main->first, &c->body, 4);
+        if (plan->fail) fail(c, "structured control flow: a goto was left");
+    }
+    ast_free(plan); free(sblk); free(blk_of);
+    free(c->pop_target);
+    c->pop_target = NULL;
+    c->brx_vars = c->nbrx;
+    free(c->brx);
+    c->brx = NULL;
+    c->nbrx = 0;
     // (MSL: more textures than sampler slots take a slot table, at a buffer index the vertex stage's streams use)
     if (!c->glsl && stage == STAGE_VERTEX && info->ntex > MSL_MAX_SAMPLERS)
         fail(c, "%d textures in a vertex shader (Metal: %d samplers)", info->ntex, MSL_MAX_SAMPLERS);
@@ -2639,6 +3774,7 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
     if (c->uses_rscale && stage != STAGE_VERTEX) {
         sp(&args, ", constant float4 *rscale [[buffer(18)]]");
         info->uses_rscale = true;
+        info->uses_ao_taps = c->ao_taps;
     }
     // Runtime highlight (e.g. golden unchecked pots): fragment shaders writing a float color target 0 get a
     // per-draw tint, float4 [0] = colour.rgb + strength, [1] = added glow.rgb (strength 0 = untouched; < 0: the
@@ -2686,6 +3822,7 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
         for (int i = 0; i < info->ntex; i++) sp(&s, "  sampler s%d = ss[smap[%d]];\n", i, i);
     for (int i = 0; i < 256; i++)
         if (c->reg_used[i]) sp(&s, "  uint r%d = 0;\n", i);
+    shadow_taps(c, &s);
     for (int i = 0; i < 7; i++)
         if (c->pred_used[i]) sp(&s, "  bool p%d = false;\n", i);
     if (c->uses_cc) sp(&s, "  uint cc = 0; bool ccz = false, ccs = false;\n");
@@ -2726,6 +3863,7 @@ ShaderInfo *maxwell_translate(const uint8_t *blob, size_t max_size, int stage, c
                 r++;
             }
         }
+        if (c->ao_pass) sp(&s, "  if (rscale[65][2] > 0.0f) o.c0 = float4(1.0f);\n");  // (ambient occlusion Off: ao_grid_fix)
         if (tint)
             sp(&s, "  if (ltint[0].w > 0.0f) { float3 g = o.c0.rgb; float l = dot(g, float3(0.299f, 0.587f, 0.114f));\n"
                    "    o.c0.rgb = mix(g, ltint[0].rgb * pow(l, ltint[1].w) + ltint[1].rgb * l, ltint[0].w); }\n");

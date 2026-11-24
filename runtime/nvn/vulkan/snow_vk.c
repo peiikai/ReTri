@@ -17,7 +17,7 @@
 #define SC_PRELUDE                                                                                                     \
     "#version 450\n"                                                                                                   \
     "layout(std140, set = 0, binding = 0) uniform SF { vec4 vp[4]; vec4 ivp[4]; vec4 screen, flags, zr, trail, tone; " \
-    "vec4 shake4[2]; } w;\n"                                                                                           \
+    "vec4 shake4[2]; vec4 lvp[4]; vec4 shd, shz, shade; } w;\n"                                                       \
     "layout(set = 0, binding = 1) uniform sampler2D dt;\n"                                                             \
     "layout(set = 0, binding = 2) uniform usampler2D sv;\n"                                                            \
     "layout(set = 0, binding = 3) uniform sampler2D ct;\n"                                                             \
@@ -25,6 +25,7 @@
     "layout(set = 0, binding = 5) uniform sampler2D pp;\n"                                                             \
     "layout(set = 0, binding = 6) uniform sampler2D tr;\n"                                                             \
     "layout(std140, set = 0, binding = 7) uniform SP { vec4 pr[128]; } prints;\n"                                      \
+    "layout(set = 0, binding = 8) uniform sampler2D smap;\n"                                                           \
     "#define saturate(x) clamp(x, 0.0, 1.0)\n"
 
 static const char *sc_common =
@@ -206,23 +207,47 @@ static const char *half_fs =
     "    k *= 1.0 - max(smoothstep(0.45, 0.62, hem) * (1.0 - smoothstep(0.03, 0.05, mc)), smoothstep(0.75, 0.9, rise / float(valid)));\n"
     "  }\n"
     "  if (k <= 0.0) { o = none; return; }\n"
-    "  float side[3];\n"
+    "  float side[3], dark = 0.0;\n"
     "  ivec2 dirs[3] = ivec2[3](ivec2(-1, 0), ivec2(1, 0), ivec2(0, w.flags.x > 0.5 ? 1 : -1));\n"  // (behind: up the screen)
     "  for (int s = 0; s < 3; s++) {\n"
     "    side[s] = 0.0;\n"
     "    for (int j = 3; j <= 15; j += 4) {\n"
-    "      vec4 a = sc_at(clamp(q + dirs[s] * int(rad * float(j)), ivec2(0), mx));\n"
+    "      ivec2 qq = clamp(q + dirs[s] * int(rad * float(j)), ivec2(0), mx);\n"
+    "      if (s == 2) {\n"  // (the doorway's dark opening behind it: renderer.m)
+    "        vec3 cb = texelFetch(ct, clamp(ivec2(vec2(qq) * w.screen.xy / w.screen.zw), ivec2(0), ivec2(w.screen.xy) - 1), 0).rgb;\n"
+    "        dark = max(dark, 1.0 - smoothstep(0.02, 0.03, max(cb.r, max(cb.g, cb.b))));\n"
+    "      }\n"
+    "      vec4 a = sc_at(qq);\n"
     "      if (a.w > 0.5) continue;\n"
     "      side[s] = max(side[s], smoothstep(0.4, 0.7, a.y - p.y));\n"
     "    }\n"
     "  }\n"
-    "  k *= 1.0 - min(side[0], min(side[1], side[2]));\n"
+    "  k *= 1.0 - min(side[0], min(side[1], side[2])) * dark;\n"
     "  if (k <= 0.0) { o = none; return; }\n"
     "  o = vec4(k, n.y, rough, sc_eye((vec2(q) + 0.5) * e, d));\n"
     "}\n";
 
 // the cover at full resolution (renderer.m's sc_fs); dst: the scene image's copy
 static const char *cover_fs =
+    "float sc_shadow(vec3 p) {\n"  // (the game's cast shadow at p: renderer.m's sc_shadow)
+    "  if (w.shd.x < 0.5) return 1.0;\n"
+    "  vec4 q = vec4(p, 1.0);\n"
+    "  vec4 l = vec4(dot(w.lvp[0], q), dot(w.lvp[1], q), dot(w.lvp[2], q), dot(w.lvp[3], q));\n"
+    "  l.xyz /= l.w;\n"
+    "  vec2 uv = vec2(l.x * 0.5 + 0.5, 0.5 - l.y * 0.5);\n"  // (the map's rows: Metal's, as the scene image's - above)
+    "  if (w.flags.x > 0.5) uv.y = 1.0 - uv.y;\n"
+    "  float z = w.shd.y > 0.5 ? l.z * 0.5 + 0.5 : l.z;\n"
+    "  z = w.shz.x + w.shz.y * z - w.shz.z;\n"
+    "  if (any(lessThanEqual(uv, vec2(0.0))) || any(greaterThanEqual(uv, vec2(1.0))) || z >= 1.0) return 1.0;\n"
+    "  vec2 a = uv * w.shd.zw - 1.0, f = a - floor(a);\n"
+    "  ivec2 i0 = ivec2(floor(a)), mx = ivec2(w.shd.zw) - 1;\n"
+    "  vec3 wx = vec3(1.0 - f.x, 1.0, f.x) * 0.5, wy = vec3(1.0 - f.y, 1.0, f.y) * 0.5;\n"
+    "  float s = 0.0;\n"
+    "  for (int j = 0; j < 3; j++)\n"
+    "    for (int i = 0; i < 3; i++)\n"
+    "      s += z <= texelFetch(smap, clamp(i0 + ivec2(i, j), ivec2(0), mx), 0).r ? wx[i] * wy[j] : 0.0;\n"
+    "  return s;\n"
+    "}\n"
     "layout(location = 0) out vec4 o;\n"
     "void main() {\n"
     "  vec4 dst = texelFetch(ct, ivec2(gl_FragCoord.xy), 0);\n"
@@ -231,11 +256,45 @@ static const char *cover_fs =
     "  ivec2 q = clamp(ivec2(uv * w.screen.zw), ivec2(0), mx);\n"
     "  uint sm = sread(q);\n"
     "  if (abs(w.trail.y - 2.0) < 0.5) { o = vec4((sm & 0x80u) != 0u ? 1.0 : 0.0, (sm & 1u) != 0u ? 1.0 : 0.0, (sm & 0x40u) != 0u ? 1.0 : 0.0, 1.0); return; }\n"
-    "  if ((sm & 0x80u) != 0u) { o = dst; return; }\n"
+    "  if (abs(w.trail.y - 3.0) < 0.5 && dread(q) < 0.99999) { o = vec4(vec3(sc_shadow(world_at((vec2(q) + 0.5) / w.screen.zw, dread(q)))), 1.0); return; }\n"
+    "  if ((sm & 0xC0u) == 0x80u) { o = dst; return; }\n"
     "  float d = dread(q);\n"
     "  if (d >= 0.99999) { o = dst; return; }\n"
     "  vec3 c = dst.rgb;\n"
     "  float mc = max(c.r, max(c.g, c.b));\n"
+    "  if ((sm & 0xC0u) == 0xC0u) {\n"  // (a character: a dusting on what faces up, renderer.m)
+    "    vec2 e = 1.0 / w.screen.zw;\n"
+    "    int r = int(max(1.0, round(2.0 * w.screen.w / 1080.0)));\n"
+    "    vec3 p = world_at((vec2(q) + 0.5) * e, d);\n"
+    "    vec3 ax[2] = vec3[2](vec3(0.0), vec3(0.0));\n"
+    "    float ez = sc_eye((vec2(q) + 0.5) * e, d);\n"
+    "    float lim = 2.5 * length(world_at((vec2(q) + vec2(0.5 + float(r), 0.5)) * e, d) - p);\n"
+    "    int nax = 0;\n"
+    "    for (int a = 0; a < 2; a++) {\n"
+    "      float best = 1e9;\n"
+    "      for (int sgn = -1; sgn <= 1; sgn += 2) {\n"
+    "        ivec2 qq = clamp(q + (a == 0 ? ivec2(sgn * r, 0) : ivec2(0, sgn * r)), ivec2(0), mx);\n"
+    "        float dk = dread(qq);\n"
+    "        if (all(equal(qq, q)) || (sread(qq) & 0xC0u) != 0xC0u || dk >= 0.99999) continue;\n"
+    "        vec3 v = world_at((vec2(qq) + 0.5) * e, dk) - p;\n"
+    "        float dz = abs(sc_eye((vec2(qq) + 0.5) * e, dk) - ez);\n"
+    "        if (length(v) > lim || dz >= best) continue;\n"
+    "        best = dz; ax[a] = v * float(sgn);\n"
+    "      }\n"
+    "      nax += best < 1e8 ? 1 : 0;\n"
+    "    }\n"
+    "    vec3 n = cross(ax[0], ax[1]);\n"
+    "    if (nax < 2 || length(n) < 1e-12) { o = dst; return; }\n"
+    "    n = normalize(n);\n"
+    "    vec4 cq = vec4(-w.ivp[0].z + w.ivp[0].w, -w.ivp[1].z + w.ivp[1].w, -w.ivp[2].z + w.ivp[2].w, -w.ivp[3].z + w.ivp[3].w);\n"
+    "    if (dot(n, cq.xyz / cq.w - p) < 0.0) n = -n;\n"
+    "    float k = smoothstep(0.72, 0.95, n.y) * 0.35 * smoothstep(0.1, 0.8, w.flags.z);\n"
+    "    if (k <= 0.0) { o = dst; return; }\n"
+    "    if (w.trail.y > 0.5) { o = mix(dst, vec4(1.0, 0.0, 0.0, 1.0), k); return; }\n"
+    "    vec3 col = w.tone.rgb * (0.3 + 0.7 * saturate(mc / w.tone.w));\n"
+    "    o = vec4(mix(c, col, k), dst.a);\n"
+    "    return;\n"
+    "  }\n"
     "  if ((sm & 0x40u) != 0u) {\n"
     "    vec3 p = world_at((vec2(q) + 0.5) / w.screen.zw, d);\n"
     "    vec2 pr = vec2(p.x * 0.8 + p.z * 0.6, p.z * 0.8 - p.x * 0.6);\n"
@@ -249,7 +308,6 @@ static const char *cover_fs =
     "    o = vec4(mix(c, col, k), dst.a);\n"
     "    return;\n"
     "  }\n"
-    "  if (mc < 0.018) { o = dst; return; }\n"
     "  vec2 e = 1.0 / w.screen.zw;\n"
     "  float ez = sc_eye((vec2(q) + 0.5) * e, d);\n"
     "  vec2 hp = gl_FragCoord.xy / w.trail.z - 0.5;\n"
@@ -267,7 +325,8 @@ static const char *cover_fs =
     "    if (dz < best) { best = dz; near = t; }\n"
     "  }\n"
     "  vec4 hv = wsum > 1e-4 ? acc / wsum : near;\n"
-    "  float k = hv.x * smoothstep(0.018, 0.03, mc);\n"
+    "  float open_ = smoothstep(0.95, 0.99, hv.y) * (1.0 - hv.z);\n"  // (near black left alone, but not open flat ground: renderer.m)
+    "  float k = hv.x * mix(smoothstep(0.018, 0.03, mc), 1.0, open_);\n"
     "  uint ts = (sm >> 1) & 7u;\n"
     "  if (ts != 0u) k *= shake(ts);\n"
     "  if (k <= 0.0) { o = dst; return; }\n"
@@ -279,6 +338,9 @@ static const char *cover_fs =
     "  k *= 1.0 - saturate(fp) * (0.9 - 0.45 * cover);\n"
     "  float lit = mix(saturate(mc / w.tone.w), 0.8, rough * 0.7);\n"
     "  vec3 col = w.tone.rgb * (0.45 + 0.55 * lit) * (0.85 + 0.15 * hv.y) * (0.96 + 0.06 * vnoise(pr * 3.0));\n"
+    "  if (w.shd.x > 0.5)\n"  // (the game's cast shadows on it: renderer.m)
+    "    col = w.tone.rgb * (0.8 + 0.2 * lit) * (0.85 + 0.15 * hv.y) * (0.96 + 0.06 * vnoise(pr * 3.0)) * mix(w.shade.rgb, vec3(1.0), sc_shadow(p));\n"
+    "  col = mix(col, mix(c, w.tone.rgb / w.tone.w * dot(c, vec3(0.2126, 0.7152, 0.0722)), open_), 1.0 - smoothstep(0.018, 0.03, mc));\n"
     "  col *= vec3(1.0 - 0.5 * saturate(fp), 1.0 - 0.42 * saturate(fp), 1.0 - 0.28 * saturate(fp));\n"
     "  o = vec4(mix(c, col, k), dst.a);\n"
     "}\n";
@@ -363,7 +425,8 @@ static VkPipeline make_pipe(int i, VkFormat fmt) {
 }
 
 // Once: shaders, the descriptor layout (0 the frame, 1 the scene depth, 2 its stencil, 3 the scene image's copy, 4 the
-// half-resolution analysis, 5 the prep, 6 the trail map, 7 the new prints), the fixed-format pipelines, the trail map
+// half-resolution analysis, 5 the prep, 6 the trail map, 7 the new prints, 8 the game's shadow map), the fixed-format
+// pipelines, the trail map
 static bool init(void) {
     if (g_ok >= 0) return g_ok;
     g_ok = 0;
@@ -373,11 +436,11 @@ static bool init(void) {
         if (!g_mod[i][0] || !g_mod[i][1]) { LOG("[snow] vk: shaders for pass %d failed\n", i); return false; }
     }
     VkShaderStageFlags vf = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutBinding b[8];
-    for (uint32_t i = 0; i < 8; i++)
+    VkDescriptorSetLayoutBinding b[9];
+    for (uint32_t i = 0; i < 9; i++)
         b[i] = (VkDescriptorSetLayoutBinding){i, i == 0 || i == 7 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                               1, vf, NULL};
-    VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 8, .pBindings = b};
+    VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 9, .pBindings = b};
     VK_CHECK(vkCreateDescriptorSetLayout(g_vk.dev, &li, NULL, &g_set_layout));
     VkPipelineLayoutCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1, .pSetLayouts = &g_set_layout};
     VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &pci, NULL, &g_layout));
@@ -411,9 +474,10 @@ static void begin(VkCommandBuffer cb, VkImageView view, uint32_t w, uint32_t h, 
 
 // The passes, in the frame's command buffer outside any rendering (exec.c ended the game's). color: the scene image
 // (its view for rendering into, its image to copy, fmt, the drawn area cw x ch), depth / stencil: the scene depth's
-// sampled views. sf: weather_snow_cover's frame, screen / flags / zr filled by exec.c
+// sampled views, shadow: the game's shadow map's depth (sf->shd.x 0: none, the scene depth stands in, unread).
+// sf: weather_snow_cover's frame, screen / flags / zr / the shadow fields filled by exec.c
 bool vk_snow_pass(VkImage color_img, VkImageView color, VkFormat fmt, uint32_t cw, uint32_t ch, VkImageView depth,
-                  VkImageView stencil, SnowFrame *sf) {
+                  VkImageView stencil, VkImageView shadow, SnowFrame *sf) {
     if (!init()) return false;
     if (g_cover_fmt != fmt || !g_pipe[S_COVER]) {  // (by the scene image's format: kept, a frame in flight may use one)
         static struct { VkFormat fmt; VkPipeline p; } made[4];
@@ -451,16 +515,17 @@ bool vk_snow_pass(VkImage color_img, VkImageView color, VkFormat fmt, uint32_t c
     VkDescriptorSet set = vk_alloc_set(g_set_layout);
     VkSampler smp = vk_default_sampler(false);
     VkDescriptorBufferInfo bf = {fs.buf, fs.off, sizeof *sf}, bp = {ps.buf, ps.off, sizeof pr};
-    VkDescriptorImageInfo im[6] = {{smp, depth, VK_IMAGE_LAYOUT_GENERAL},      {smp, stencil, VK_IMAGE_LAYOUT_GENERAL},
+    VkDescriptorImageInfo im[8] = {{smp, depth, VK_IMAGE_LAYOUT_GENERAL},      {smp, stencil, VK_IMAGE_LAYOUT_GENERAL},
                                    {smp, g_copy.view, VK_IMAGE_LAYOUT_GENERAL}, {smp, g_half.view, VK_IMAGE_LAYOUT_GENERAL},
-                                   {smp, g_prep.view, VK_IMAGE_LAYOUT_GENERAL}, {smp, g_trail.view, VK_IMAGE_LAYOUT_GENERAL}};
-    VkWriteDescriptorSet wr[8];
-    for (uint32_t i = 0; i < 8; i++) {
+                                   {smp, g_prep.view, VK_IMAGE_LAYOUT_GENERAL}, {smp, g_trail.view, VK_IMAGE_LAYOUT_GENERAL},
+                                   {0},                                         {smp, shadow ? shadow : depth, VK_IMAGE_LAYOUT_GENERAL}};
+    VkWriteDescriptorSet wr[9];
+    for (uint32_t i = 0; i < 9; i++) {
         wr[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = i, .descriptorCount = 1};
         if (i == 0 || i == 7) wr[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, wr[i].pBufferInfo = i ? &bp : &bf;
         else wr[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, wr[i].pImageInfo = &im[i - 1];
     }
-    rec_UpdateDescriptorSets(8, wr);
+    rec_UpdateDescriptorSets(9, wr);
     // new footprints into the trail map (cleared the first time)
     static bool trail_clear = true;
     if (np || trail_clear) {

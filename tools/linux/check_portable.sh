@@ -1,0 +1,49 @@
+#!/bin/bash
+# tools/linux/check_portable.sh <x86_64|aarch64> (after make appimage + make tarball, on a machine of that arch): the
+# data folder rules of runtime/paths.c, checked with the shipped files. No window or GPU: --list-settings reads the
+# settings from the data folder and exits (its log line "[paths] data: <folder>" says which one it used).
+#   - the tarball: its own folder (portable.txt), else ~/.local/share/retri once portable.txt is gone
+#   - the AppImage with <file>.AppImage.home next to it: <file>.AppImage.home/.local/share/retri
+#   - --data-dir: that folder
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+ARCH=${1:?usage: tools/linux/check_portable.sh x86_64|aarch64}
+NAMEARCH=$([ "$ARCH" = aarch64 ] && echo arm64 || echo x64)  # (the release files' names)
+TAR=$(ls build/dist/*-linux-"$NAMEARCH".tar.gz)
+APP=$(ls build/dist/*-linux-"$NAMEARCH".AppImage)
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
+export HOME="$T/home" XDG_DATA_HOME="$T/xdg"  # (never the machine's own data folder)
+unset LARECOMP_DATA_ROOT APPIMAGE APPDIR
+mkdir -p "$HOME"
+data_of() {  # command... -> the data folder it used
+    local log="$T/run.log"
+    "$@" --list-settings >/dev/null 2>"$log" || true
+    # (without a terminal the log goes to the data folder's eowrecomp.log: look there too)
+    local logs=("$T"/*/eowrecomp*.log "$T"/*/*/eowrecomp*.log "$T"/*/*/.local/share/retri/eowrecomp*.log)
+    { cat "$log"; cat "${logs[@]}" 2>/dev/null; } | sed -n 's/^\[paths\] data: //p' | tail -1
+    rm -f "${logs[@]}"
+}
+expect() {  # what, got, want
+    if [ "$2" = "$3" ]; then echo "ok: $1 -> $2"; else echo "::error::$1: data folder '$2', expected '$3'"; exit 1; fi
+}
+
+tar -xzf "$TAR" -C "$T"
+D="$T/ReTri"
+[ -f "$D/portable.txt" ] && [ -x "$D/AppRun" ] && [ -L "$D/eowrecomp" ] || { echo "::error::tarball layout"; exit 1; }
+expect "tarball" "$(cd "$T" && data_of "$D/eowrecomp")" "$D"
+expect "tarball --data-dir" "$(data_of "$D/eowrecomp" --data-dir "$T/chosen")" "$T/chosen"
+rm "$D/portable.txt"
+expect "tarball without portable.txt" "$(data_of "$D/eowrecomp")" "$T/xdg/retri"
+
+mkdir "$T/ai"
+cp "$APP" "$T/ai/game.AppImage"
+chmod +x "$T/ai/game.AppImage"
+export APPIMAGE_EXTRACT_AND_RUN=1  # (no FUSE needed)
+mkdir "$T/ai/game.AppImage.home"  # (what --appimage-portable-home makes; that option needs the runtime to mount)
+got=$(data_of "$T/ai/game.AppImage")
+if [ -z "$got" ]; then  # (the AppImage didn't run: what it said)
+    "$T/ai/game.AppImage" --list-settings 2>&1 | tail -20 || true
+fi
+expect "AppImage with .home" "$got" "$T/ai/game.AppImage.home/.local/share/retri"
+echo "data folder rules: ok"

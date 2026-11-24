@@ -8,12 +8,10 @@
 #include <string.h>
 
 #include "../hle.h"
-#include "../rando.h"
 #include "../settings.h"
 
-#define MAIN_BASE 0x7000000000ull
 
-// 360-degree movement: main+0xded9f0 (tools/patches.py SNAP_DIR_SITE) turns the stick vector (s1 = x, s2 = y) into
+// 360-degree movement: main+0xded9f0 (runtime/gen/patches.cpp SNAP_DIR_SITE) turns the stick vector (s1 = x, s2 = y) into
 // one of 8 directions, returned in w0 as an angle (full turn = 2^32, 0 = down, 2^30 = right). With the setting on
 // it returns the stick's own angle (returns 1: the original function is skipped).
 int rt_snap_dir(Cpu *c) {
@@ -40,7 +38,7 @@ int rt_snap_dir(Cpu *c) {
     return 1;
 }
 
-// Walk speed (Gameplay tab, setting walk_speed): tools/patches.py WALK_SPEED_SITES hand over the multiplier Link's walk
+// Walk speed (Gameplay tab, setting walk_speed): runtime/gen/patches.cpp WALK_SPEED_SITES hand over the multiplier Link's walk
 // / shield-walk state applies to its ramped speed (1, or 1.15 with a Piece of Power; s0) with the player actor.
 float rt_walk_speed(uint64_t player, float m, int site) {
     static float env = -1;  // LARECOMP_WALK_SPEED=<mult>: test override; LARECOMP_LOG_WALK: log some calls
@@ -67,115 +65,19 @@ float rt_walk_speed(uint64_t player, float m, int site) {
     return m * k;
 }
 
-// No Guardian Acorns / Pieces of Power (randomizer option no-buff-drops). Enemy kills count up two bytes of PlayerStatus
-// (+0xa4, +0xa5, saturating at 255; shared death code main+0x7c6950). The drop roll main+0x89b960 takes the dropper's
-// ItemDrop row; a row with mAllowBuffReplace (+0x38: NormalLow / NormalMid / RupeeMid...) first checks the
+// No Guardian Acorns / Pieces of Power (Gameplay tab, setting no_buff_drops). Enemy kills count up two bytes of
+// PlayerStatus (+0xa4, +0xa5, saturating at 255; shared death code main+0x7c6950). The drop roll main+0x89b960 takes the
+// dropper's ItemDrop row; a row with mAllowBuffReplace (+0x38: NormalLow / NormalMid / RupeeMid...) first checks the
 // kill counters in PlayerStatus (+0xa5 >= 14: "DefenceUp" = Guardian Acorn; +0xa4 past a threshold: "PowerUp" =
 // Piece of Power; the counter is then wrapped) and drops that item symbol directly - the ItemDrop rows GuardianAcorn /
-// PowerPiece (emptied by LAS-Randomizer item_drops.py) aren't involved, which is why the option alone didn't work.
-// tools/patches.py BUFF_REPLACE_SITE reads the flag as false here: the counters are never consumed (they stay at 255) and
-// the row's own lot table is rolled as usual. Anything else that would make one (ItemPowerPiece 0xb2 / ItemGuardianAcorn 0xb3) is
-// held back at the actor factory (souls.c).
-// a seed folder's settings.json says "no-buff-drops": true
-static int dir_no_buff(const char *dir) {
-    char p[512];
-    snprintf(p, sizeof p, "%s/settings.json", dir);
-    FILE *f = fopen(p, "rb");
-    if (!f) return 0;
-    static char buf[1 << 16];
-    size_t n = fread(buf, 1, sizeof buf - 1, f);
-    buf[n] = 0;
-    fclose(f);
-    return strstr(buf, "\"no-buff-drops\": true") != NULL;
-}
-
-static int g_no_buff = -1;  // the running seed has it (per seed: read again after an in-place reboot)
-static bool seed_no_buff(void) {
-    if (g_no_buff < 0) {
-        const char *dir = rando_seed_dir();
-        g_no_buff = dir ? dir_no_buff(dir) : 0;
-        LOG("[qol] no Guardian Acorns / Pieces of Power by the seed: %s\n", g_no_buff ? "ON" : "off");
-    }
-    return g_no_buff;
-}
-// on: the Gameplay tab's lever, or the seed was made with it
+// PowerPiece aren't involved. runtime/gen/patches.cpp BUFF_REPLACE_SITE reads the flag as false here: the counters are never
+// consumed (they stay at 255) and the row's own lot table is rolled as usual. Anything else that would make one
+// (ItemPowerPiece 0xb2 / ItemGuardianAcorn 0xb3) is held back at the actor factory (rt_actor_create_fn).
 static bool no_buff(void) {
     const char *e = getenv("LARECOMP_NO_BUFF");  // test: 1 / 0 forces it
     if (e) return atoi(e) != 0;
-    return g_settings.no_buff_drops || seed_no_buff();
+    return g_settings.no_buff_drops;
 }
-// The seed forces it (the Gameplay toggle is greyed out). On the start screen: the seed PLAY would start, from its
-// folder (rando_seed_dir() would apply its patches before the game is loaded) - as rt_hookshot_seed_forced.
-extern int g_start_screen;  // warp.c
-int rt_no_buff_seed_forced(void) {
-    if (!g_start_screen) return seed_no_buff();
-    static char last[128] = "\x01";
-    static int on;
-    if (strcmp(last, g_settings.rando_seed)) {
-        snprintf(last, sizeof last, "%s", g_settings.rando_seed);
-        char dir[256];
-        snprintf(dir, sizeof dir, "rando/%s", g_settings.rando_seed);
-        on = g_settings.rando_seed[0] && dir_no_buff(dir);
-    }
-    return on;
-}
-RT_ON_RESET(no_buff_reset) { g_no_buff = -1; }  // (seed switch)
-
-// Treat Tunics as Upgrades (seed option "tunic-upgrades"): the game's add-item code sets the new tunic's bit in the
-// tunics byte (save +0x555C: 0x40 red, 0x80 blue) and clears the other one (tools/patches.py TUNIC_CLEAR_SITES); with
-// the option the other one stays. The game applies each tunic's effect from its own bit (attack: main+0xd1f580, red
-// or a Piece of Power; damage halved after main+0xd4c738 etc: blue or a Guardian Acorn), so with both Link has both.
-static int g_tunic_up = -1;  // (per seed)
-int rt_tunic_upgrades(void) {
-    if (g_tunic_up < 0) {
-        g_tunic_up = 0;
-        const char *dir = rando_seed_dir();
-        char p[512];
-        FILE *f = dir ? (snprintf(p, sizeof p, "%s/settings.json", dir), fopen(p, "rb")) : NULL;
-        if (f) {
-            static char buf[1 << 16];
-            size_t n = fread(buf, 1, sizeof buf - 1, f);
-            buf[n] = 0;
-            fclose(f);
-            g_tunic_up = strstr(buf, "\"tunic-upgrades\": true") != NULL;
-        }
-        LOG("[qol] tunics as upgrades: %s\n", g_tunic_up ? "ON" : "off");
-    }
-    return g_tunic_up;
-}
-RT_ON_RESET(tunic_up_reset) { g_tunic_up = -1; }
-
-// Underwater checks (tools/rando/underwater.py, settings.json "underwater-items"): the sunken heart-piece actors hold
-// randomized items and hide by their own flag, so their "do you own this heart piece already?" check is skipped
-// (tools/patches.py UNDERWATER_OWNED_SITE, x20 = the item actor) and their pickup adds no heart piece
-// (UNDERWATER_PICKUP_SITE, x19 = its event actor, which keeps the name at +0x398: "ItemHeartPiece-<id>"). The item
-// actor is told by its class (vtable): its name is often not filled in yet when it asks whether to appear, and with
-// the check not skipped a sunken spot whose heart-piece index the player owns was deleted on load (found 2026-10-24:
-// the Eagle's Tower exit cave's item, index 7, gone in most loads - nothing to see or dive for).
-static int g_underwater = -1;  // (per seed)
-int rt_underwater_items(void) {
-    if (g_underwater < 0) {
-        g_underwater = 0;
-        const char *dir = rando_seed_dir();
-        char p[512];
-        FILE *f = dir ? (snprintf(p, sizeof p, "%s/settings.json", dir), fopen(p, "rb")) : NULL;
-        if (f) {
-            static char buf[1 << 16];
-            size_t n = fread(buf, 1, sizeof buf - 1, f);
-            buf[n] = 0;
-            fclose(f);
-            g_underwater = strstr(buf, "\"underwater-items\": true") != NULL;
-        }
-        LOG("[qol] underwater items: %s\n", g_underwater ? "ON" : "off");
-    }
-    return g_underwater;
-}
-
-int rt_underwater_skip_owned(uint64_t actor) {
-    return rt_underwater_items() && actor && (LD64(actor) == GA(ITEM_HEART_PIECE_VTABLE) ||
-                                              !memcmp((const void *)(uintptr_t)(actor + 0x398), "ItemHeartPiece-", 15));
-}
-RT_ON_RESET(underwater_reset) { g_underwater = -1; }
 
 int rt_buff_replace(int allow) {
     // LARECOMP_BUFF_PRIME=1 (test): every roll finds the Guardian Acorn counter full; =2: and every row allows buffs
@@ -191,10 +93,12 @@ int rt_buff_replace(int allow) {
     return allow && !no_buff();
 }
 
-bool rt_no_buff_actor(uint32_t type) {
-    if ((type != 0xb2 && type != 0xb3) || !no_buff()) return false;
+// The actor factory's create function for an actor type (runtime/gen/patches.cpp BOSS_SPAWN_SITE); 0: the factory's own path
+// for a type without a class (the caller gets an empty handle)
+uint64_t rt_actor_create_fn(uint64_t fn, uint32_t type) {
+    if ((type != 0xb2 && type != 0xb3) || !no_buff()) return fn;
     LOG("[qol] %s held back (no-buff-drops)\n", type == 0xb2 ? "Piece of Power" : "Guardian Acorn");
-    return true;
+    return 0;
 }
 
 // Blur removal: the post-process's tilt-shift object (post-process manager +0x620, set up once at boot by
@@ -202,8 +106,9 @@ bool rt_no_buff_actor(uint32_t type) {
 // uniform buffer (+0x50) with a pointer to that text (buffer +0x60). The buffer is bound to postprocess.bfsha's block
 // of that name each frame; under any other name the shader gets no parameters and draws no blur (LAS-Randomizer
 // 'blur-removal', patch by theboy181, renames the string in the module - which only took effect at the next start,
-// the copy being made once). tools/patches.py TILT_INIT_SITE hands us the object; its copy's first letter is
-// switched P <-> X as the setting changes, live.
+// the copy being made once). runtime/gen/patches.cpp TILT_INIT_SITE hands us the object; its copy's first letter is
+// switched P <-> X as the setting changes, live. EoW has the same object (renderer +0x600, runtime/gen/patches.cpp),
+// but its buffer keeps the name pointer at +0x68.
 static uint64_t g_tilt_obj;
 static int g_tilt_applied = -1;  // blur removal as last applied (-1: not yet)
 RT_ON_RESET(qol_reset) { g_tilt_obj = 0; g_tilt_applied = -1; }  // (reboot: a new post-process)
@@ -212,15 +117,16 @@ void rt_tilt_obj(uint64_t obj) { g_tilt_obj = obj; g_tilt_applied = -1; }
 
 static bool apply_tilt(int removed) {  // false: not set up yet (or not the name we know)
     uint64_t buf = g_tilt_obj ? LD64(g_tilt_obj + 0x50) : 0;
-    char *name = buf ? (char *)(uintptr_t)LD64(buf + 0x60) : NULL;
+    char *name = buf ? (char *)(uintptr_t)LD64(buf + (game_other() ? 0x68 : 0x60)) : NULL;
     if (!name || memcmp(name + 1, "FXTiltShiftParam", 17) || (name[0] != 'P' && name[0] != 'X')) return false;
     name[0] = removed ? 'X' : 'P';
     return true;
 }
 
 // LARECOMP_SETTING_AT="frame:key=value,..." (test): flip an in-game menu toggle at that presented frame, as the menu
-// would (move_360, blur_removal: 0 / 1; dpad_mode: 0 nothing / 1 items / 2 move; Cosmetics colour rows: a palette name or #RRGGBB - tunic, hearts,
-// hair, shield, skin, leaves, grass, sand; enemy_colours: 0 / 1 / 2; screen_filter: 0-3).
+// would (move_360, blur_removal, frame_interp: 0 / 1; dpad_mode: 0 nothing / 1 items / 2 move; Cosmetics colour rows: a palette name or #RRGGBB - tunic, hearts,
+// hair, shield, skin, leaves, grass, sand; enemy_colours: 0 / 1 / 2; screen_filter: 0-3; text_speed: 0-2;
+// fps (Resolution's), fps_target (Dynamic's): 30 / 60; dyn_res: 0 / 1).
 static void setting_at_tick(void) {
     static const char *spec;
     static int init;
@@ -239,8 +145,15 @@ static void setting_at_tick(void) {
         int v = atoi(val);
         if (!strcmp(key, "screen_filter")) { g_settings.screen_filter = v; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
         if (!strcmp(key, "enemy_colours")) { g_settings.enemy_colours = v; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
+        if (!strcmp(key, "text_speed") && v >= 0 && v < N_TEXT_SPEEDS) { g_settings.text_speed = v; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
         if (!strcmp(key, "dpad_mode")) { g_settings.dpad_mode = v; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
-        bool *b = !strcmp(key, "move_360") ? &g_settings.move_360 : !strcmp(key, "blur_removal") ? &g_settings.blur_removal : NULL;
+        if (!strcmp(key, "fps")) { g_settings.fps = v == 30 ? FPS_TARGET_30 : FPS_TARGET_60; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
+        if (!strcmp(key, "fps_target")) { g_settings.fps_target = v == 30 ? FPS_TARGET_30 : FPS_TARGET_60; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
+        if (!strcmp(key, "dyn_res")) { g_settings.dyn_res = v != 0; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
+        if (!strcmp(key, "shadows")) { g_settings.shadow_quality = v; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
+        bool *b = !strcmp(key, "move_360") ? &g_settings.move_360 : !strcmp(key, "blur_removal") ? &g_settings.blur_removal :
+                  !strcmp(key, "frame_interp") ? &g_settings.frame_interp :
+                  !strcmp(key, "powerup_music") ? &g_settings.powerup_music : NULL;
         if (b) { *b = v != 0; LOG("[qol] test: f%llu %s = %d\n", (unsigned long long)now, key, v); }
         CosColour *c = !strcmp(key, "tunic") ? &g_settings.tunic : !strcmp(key, "hearts") ? &g_settings.hearts :
                        !strcmp(key, "hair") ? &g_settings.hair : !strcmp(key, "shield") ? &g_settings.shield :
@@ -256,7 +169,9 @@ void qol_tick(void) {
     setting_at_tick();
     static int env = -1;  // LARECOMP_BLUR_REMOVAL=0/1: test override
     if (env < 0) { const char *e = getenv("LARECOMP_BLUR_REMOVAL"); env = e ? atoi(e) != 0 : 2; }
-    int want = env == 2 ? g_settings.blur_removal : env;
+    // (EoW: off, its row hidden, until the cutscene depth-of-field fix has been tested more - LARECOMP_BLUR_REMOVAL=1 still
+    // turns it on for tests)
+    int want = env == 2 ? g_settings.blur_removal && !game_other() : env;
     if (want != g_tilt_applied && apply_tilt(want)) {
         LOG("[qol] blur removal %s\n", want ? "on" : "off");
         g_tilt_applied = want;

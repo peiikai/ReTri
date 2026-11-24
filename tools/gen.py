@@ -1,8 +1,12 @@
 """Generate C for a whole NSO module.
 
-Usage: gen.py <name> <nso> <base> <outdir> [--hle hle_symbols.txt] [--chunk N] [--simd asm|c]
+The reference for the C++ generator the app runs (runtime/gen/): tools/test_gen_cpp.py checks that both write the same
+C. Not shipped; it stays until the C++ port has been released.
+
+Usage: gen.py <name> <nso> <base> <outdir> [--hle hle_symbols.txt] [--simd asm|c] [--dyn-base] [--new-chunk-bounds]
 
 --simd: FP/SIMD/CRC32 as AArch64 inline asm (default on arm64 hosts) or portable C (default elsewhere).
+--new-chunk-bounds: cut the files by size and save those cuts to tools/chunk_bounds.py (every file compiles once).
 """
 import argparse
 import bisect
@@ -18,7 +22,9 @@ import unicorn as uc
 from unicorn import arm64_const as A
 
 from analyze import eh_frame_functions
-from lifter import Insn, Lifter, Unsupported, bits, emit_asm_batch, hx, sext
+import chunk_bounds
+import lifter
+from lifter import CANON, Insn, Lifter, Unsupported, bits, emit_asm_batch, gaddr, hx, sext
 from nso import Nso, R_AARCH64_RELATIVE
 
 SCRATCH_MEM = 0x7300000000
@@ -64,7 +70,7 @@ class Module:
                 ins = self.lifter.lift(self.word(a), a)
             except Unsupported as e:
                 self.stats['unsupported'] += 1
-                ins = Insn('trap', f'rt_udf(c, {hx(a)}); /* {e} */')
+                ins = Insn('trap', f'rt_udf(c, {gaddr(a)}); /* {e} */')
             self.cache[a] = ins
         return ins
 
@@ -86,6 +92,7 @@ class Module:
 
     def emu(self):
         if self.mu is None:
+            print(f'{self.name}: starting the jump table emulator', file=sys.stderr, flush=True)
             mu = uc.Uc(uc.UC_ARCH_ARM64, uc.UC_MODE_ARM)
             n = self.nso
             mu.mem_map(self.base, len(n.image))
@@ -342,10 +349,10 @@ class Module:
             t = ins.target
             if self.in_text(t):
                 refs.add(t)
-                return [f'c->x[30] = {hx(a + 4)}; {fname(t)}(c);']
-            return [f'c->x[30] = {hx(a + 4)}; c->pc = {hx(t)}; rt_dispatch(c);']
+                return [f'c->x[30] = {gaddr(a + 4)}; {fname(t)}(c);']
+            return [f'c->x[30] = {gaddr(a + 4)}; c->pc = {gaddr(t)}; rt_dispatch(c);']
         if k == 'blr':
-            return [f'c->pc = {ins.target}; c->x[30] = {hx(a + 4)}; rt_dispatch(c);']
+            return [f'c->pc = {ins.target}; c->x[30] = {gaddr(a + 4)}; rt_dispatch(c);']
         if k == 'br':
             return [f'c->pc = {ins.target}; __attribute__((musttail)) return rt_dispatch(c);']
         if k == 'ret':
@@ -353,12 +360,12 @@ class Module:
         raise Unsupported(k)
 
     def emit_function(self, entry, end, labels, tables, hle):
-        out = [f'void {fname(entry)}(Cpu *c) {{']
+        out = [f'{"__attribute__((optnone)) " if entry in OPTNONE else ""}void {fname(entry)}(Cpu *c) {{']
         if entry in hle:
             out.append(f'    {sanitize(hle[entry])}(c);')
             out.append('}')
             return out
-        out.append(f'    FN_ENTER({hx(entry)});')
+        out.append(f'    FN_ENTER({gaddr(entry)});')
         batch = []
         refs = set()
 
@@ -371,7 +378,7 @@ class Module:
             if entry <= t < end:
                 return f'goto L_{t:x};'
             if not self.in_text(t):
-                return f'c->pc = {hx(t)}; __attribute__((musttail)) return rt_dispatch(c);'
+                return f'c->pc = {gaddr(t)}; __attribute__((musttail)) return rt_dispatch(c);'
             refs.add(t)
             return f'__attribute__((musttail)) return {fname(t)}(c);'
 
@@ -380,14 +387,6 @@ class Module:
         all_labels = bool(tables)
         if all_labels:
             labels = set(range(entry, end, 4))
-        rando_here = [a for a in range(entry, end, 4) if a - self.base in RANDO_CODE]
-        if rando_here:
-            labels = set(labels)
-            for a in rando_here:
-                for w in RANDO_CODE[a - self.base]:
-                    v = self.lifter.lift(w, a)
-                    if v.kind in ('b', 'bcond') and isinstance(v.target, int) and entry <= v.target < end:
-                        labels.add(v.target)
         hooks_here = [a for a in range(entry, end, 4) if a in HOOKS]
         if hooks_here:  # (a hook's jump targets need their labels)
             labels = set(labels)
@@ -402,17 +401,6 @@ class Module:
             if a in labels:
                 flush()
                 out.append(f'L_{a:x}:;')
-            if a - self.base in RANDO_CODE:  # randomizer patch site: the active seed picks the instruction
-                flush()
-                out.append(f'    {{ extern uint32_t rando_word(uint64_t); uint32_t rw = rando_word({hx(a)});')
-                first = True
-                for w in RANDO_CODE[a - self.base]:
-                    v = self.lifter.lift(w, a)
-                    out.append(f'    {"if" if first else "else if"} (rw == {hx(w)}) {{ ' + ' '.join(self.render_single(v, a, jump, refs)) + ' }')
-                    first = False
-                out.append('    else { ' + ' '.join(self.render_single(ins, a, jump, refs)) + ' } }')
-                last = 'op'
-                continue
             if a in HOOKS:  # hook site (tools/patches.py HOOKS): the runtime decides, the instruction stays as it is
                 flush()
                 word, targets, _ = HOOKS[a]
@@ -421,13 +409,13 @@ class Module:
                     raise ValueError(f'hook {a:#x}: instruction {w:#010x}, expected {word:#010x}')
                 body = ' '.join(self.render_single(ins, a, jump, refs))
                 jumps = ' '.join(f'else if (h_ == {k + 2}) goto L_{t:x};' for k, t in enumerate(targets))
-                out.append(f'    {{ int h_ = rt_hook(c, {hx(a)}); if (h_ == 0) {{ {body} }} {jumps} }}'
+                out.append(f'    {{ int h_ = rt_hook(c, {gaddr(a)}); if (h_ == 0) {{ {body} }} {jumps} }}'
                            f'  /* {a:#x}: hook (runtime/hle/hooks.c) */')
                 last = 'op'
                 continue
             if a in PATCHES:  # hand-written replacement for one instruction (tools/patches.py)
                 flush()
-                out.append('    ' + PATCHES[a](self, a))
+                out.append('    ' + rebase_patch(PATCHES[a](self, a)))
                 last = 'op'
                 continue
             k = ins.kind
@@ -454,19 +442,19 @@ class Module:
                 t = ins.target
                 if self.in_text(t):
                     refs.add(t)
-                    out.append(f'    c->x[30] = {hx(a + 4)}; {fname(t)}(c);')
+                    out.append(f'    c->x[30] = {gaddr(a + 4)}; {fname(t)}(c);')
                 else:
-                    out.append(f'    c->x[30] = {hx(a + 4)}; c->pc = {hx(t)}; rt_dispatch(c);')
+                    out.append(f'    c->x[30] = {gaddr(a + 4)}; c->pc = {gaddr(t)}; rt_dispatch(c);')
             elif k == 'blr':
-                out.append(f'    c->pc = {ins.target}; c->x[30] = {hx(a + 4)}; rt_dispatch(c);')
+                out.append(f'    c->pc = {ins.target}; c->x[30] = {gaddr(a + 4)}; rt_dispatch(c);')
             elif k == 'br':
                 jt = tables.get(a)
                 if jt == 'all':
                     out.append(f'    c->pc = {ins.target}; goto L_dispatch;')
                     continue
                 if jt:
-                    cases = ' '.join(f'case {hx(t)}: goto L_{t:x};' for t in jt)
-                    out.append(f'    switch ({ins.target}) {{ {cases} default: break; }}')
+                    cases = ' '.join(f'case {case_key(t)}: goto L_{t:x};' for t in jt)
+                    out.append(f'    switch ({switch_on(ins.target)}) {{ {cases} default: break; }}')
                     out.append(f'    c->pc = {ins.target}; goto L_dispatch;')
                     continue
                 out.append(f'    c->pc = {ins.target}; __attribute__((musttail)) return rt_dispatch(c);')
@@ -475,13 +463,15 @@ class Module:
             last = k
         flush()
         if last not in ('b', 'br', 'ret', 'trap'):
-            out.append('    ' + jump(end) if end < self.hi else f'    rt_udf(c, {hx(end)});')
+            out.append('    ' + jump(end) if end < self.hi else f'    rt_udf(c, {gaddr(end)});')
         if all_labels:
             out.append('L_dispatch:')
-            cases = ' '.join(f'case {hx(t)}: goto L_{t:x};' for t in range(entry, end, 4))
-            out.append(f'    switch (c->pc) {{ {cases} default: break; }}')
+            cases = ' '.join(f'case {case_key(t)}: goto L_{t:x};' for t in range(entry, end, 4))
+            out.append(f'    switch ({switch_on("c->pc")}) {{ {cases} default: break; }}')
             out.append('    __attribute__((musttail)) return rt_dispatch(c);')
         out.append('}')
+        if lifter.DYN_BASE and any(GB_USE.search(l) for l in out):
+            out.insert(1, '    const uint64_t GB = lasgame_gb;')
         self._refs = refs
         return out
 
@@ -490,13 +480,27 @@ class Module:
 # is known from the NSO's build ID (tools/game_addresses.py; an unknown build ID stops the generator)
 HOOKS, PATCHES = {}, {}
 
-import json as _json
-import os as _os
-_rv = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'rando', 'patch_variants.json')
-RANDO_CODE = {}
-if _os.path.exists(_rv):
-    for _a, _ws in _json.load(open(_rv))['code'].items():
-        RANDO_CODE[int(_a, 16)] = [int(_w, 16) for _w in _ws]
+# --dyn-base (lifter.gaddr): jump table and dispatch switches compare window offsets, so their case labels stay
+# constants; the hand-written patches' code addresses move with the window like the lifted ones.
+GB_USE = re.compile(r'\bGB\b')
+PATCH_ADDR = re.compile(r'\b0x(7[0-3][0-9a-f]{8})ull\b')
+
+
+def case_key(t):
+    return hx(t - CANON) if lifter.DYN_BASE else hx(t)
+
+
+def switch_on(expr):
+    return f'{expr} - GB' if lifter.DYN_BASE else expr
+
+
+def rebase_patch(code):
+    return PATCH_ADDR.sub(lambda m: gaddr(int(m.group(1), 16)), code) if lifter.DYN_BASE else code
+
+# Functions built without optimisation: guest address -> its first instruction word (checked, as patches are).
+# Workaround: LLVM's loop passes (LICM, then loop-load elimination) run for over half an hour and 7 GB on these at
+# -O1, a cost no flag of theirs caps (-disable-licm-promotion below doesn't), and they don't run in normal play.
+OPTNONE = {}
 
 
 def write_if_changed(path, text):
@@ -532,44 +536,97 @@ def main():
     ap.add_argument('base', type=lambda s: int(s, 0))
     ap.add_argument('outdir')
     ap.add_argument('--hle')
+    # --new-chunk-bounds only: how the files are cut by size (with saved cuts, those decide; tools/chunk_bounds.py)
     ap.add_argument('--chunk', type=int, default=1500)  # functions per file at most
     ap.add_argument('--chunk-bytes', type=int, default=1500000)  # and about this much C (even compile times)
     ap.add_argument('--big-fn', type=int, default=100000)  # bytes of C from which a function gets its own file
+    ap.add_argument('--new-chunk-bounds', action='store_true',
+                    help='cut the files by size and save the cuts for this module build (tools/chunk_bounds.py)')
     ap.add_argument('--limit', type=int, default=0)
     ap.add_argument('--simd', choices=('asm', 'c'),
                     default='asm' if platform.machine().lower() in ('arm64', 'aarch64') else 'c')
     ap.add_argument('--game', default='la')  # another game on the same engine (runtime/game_addresses/games.h): no
-    # patches, hooks or randomizer code (all of them are LA addresses)
+    # LA patches or hooks (all of them are LA addresses)
+    ap.add_argument('--dyn-base', action='store_true',
+                    help='Android: guest addresses relative to the window the runtime picks (lifter.gaddr)')
     args = ap.parse_args()
+    lifter.DYN_BASE = args.dyn_base
+    # (first: a generator that ends early still shows it started)
+    print(f'{args.name}: started', file=sys.stderr, flush=True)
 
     global HOOKS, PATCHES
     t0 = time.time()
     m = Module(args.name, args.nso, args.base, args.simd)
     import game_addresses
     if args.game != 'la':
-        global RANDO_CODE
-        RANDO_CODE = {}
         if args.game not in game_addresses.GAMES:
             sys.exit(f'{args.name}: unknown game {args.game}')
-        if args.name == 'main' and game_addresses.game_for_build_id(m.nso.build_id) != args.game:
+        build = game_addresses.game_build(m.nso.build_id) if args.name == 'main' else None
+        if args.name == 'main' and (not build or build['key'] != args.game):
             sys.exit(f'{args.name}: main build ID {m.nso.build_id[:16].upper()} is not {args.game}')
-        print(f'{args.name}: game {game_addresses.GAMES[args.game][0]} (no LA patches)', file=sys.stderr)
+        print(f'{args.name}: game {game_addresses.GAMES[args.game]}' + (f" {build['release']}" if build else '') +
+              ' (no LA patches)', file=sys.stderr)
         if args.name == 'main' and args.game == 'eow':
-            # (warp, runtime/hle/warp_other.c) the level-jump request processor (main+0x160f7e0, x0 = its object,
+            # the build's own addresses (runtime/game_addresses/eow_<table>.h); each site asserts its instruction
+            T = game_addresses.other_table(build)
+            # (OPTNONE) a 25 500-line function behind a data table (1.0.2: main+0x3d85e90), never entered in 4 200 frames
+            # of start, file load and play (LARECOMP_FNPROF); at -O1 it took 30+ minutes to compile
+            OPTNONE[T['OPTNONE_TABLE_FN']] = 0xa9ba7bfd  # stp x29, x30, [sp, #-0x60]!
+            # a 27 300-line function called once while the game starts (LARECOMP_FNPROF: once in boot to the overworld);
+            # at -O2 it took 8 minutes on a Mac and 30+ on a Snapdragon 865 (Android builds it on the phone)
+            OPTNONE[T['OPTNONE_SLOW_FN']] = 0xa9ba7bfd  # stp x29, x30, [sp, #-0x60]!
+            for _a, _w in OPTNONE.items():
+                _got = struct.unpack_from('<I', m.nso.image, _a - m.base)[0]
+                assert _got == _w, f'OPTNONE {_a:#x}: {_got:#x}, not {_w:#x}'
+            # (warp, runtime/hle/warp_other.c) the level-jump request processor (REQUEST_PROC, x0 = its object,
             # the request at +0x10): its `mov x20, x0` tells us where the request is
             def _eow_request(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
                 assert w == 0xaa0003f4, hex(w)  # mov x20, x0
                 return ('{ extern void rt_other_request_holder(uint64_t); rt_other_request_holder(c->x[0]); c->x[20] = c->x[0]; }'
                         f'  /* {a:#x}: mov x20, x0 (level-jump request processor) */')
-            PATCHES[0x700160f804] = _eow_request
+            PATCHES[T['REQUEST_SITE']] = _eow_request
+            # (blur removal, runtime/hle/qol.c) the renderer's per-frame set-up makes the tilt-shift object
+            # (renderer +0x600) once, the first time it's reached, as LA's main+0x1071220 does: name copy at +0x58,
+            # uniform buffer at +0x50. Its `add x19, x23, #0x600` hands qol.c the object.
+            def _eow_tilt(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0x911802f3, hex(w)  # add x19, x23, #0x600
+                return ('{ extern void rt_tilt_obj(uint64_t); c->x[19] = c->x[23] + 0x600; rt_tilt_obj(c->x[19]); }'
+                        f'  /* {a:#x}: add x19, x23, #0x600 (tilt-shift set-up: blur removal) */')
+            PATCHES[T['TILT_SITE']] = _eow_tilt
+            # (resolution, runtime/nvn/output_scale.c) the game's own dynamic resolution, off - as LA's
+            # GAME_DYNRES_SITE. Its frame controller (1.0.2: main+0x346530) reads the scaler's enabled byte (+0x480 of its
+            # object); on, it turns the GPU timing counters into a load figure and steps its 3D a level (1080 - 36 x
+            # level lines) after 6 samples over 90% / under 70%. It started at 1408x792 and climbed
+            # to 1920x1080 on a fast GPU: our scale (Match display maps 792 lines to the window) then drew the 3D at
+            # up to 1.9x the window's pixels (6982x1964 for 5120x1440), new targets at each step, and frames over
+            # 16.7 ms once our own window step (SMAA, upscale) came on top. Read as 0: it stays at 1408x792.
+            # LARECOMP_GAME_DYNRES=1 (test): the game's own again.
+            def _eow_dynres(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0x39520348, hex(w)  # ldrb w8, [x26, #0x480]
+                return ('{ extern int rt_game_dynres(void); '
+                        'c->x[8] = rt_game_dynres() ? LD8(c->x[26] + 0x480) : 0; }'
+                        f'  /* {a:#x}: ldrb w8, [x26, #0x480] (the game\'s dynamic resolution: off) */')
+            PATCHES[T['DYNRES_SITE']] = _eow_dynres
+            # (frame pacing, runtime/nvn/pace.c rt_other_fps_limit) the frame controller's own 30 / 60 fps switch, off:
+            # the frame time it calls slow, 1/60 s (`movk wD, #0x3c88, lsl #16` after `mov wD, #0x8889`) - in its 30 fps
+            # branch (a 12-frame window with none slow goes back to 60), its 60 fps branch (slow frames there go to 30)
+            # and the flag of a slow frame that sends it to 30 the next frame - is the runtime's: 1 s, no frame slow,
+            # always 60 (0 with the FPS target at 30: every frame slow, its 30 fps mode)
+            def _eow_fps_limit(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert (w & 0xFFFFFFE0) == 0x72A79100, hex(w)  # movk wD, #0x3c88, lsl #16
+                d = w & 31
+                return ('{ extern uint32_t rt_other_fps_limit(void); '
+                        f'c->x[{d}] = rt_other_fps_limit(); }}'
+                        f'  /* {a:#x}: movk w{d}, #0x3c88, lsl #16 (1/60 s: a slow frame) */')
+            for a in (T['FPS_LIMIT_30_SITE'], T['FPS_LIMIT_60_SITE'], T['FPS_LIMIT_FLAG_SITE']):
+                PATCHES[a] = _eow_fps_limit
             # (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
             # `movz wD, #0x8e39; movk wD, #0x3fe3, lsl #16`: the movk gets the runtime's aspect instead
-            eow_aspect = [0x700033d32c, 0x700033e6f8, 0x7000348b70, 0x7000351e20, 0x7000c2bd3c, 0x7000c2c8b4,
-                          0x7000c3268c, 0x7000c409bc, 0x7000c41084, 0x7000c42784, 0x7000c4597c, 0x7000c46da8,
-                          0x7001583b40, 0x7001584390, 0x70015866d0, 0x70015879dc, 0x70015ec260, 0x7001628908,
-                          0x7001645218, 0x7001646d58, 0x70020ebc34, 0x700231dfe8, 0x700231e050, 0x7002703a30,
-                          0x7002722884, 0x700279adcc]
+            eow_aspect = [v for k, v in sorted(T.items()) if k.startswith('ASPECT_SITE_')]
             def _eow_aspect(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
                 assert (w & 0xFFFFFFE0) == 0x72A7FC60, hex(w)  # movk wD, #0x3fe3, lsl #16
@@ -578,6 +635,21 @@ def main():
                         f'  /* {a:#x}: movk w{d}, #0x3fe3, lsl #16 (16:9) */')
             for a in eow_aspect:
                 PATCHES[a] = _eow_aspect
+            # (widescreen, runtime/hle/widescreen.c rt_screen_spot) layouts placed at a target's spot on screen (the
+            # lock-on reticle L_LockOn_00 and the others below): the code works the spot out with the widened camera
+            # and turns it into the 16:9 layout's units (x 960, y 540 from the centre), then stores it as the root
+            # pane's translation, `stp sA, sB, [xN, #0x30]` = x, y. The runtime rescales them to the window's shape.
+            eow_spot = [v for k, v in sorted(T.items()) if k.startswith('SPOT_SITE_')]
+            def _eow_spot(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert (w & 0xFFFF8000) == 0x2D060000, hex(w)  # stp sA, sB, [xN, #0x30]
+                ra, rn, rb = w & 31, (w >> 5) & 31, (w >> 10) & 31
+                return (f'{{ extern void rt_screen_spot(int site, uint64_t pane, float *xy); float xy_[2]; '
+                        f'memcpy(&xy_[0], &c->v[{ra}], 4); memcpy(&xy_[1], &c->v[{rb}], 4); '
+                        f'rt_screen_spot({eow_spot.index(a)}, c->x[{rn}], xy_); memcpy((void *)(uintptr_t)(c->x[{rn}] + 0x30), xy_, 8); }}'
+                        f'  /* {a:#x}: stp s{ra}, s{rb}, [x{rn}, #0x30] (a layout at a spot on screen: widescreen) */')
+            for a in eow_spot:
+                PATCHES[a] = _eow_spot
         if args.name == 'main' and os.environ.get('GEN_TRACE_STORE_OFF'):  # (debug) every `str xT, [xN, #off]` and
             # `stp` whose either slot is at one of these offsets (comma-separated): the runtime hears of it
             # (rt_trace_store: site, base, value) - finding where an object is registered
@@ -707,41 +779,83 @@ def main():
     order = sorted(entries)
     if args.limit:
         order = order[:args.limit]
-    nchunks = 0
-    ci = 0
-    pending = None  # (address, lines, refs) of a big function that starts the next file
-    while ci < len(order) or pending:
-        body, refs, size, fns = [], set(), 0, []
-        while (pending or ci < len(order)) and len(fns) < args.chunk and size < args.chunk_bytes:
-            if pending:
-                a, lines, r = pending
-                pending = None
-            else:
-                a = order[ci]
-                ci += 1
-                end, labels, tables = entries[a]
-                lines = m.emit_function(a, end, labels, tables, hle)
-                r = getattr(m, '_refs', set())
-                m._refs = set()
-            n = sum(len(l) + 1 for l in lines)
-            if n > args.big_fn and fns:  # (a big function gets a file of its own: they compile in parallel)
-                pending = (a, lines, r)
-                break
+
+    def render(a):
+        end, labels, tables = entries[a]
+        lines = m.emit_function(a, end, labels, tables, hle)
+        r = getattr(m, '_refs', set())
+        m._refs = set()
+        return a, lines, r
+
+    def by_size():
+        """Files of at most --chunk functions and about --chunk-bytes of C; a big function gets a file of its own
+        (they compile in parallel). Makes the saved cuts; builds use it only for a module without them, since here
+        where a cut falls depends on every function before it."""
+        ci, pending = 0, None
+        while ci < len(order) or pending:
+            fns, size = [], 0
+            while (pending or ci < len(order)) and len(fns) < args.chunk and size < args.chunk_bytes:
+                if pending:
+                    f, pending = pending, None
+                else:
+                    f = render(order[ci])
+                    ci += 1
+                n = sum(len(l) + 1 for l in f[1])
+                if n > args.big_fn and fns:
+                    pending = f
+                    break
+                fns.append(f)
+                size += n
+                if n > args.big_fn:
+                    break
+            yield fns
+
+    def by_bounds(starts):
+        """File k holds the functions from starts[k] up to starts[k + 1] (the first file also anything before
+        starts[0]): a changed function changes only its own file, whatever happens before it."""
+        k, fns = 0, []
+        for a in order:
+            j = max(bisect.bisect_right(starts, a) - 1, 0)
+            while j > k:
+                yield fns
+                fns, k = [], k + 1
+            fns.append(render(a))
+        while k < len(starts):
+            yield fns
+            fns, k = [], k + 1
+
+    key = m.nso.build_id[:16]
+    saved = None if args.new_chunk_bounds else chunk_bounds.BOUNDS.get(key)
+    if saved:
+        chunks = by_bounds([args.base + o for o in saved[1]])
+    else:
+        if not args.new_chunk_bounds:
+            print(f'{args.name}: no saved file cuts for build {key}, cutting by size', file=sys.stderr)
+        chunks = by_size()
+    nchunks = done = 0
+    firsts = []
+    for fns in chunks:
+        body, refs = [], set()
+        for a, lines, r in fns:
             body += lines
-            size += n
-            fns.append(a)
             refs |= r
-            if n > args.big_fn:
-                break
+        firsts.append(fns[0][0] if fns else None)
+        done += len(fns)
         path = os.path.join(args.outdir, f'{args.name}_{nchunks:03d}.c')
         text = ['#include "cpu.h"\n' + ('#include "simd.h"\n' if m.lifter.sc else '')]
+        if args.dyn_base:
+            text += ['extern __attribute__((visibility("hidden"))) uint64_t lasgame_gb;\n']
         text += [f'void {fname(r)}(Cpu *c);\n' for r in sorted(refs)]
-        text += [f'void {sanitize(hle[a])}(Cpu *c);\n' for a in sorted(set(hle) & set(fns))]
+        text += [f'void {sanitize(hle[a])}(Cpu *c);\n' for a in sorted(set(hle) & {a for a, _, _ in fns})]
         text += ['\n'.join(body), '\n']
         write_if_changed(path, ''.join(text))
         nchunks += 1
         # (the start screen's setup reads these for its progress bar: runtime/gamebuild.c)
-        print(f'{args.name}: progress {ci}/{len(order)} files {nchunks}', file=sys.stderr, flush=True)
+        print(f'{args.name}: progress {done}/{len(order)} files {nchunks}', file=sys.stderr, flush=True)
+    if args.new_chunk_bounds:
+        what = args.name + (f' {game_addresses.VERSIONS[version][0]}' if args.name == 'main' else '')
+        chunk_bounds.save(key, what, [a - args.base for a in firsts])
+        print(f'{args.name}: saved {nchunks} file cuts for build {key} to tools/chunk_bounds.py', file=sys.stderr)
     for fn in os.listdir(args.outdir):  # an earlier run's extra chunks
         mm = re.fullmatch(re.escape(args.name) + r'_(\d{3})\.c', fn)
         if mm and int(mm.group(1)) >= nchunks:
@@ -758,10 +872,15 @@ def main():
         f.write(',\n'.join(fname(a) for a in order))
         f.write('};\n')
         f.write(f'const uint64_t {args.name}_fn_count = {len(order)};\n')
+        if args.dyn_base:  # (in each module's table, weak: main and sdk share one; the table keeps CANON addresses)
+            f.write("// the guest window's start (--dyn-base): the runtime sets it before any game code runs\n")
+            f.write(f'__attribute__((weak, visibility("hidden"))) uint64_t lasgame_gb = {hx(CANON)};\n')
+            f.write('__attribute__((weak, visibility("default"))) void lasgame_set_guest_base(uint64_t gb) '
+                    '{ lasgame_gb = gb; }\n')
         write_if_changed(os.path.join(args.outdir, f'{args.name}_table.c'), f.getvalue())
     if args.name == 'main':  # (what this code was generated from: the Makefile's game code library id, GAMELIB_BUILD_ID)
         write_if_changed(os.path.join(args.outdir, 'main_build_id.txt'),
-                         (game_addresses.GAMES[args.game][1] if args.game != 'la' else
+                         (game_addresses.game_build(m.nso.build_id)['build_id'] if args.game != 'la' else
                           game_addresses.VERSIONS[version][1]) + '\n')
     print(f'{args.name}: wrote {nchunks} chunks, {time.time() - t0:.0f}s total', file=sys.stderr)
 

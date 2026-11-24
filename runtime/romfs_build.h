@@ -5,6 +5,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,9 +31,30 @@ void romfs_layout_free(RomfsLayout *l);
 // Bytes of file data under dir (the image is about this plus its tables).
 uint64_t romfs_dir_bytes(const char *dir);
 
+// The game's files in the player's folder: exefs is the folder holding main and main.npdm, romfs the one holding
+// region_common (the game's data root) - the picked folder itself, its exefs/ and romfs/, or a few levels down (some
+// layouts nest them; the two may be one and the same folder). Either comes back "" when not found. unusable (optional)
+// is set when game packages (.xci / .nsp / .nca...) were seen instead: the player has the game, not its files.
+void romfs_find_game(const char *dir, char *exefs, size_t exefs_size, char *romfs, size_t romfs_size, bool *unusable);
+
 // Copies the folder tree src to dst (hard links where the file system allows: no second copy of 6 GB). progress as
 // above. false = failed.
 bool romfs_copy_tree(const char *src, const char *dst, void (*progress)(uint64_t done, uint64_t total));
+// One file the same way (an existing dst is replaced).
+bool romfs_copy_file(const char *src, const char *dst);
+// A new file to write, never an existing one (NULL, errno EEXIST): the data folder's game files can be hard links to
+// the player's own files, and opening one with "wb" would truncate theirs. Every copy into the data folder writes
+// through this after removing the old name.
+static inline FILE *romfs_create_new(const char *path) {
+#ifdef O_BINARY
+    int fd = open(path, O_CREAT | O_EXCL | O_WRONLY | O_BINARY, 0644);
+#else
+    int fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
+#endif
+    FILE *f = fd >= 0 ? fdopen(fd, "wb") : NULL;
+    if (fd >= 0 && !f) close(fd);
+    return f;
+}
 
 #ifdef __cplusplus
 }

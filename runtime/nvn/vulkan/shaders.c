@@ -186,7 +186,7 @@ int vk_reflect(const uint32_t *spv, size_t n, VkBindingInfo *out, int max) {
     if (n < 5 || spv[0] != 0x07230203) return 0;
     uint32_t bound = spv[3];
     int32_t *binding = malloc(bound * sizeof *binding), *set = malloc(bound * sizeof *set);
-    uint8_t *flags = calloc(bound, 1);    // 1 Block, 2 BufferBlock
+    uint8_t *flags = calloc(bound, 1);    // 1 Block, 2 BufferBlock, 4 storage image
     uint32_t *op = calloc(bound, sizeof *op), *ref = calloc(bound, sizeof *ref), *sc = calloc(bound, sizeof *sc);
     for (uint32_t i = 0; i < bound; i++) binding[i] = set[i] = -1;
     for (size_t i = 5; i < n;) {
@@ -200,6 +200,7 @@ int vk_reflect(const uint32_t *spv, size_t n, VkBindingInfo *out, int max) {
             else if (w[2] == DEC_BUFFER_BLOCK) flags[w[1]] |= 2;
         } else if ((o == OP_TYPE_IMAGE || o == OP_TYPE_SAMPLER || o == OP_TYPE_SAMPLED_IMAGE || o == OP_TYPE_STRUCT) && wc >= 2 && w[1] < bound) {
             op[w[1]] = o;
+            if (o == OP_TYPE_IMAGE && wc >= 9 && w[7] == 2) flags[w[1]] |= 4;  // (Sampled 2: a storage image)
         } else if ((o == OP_TYPE_ARRAY || o == OP_TYPE_RUNTIME_ARRAY) && wc >= 3 && w[1] < bound) {
             op[w[1]] = o;
             ref[w[1]] = w[2];
@@ -222,7 +223,7 @@ int vk_reflect(const uint32_t *spv, size_t n, VkBindingInfo *out, int max) {
         VkDescriptorType dt;
         if (t >= bound) continue;
         if (op[t] == OP_TYPE_SAMPLED_IMAGE) dt = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        else if (op[t] == OP_TYPE_IMAGE) dt = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        else if (op[t] == OP_TYPE_IMAGE) dt = (flags[t] & 4) ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         else if (op[t] == OP_TYPE_SAMPLER) dt = VK_DESCRIPTOR_TYPE_SAMPLER;
         else if (op[t] == OP_TYPE_STRUCT && (sc[id] == SC_STORAGE_BUFFER || (flags[t] & 2))) dt = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         else if (op[t] == OP_TYPE_STRUCT && sc[id] == SC_UNIFORM) dt = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -248,13 +249,17 @@ VkDescriptorSetLayout vk_set_layout(const VkBindingInfo *b, int n, uint32_t set,
 static const char *builtin_src(const char *name, int *stage) {
     if (!strcmp(name, "present.vert")) {
         *stage = STAGE_VERTEX;
-        // pv[0].x: flip (lower-left origin), pv[1]: uv crop (origin, size). Fullscreen triangle; Vulkan NDC y points down.
+        // pv[0].x: flip (lower-left origin), pv[0].y: the swapchain's pre-rotation in quarter turns (device.c
+        // vk_sc_rect: 1 -> (-y, x), 3 -> (y, -x)), pv[1]: uv crop (origin, size). Fullscreen triangle; Vulkan NDC y
+        // points down.
         return "#version 450\n"
                "layout(push_constant) uniform P { vec4 a; vec4 crop; } pc;\n"
                "layout(location = 0) out vec2 uv;\n"
                "void main() {\n"
                "  vec2 p = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);\n"
-               "  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
+               "  vec2 c = p * 2.0 - 1.0;\n"
+               "  if (pc.a.y > 0.5) c = pc.a.y < 2.0 ? vec2(-c.y, c.x) : vec2(c.y, -c.x);\n"
+               "  gl_Position = vec4(c, 0.0, 1.0);\n"
                "  vec2 u = vec2(p.x, pc.a.x > 0.5 ? 1.0 - p.y : p.y);\n"
                "  uv = pc.crop.xy + u * pc.crop.zw;\n"
                "}\n";

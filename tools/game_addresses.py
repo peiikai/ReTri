@@ -10,7 +10,6 @@ built from it on import, so select first. An unknown build ID is an error: there
 """
 from pathlib import Path
 import re
-import sys
 from types import SimpleNamespace
 
 
@@ -47,27 +46,45 @@ def load_versions(path):
     return versions
 
 
-_root = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else Path(__file__).resolve().parent.parent
-TABLE_DIR = _root / 'runtime/game_addresses'
+TABLE_DIR = Path(__file__).resolve().parent.parent / 'runtime/game_addresses'
 VERSIONS = load_versions(TABLE_DIR / 'versions.h')
 
 
 def load_games(path):
-    """{key: (label, main build ID, sdk base)} from games.h: other games on the same engine (no address tables)."""
-    games = {}
+    """[{key, table, label, release, build_id, sdk_base}] from games.h, in file order: other games on the same engine,
+    one row per build (its own address table, <key>_<table>.h)."""
+    builds = []
     if not path.exists():
-        return games
+        raise FileNotFoundError(f'{path} is missing')
     for line in path.read_text(encoding='utf-8').splitlines():
         if not line.startswith('GA_GAME'):
             continue
-        match = re.fullmatch(r'GA_GAME\(([a-z][a-z0-9_]*),\s+"([^"]+)",\s+"([0-9A-F]{40})",\s+(0x[0-9a-f]+)\)', line)
-        if not match or match[1] in games:
-            raise ValueError(f'Invalid or duplicate game: {line}')
-        games[match[1]] = (match[2], match[3], int(match[4], 16))
-    return games
+        match = re.fullmatch(r'GA_GAME\(([a-z][a-z0-9_]*),\s+(v\d+_\d+_\d+),\s+"([^"]+)",\s+"([^"]+)",\s+'
+                             r'"([0-9A-F]{40})",\s+(0x[0-9a-f]+)\)', line)
+        if not match or any(b['build_id'] == match[5] or (b['key'], b['table']) == (match[1], match[2]) for b in builds):
+            raise ValueError(f'Invalid or duplicate game build: {line}')
+        builds.append(dict(key=match[1], table=match[2], label=match[3], release=match[4], build_id=match[5],
+                           sdk_base=int(match[6], 16)))
+    return builds
 
 
-GAMES = load_games(TABLE_DIR / 'games.h')
+def load_other_table(path):
+    """{name: address} from an other game's table (OTHER_ADDR lines)."""
+    values = {}
+    for line in Path(path).read_text(encoding='utf-8').splitlines():
+        if not line.startswith('OTHER_ADDR'):
+            continue
+        match = re.fullmatch(r'OTHER_ADDR\(([A-Z][A-Z0-9_]*),\s+(0x[0-9a-f]+)\)', line)
+        if not match or match[1] in values:
+            raise ValueError(f'Invalid or duplicate game-address definition: {line}')
+        values[match[1]] = int(match[2], 16)
+    if not values:
+        raise ValueError(f'Empty game-address table {path}')
+    return values
+
+
+GAME_BUILDS = load_games(TABLE_DIR / 'games.h')
+GAMES = {b['key']: b['label'] for b in GAME_BUILDS}  # key -> label
 
 
 def table_path(key, kind='patches'):
@@ -86,13 +103,24 @@ def version_for_build_id(build_id):
                              f'{want[:16] or "missing"}). Supported: {supported}.')
 
 
+def game_build(build_id):
+    """The games.h row of a main build ID, or None (LA, or unknown)."""
+    padded = build_id.upper().ljust(64, '0')
+    for b in GAME_BUILDS:
+        if padded[:40] == b['build_id'] and not padded[40:].strip('0'):
+            return b
+    return None
+
+
 def game_for_build_id(build_id):
     """The games.h key for a main build ID, or None (LA, or unknown)."""
-    padded = build_id.upper().ljust(64, '0')
-    for key, (label, bid, sdk_base) in GAMES.items():
-        if padded[:40] == bid and not padded[40:].strip('0'):
-            return key
-    return None
+    b = game_build(build_id)
+    return b['key'] if b else None
+
+
+def other_table(b):
+    """The address table of a games.h row: {name: address}."""
+    return load_other_table(TABLE_DIR / f"{b['key']}_{b['table']}.h")
 
 
 ADDRESS = SimpleNamespace()

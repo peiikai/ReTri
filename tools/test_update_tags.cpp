@@ -1,12 +1,13 @@
 // Update check tags (runtime/ui/update_tags.h): their order and labels; the macOS build numbers
-// (tools/bundle_version.sh) go up in the same order. No game, no network.
+// (tools/bundle_version.sh) go up in the same order. The update dialog's changelog (runtime/ui/update_notes.h). No game,
+// no network.
 // Build + run (from the repo root): clang++ -std=c++17 -O1 tools/test_update_tags.cpp -o build/test-update-tags &&
 // build/test-update-tags
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
 
-#include "../runtime/ui/update_tags.h"
+#include "../runtime/ui/update_notes.h"  // (and update_tags.h)
 
 static int fails;
 #define CHECK(c, ...) do { if (!(c)) { fails++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
@@ -23,11 +24,11 @@ static std::string bundle_build(const char *tag, const char *test_of = "") {
 
 // macOS compares bundle versions part by part, numerically (a missing part is 0): <0, 0, >0
 static int bundle_cmp(const std::string &a, const std::string &b) {
-    std::vector<long> x, y;
-    for (const char *p = a.c_str(); *p; p += *p == '.') x.push_back(strtol(p, (char **)&p, 10));
-    for (const char *p = b.c_str(); *p; p += *p == '.') y.push_back(strtol(p, (char **)&p, 10));
+    std::vector<long long> x, y;  // (long is 32-bit on Windows: nightly stamps have 12 digits)
+    for (const char *p = a.c_str(); *p; p += *p == '.') x.push_back(strtoll(p, (char **)&p, 10));
+    for (const char *p = b.c_str(); *p; p += *p == '.') y.push_back(strtoll(p, (char **)&p, 10));
     for (size_t i = 0; i < x.size() || i < y.size(); i++) {
-        long u = i < x.size() ? x[i] : 0, v = i < y.size() ? y[i] : 0;
+        long long u = i < x.size() ? x[i] : 0, v = i < y.size() ? y[i] : 0;
         if (u != v) return u < v ? -1 : 1;
     }
     return 0;
@@ -67,13 +68,21 @@ int main(void) {
         CHECK(bundle_cmp(t, bundle_build("beta_5.3")) > 0 && bundle_cmp(t, bundle_build("beta_5.4")) < 0,
               "test build of beta_5.4: %s between 5.3 and 5.4", t.c_str());
         CHECK(bundle_build("test-foo").empty() && bundle_build("alpha_3").empty(), "no build number without a release");
+        // nightlies: each round above the last (Sparkle's feed), all between the release before and the one previewed
+        std::string n1 = bundle_build("nightly-202611161000-abc1234", "v0.7.0"), n2 = bundle_build("nightly-202611171000-def5678", "v0.7.0");
+        CHECK(n1 == "699.1.202611161000", "nightly build number: %s", n1.c_str());
+        CHECK(bundle_cmp(n2, n1) > 0 && bundle_cmp(n1, bundle_build("v0.6.9")) > 0 && bundle_cmp(n2, bundle_build("v0.7.0")) < 0,
+              "nightlies in order: %s %s", n1.c_str(), n2.c_str());
+        CHECK(bundle_build("nightly-2026-abc", "v0.7.0").empty(), "bad nightly stamp");
     }
-    const char *never[] = {"alpha_3", "test-388-grass", "beta_0", "beta_5.0", "v0.0.1", "v1.0", "v0.6.0-rc1", "beta_5.3x",
-                           "ci-test-1", "", "v", "beta_", "experimental", "experimental-202610302315-abc1234"};
+    const char *never[] = {"alpha_3", "test-388-grass", "beta_0", "beta_5.0", "v0.0.1", "v1.0", "v0.6.0-rc1", "v0.1.0-beta.1", "v0.1.0-beta", "beta_5.3x",
+                           "ci-test-1", "", "v", "beta_", "experimental", "experimental-202610302315-abc1234", "nightly",
+                           "nightly-202611160400-abc1234"};
     for (const char *t : never) CHECK(tag_rank(t) == -1, "'%s' is not a release (%lld)", t, tag_rank(t));
 
     const char *labels[][3] = {  // tag, label, with the word
         {"beta_5", "Beta 5", "Beta 5"},
+        {"v0.1.0", "Beta 1", "Beta 1"},  // (ReTri's Beta 1: the tag is v0.1.0, no pre-release suffix)
         {"beta_5.3", "Beta 5.3", "Beta 5.3"},
         {"v0.6.0", "Beta 6", "Beta 6"},
         {"v0.6.1", "Beta 6.1", "Beta 6.1"},
@@ -83,6 +92,8 @@ int main(void) {
         {"test-foo", "Test build foo", "Test build foo"},
         {"experimental", "Experimental build", "Experimental build"},
         {"experimental-202610302315-abc1234", "Experimental build 2026-10-30", "Experimental build 2026-10-30"},
+        {"nightly", "Nightly build", "Nightly build"},
+        {"nightly-202611160400-abc1234", "Nightly build 2026-11-16", "Nightly build 2026-11-16"},
     };
     for (auto &l : labels) {
         std::string a = tag_label(l[0], false), b = tag_label(l[0], true);
@@ -90,16 +101,93 @@ int main(void) {
         CHECK(b == l[2], "%s (with word) -> '%s', want '%s'", l[0], b.c_str(), l[2]);
     }
     {  // the newest experimental build of one platform, from asset names
-        std::string body = "\"name\":\"LAS.Recomp-experimental-202610302315-abc1234-linux-aarch64.AppImage\"\n"
-                           "\"name\":\"LAS.Recomp-experimental-202611011200-def5678-linux-aarch64.AppImage\"\n"
-                           "\"name\":\"LAS.Recomp-experimental-202612010000-0123456-windows-arm64.zip\"\n"
-                           "\"name\":\"LAS.Recomp-experimental-2026120100-0123456-linux-aarch64.AppImage\"\n"
-                           "\"name\":\"LAS.Recomp-experimental-202612020000-0123456-linux-aarch64x.AppImage\"\n"
-                           "\"name\":\"LAS.Recomp-beta_5.4-linux-aarch64.AppImage\"\n";
+        std::string body = "\"name\":\"ReTri-experimental-202610302315-abc1234-linux-aarch64.AppImage\"\n"
+                           "\"name\":\"ReTri-experimental-202611011200-def5678-linux-aarch64.AppImage\"\n"
+                           "\"name\":\"ReTri-experimental-202612010000-0123456-windows-arm64.zip\"\n"
+                           "\"name\":\"ReTri-experimental-2026120100-0123456-linux-aarch64.AppImage\"\n"
+                           "\"name\":\"ReTri-experimental-202612020000-0123456-linux-aarch64x.AppImage\"\n"
+                           "\"name\":\"ReTri-beta_5.4-linux-aarch64.AppImage\"\n";
         CHECK(newest_experimental(body, "linux-aarch64") == 202611011200LL, "linux-aarch64: %lld",
               newest_experimental(body, "linux-aarch64"));
         CHECK(newest_experimental(body, "windows-arm64") == 202612010000LL, "windows-arm64");
         CHECK(newest_experimental(body, "linux-x86_64") == 0 && newest_experimental("", "linux-aarch64") == 0, "none");
+    }
+    {  // the newest nightly of one platform; experimental files don't count, nor the other way round
+        std::string body = "\"name\":\"ReTri-nightly-202611160400-abc1234-macOS.dmg\"\n"
+                           "\"name\":\"ReTri-nightly-202611170400-def5678-macOS.dmg\"\n"
+                           "\"name\":\"ReTri-nightly-202611170400-def5678-android.apk\"\n"
+                           "\"name\":\"ReTri-experimental-202612010000-0123456-macOS.dmg\"\n"
+                           "\"name\":\"ReTri-nightly-202611180400-0123456-windows-arm64.zip\"\n";
+        CHECK(newest_nightly(body, "macOS") == 202611170400LL, "nightly macOS: %lld", newest_nightly(body, "macOS"));
+        CHECK(newest_nightly(body, "android") == 202611170400LL, "nightly android");
+        CHECK(newest_nightly(body, "windows") == 0, "nightly windows: none (windows-arm64 is another platform)");
+        CHECK(newest_experimental(body, "macOS") == 202612010000LL, "experimental macOS ignores nightlies");
+    }
+    {  // Windows x64's zip renamed (2026-11): builds from before look for "-windows.", newer ones for "-windows-x64.";
+       // the handover rounds carry both names, the later ones only the new one
+        std::string handover = "\"name\":\"ReTri-nightly-202611200400-abc1234-windows-x64.zip\"\n"
+                               "\"name\":\"ReTri-nightly-202611200400-abc1234-windows.zip\"\n"
+                               "\"name\":\"ReTri-nightly-202611210400-def5678-windows-arm64.zip\"\n";
+        std::string later = "\"name\":\"ReTri-nightly-202612200400-abc1234-windows-x64.zip\"\n";
+        CHECK(newest_nightly(handover, "windows") == 202611200400LL, "old builds see the handover round");
+        CHECK(newest_nightly(handover, "windows-x64") == 202611200400LL, "new builds see it too");
+        CHECK(newest_nightly(handover, "windows-arm64") == 202611210400LL, "Windows on ARM: its own file");
+        CHECK(newest_nightly(later, "windows-x64") == 202612200400LL, "new builds: the new name alone");
+        CHECK(newest_nightly(later, "windows") == 0, "old builds don't take windows-x64 for theirs");
+    }
+    {  // the self-updater's manifests on the nightly page are never taken for a nightly build
+        std::string body = "\"name\":\"update-macOS.txt\"\n\"name\":\"update-windows.txt\"\n"
+                           "\"browser_download_url\":\"https://github.com/x/releases/download/nightly/update-windows.txt\"\n";
+        CHECK(newest_nightly(body, "windows") == 0 && newest_nightly(body, "macOS") == 0, "manifests aren't nightlies");
+    }
+    {  // the releases JSON: tag and notes of each, nested objects and escapes on the way
+        std::string json = "[{\"url\":\"x\",\"author\":{\"login\":\"a\",\"body\":\"not this\"},\"tag_name\":\"v0.7.0\","
+                           "\"assets\":[{\"name\":\"a\",\"size\":3}],\"prerelease\":false,"
+                           "\"body\":\"# ReTri Beta 7\\r\\n\\r\\n- \\\"quoted\\\" caf\\u00e9 \\ud83d\\ude00\"},"
+                           " {\"tag_name\":\"nightly\",\"body\":null}, {\"tag_name\":\"beta_6\",\"body\":\"B6\"}]";
+        std::vector<ReleaseInfo> r = json_releases(json);
+        CHECK(r.size() == 3, "3 releases: %zu", r.size());
+        if (r.size() == 3) {
+            CHECK(r[0].tag == "v0.7.0" && r[0].body == "# ReTri Beta 7\r\n\r\n- \"quoted\" caf\xc3\xa9 \xf0\x9f\x98\x80",
+                  "first: '%s' '%s'", r[0].tag.c_str(), r[0].body.c_str());
+            CHECK(r[1].tag == "nightly" && r[1].body.empty() && r[2].tag == "beta_6" && r[2].body == "B6", "others");
+        }
+        CHECK(json_releases("").empty() && json_releases("[{\"tag_name\":\"x").empty() && json_releases("{}").empty(), "broken JSON");
+    }
+    {  // a release's notes: banner, "Built from", sha256 table and comments out
+        std::string b = "> [!WARNING]\r\n> **Test build.** Not for general use.\r\n\r\n# ReTri Beta 7 Changelog\r\n\r\n"
+                        "## New\r\n\r\n- One <!-- hidden -->thing\r\n- Two\r\n\r\n---\r\n\r\nBuilt from abc.\r\n\r\n"
+                        "| File | sha256 |\r\n|---|---|\r\n| `a` | `b` |\r\n";
+        std::string c = clean_release_notes(b);
+        CHECK(c == "# ReTri Beta 7 Changelog\n\n## New\n\n- One thing\n- Two", "clean: [%s]", c.c_str());
+        CHECK(clean_release_notes("Release notes: (to be written)\n\nBuilt from x.\n\n| File | sha256 |") ==
+              "Release notes: (to be written)", "draft notes");
+        CHECK(clean_release_notes("a\n<!-- one\ntwo -->\nb") == "a\nb", "comment over lines: [%s]",
+              clean_release_notes("a\n<!-- one\ntwo -->\nb").c_str());
+    }
+    {  // every release skipped, newest first; nothing older than this build, nothing newer than the offer
+        std::vector<ReleaseInfo> r = {{"v0.6.1", "- fix one"}, {"beta_6", "# ReTri Beta 6 Changelog\n\n- six"},
+                                      {"v0.7.0", "# ReTri Beta 7 Changelog\n\n- seven"}, {"v0.6.2", ""},
+                                      {"test-x", "no"}, {"nightly", "no"}, {"v0.8.0", "not offered"}};
+        std::string c = release_changelog(r, tag_rank("v0.6.0"), "v0.7.0");
+        CHECK(c == "# ReTri Beta 7 Changelog\n\n- seven\n\n# Beta 6.2\n\n# Beta 6.1\n\n- fix one", "changelog: [%s]", c.c_str());
+        CHECK(release_changelog(r, tag_rank("v0.7.0"), "v0.7.0").empty(), "nothing newer");
+    }
+    {  // nightly rounds newer than this build
+        std::string body = "> [!WARNING]\n> x\n\n## Changes\n\n<!-- nightly-changes: 202611171000 -->\n**2026-11-17**\n\n"
+                           "- Third (#3)\n\n<!-- nightly-changes: 202611161000 -->\n**2026-11-16**\n\n- Second (#2)\n- First (#1)\n\n"
+                           "To report a problem, open an issue.\n\n<!-- nightly-round: 202611171000 abc -->\n";
+        std::vector<ReleaseInfo> r = {{"beta_6", "x"}, {"nightly", body}};
+        std::string c = nightly_changelog(r, 202611161000LL);
+        CHECK(c == "**2026-11-17**\n\n- Third (#3)", "one round: [%s]", c.c_str());
+        c = nightly_changelog(r, 202611151000LL);
+        CHECK(c == "**2026-11-17**\n\n- Third (#3)\n\n**2026-11-16**\n\n- Second (#2)\n- First (#1)", "two rounds: [%s]", c.c_str());
+        CHECK(nightly_changelog(r, 202611171000LL).empty() && nightly_changelog({}, 0).empty(), "none newer");
+    }
+    {  // inline Markdown out
+        CHECK(md_inline("**Bold** and `code`, [a link](https://x.y/z) <https://a.b> \\*star\\*") ==
+              "Bold and code, a link https://a.b *star*", "inline: [%s]",
+              md_inline("**Bold** and `code`, [a link](https://x.y/z) <https://a.b> \\*star\\*").c_str());
     }
     if (fails) { printf("%d failed\n", fails); return 1; }
     printf("update tags: all passed\n");

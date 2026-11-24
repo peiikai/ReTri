@@ -10,16 +10,15 @@
 #include <strings.h>
 
 #include "imgui.h"
+#include "imgui_internal.h"
+#include "plastic.h"
+#include "../platform.h"  // (PLAT_TOUCH)
 #include "i18n.h"
 #include "osk.h"
 #include "item_names.h"
 #include "option_rows.h"
 
 extern "C" void give_item_request(int id, int count, int index);
-extern "C" bool pets_owned(int c);             // runtime/hle/pets.c
-extern "C" void pets_give(int c, bool on);
-extern "C" const char *rando_seed_dir(void);
-extern "C" const char *chaos_current_level(void);  // runtime/ui/chaos_overlay.mm
 extern "C" void hud_hearts_refresh(void);        // runtime/hle/hud_hearts.c
 static int current_dungeon(void);
 static int g_dungeon;  // (the Dungeon keys section's Dungeon row)
@@ -275,14 +274,15 @@ static void sec_instruments(void) {
 }
 
 // Per-dungeon records (notes/save_format.md): live save + 0xE0 + 0x10 * rec, dungeon n -> rec 2(n-1), Color Dungeon
-// -> 18 (as runtime/hle/keysanity.c); +0 small keys, +1 bits: compass 0, map 1, beak 2, Nightmare Key 3.
+// -> 18; +0 small keys, +1 bits: compass 0, map 1, beak 2, Nightmare Key 3.
 static const char *const k_dungeons[] = {LN("Tail Cave"), LN("Bottle Grotto"), LN("Key Cavern"), LN("Angler's Tunnel"),
                                          LN("Catfish's Maw"), LN("Face Shrine"), LN("Eagle's Tower"), LN("Turtle Rock"),
                                          LN("Color Dungeon")};
 static uint32_t dungeon_rec(int d) { return 0xE0 + 0x10 * (d == 8 ? 18 : 2 * d); }
 
 static int current_dungeon(void) {  // the dungeon Link is in: Lv01TailCave..Lv08TurtleRock 0-7, Lv10ClothesDungeon 8; else -1
-    const char *lv = chaos_current_level();
+    uint64_t ps = LD64(GA(PLAYER_STATUS_PTR));  // (PlayerStatus*: the current level's name at +0)
+    const char *lv = ps ? (const char *)(uintptr_t)ps : NULL;
     if (!lv || strncmp(lv, "Lv", 2) || lv[2] < '0' || lv[2] > '9' || lv[3] < '0' || lv[3] > '9') return -1;
     int n = (lv[2] - '0') * 10 + (lv[3] - '0');
     return n >= 1 && n <= 8 ? n - 1 : n == 10 ? 8 : -1;
@@ -334,49 +334,27 @@ static void sec_trade(void) {
     }
 }
 
-static void sec_companions(void) {
-    static const struct { int c; const char *name; } comps[] = {{1, LN("BowWow")}, {2, LN("Marin")},
-                                                                  {4, LN("Flying Rooster")}, {3, LN("Ghost")}};
-    for (const auto &k : comps) {
-        bool on = pets_owned(k.c);
-        if (opt_toggle(k.name, &on, false, "Companions are items in this seed. Turn one on and it follows Link."))
-            pets_give(k.c, on);
-    }
-}
-
 static void sec_give(void) {
     {   // the game's own AddItem (same path as an item pickup / Inventory.AddItemByKey event)
         enum { N_ITEMS = sizeof kItems / sizeof kItems[0] };
         static const char *names[N_ITEMS];
         for (int i = 0; i < N_ITEMS; i++) names[i] = kItems[i].name;
-        static int item = 0, count = 1, index = -1;
+        static int item = 0, count = 1;
         opt_choice("Item", &item, names, N_ITEMS, -1, "The item to give. It comes through the game's normal pickup.");
         opt_int("Count", &count, 1, 99, 1, 1, "%d", "How many to give.");
-        opt_int("Index", &index, -1, 99, 1, -1, "%d",
-                "Which one to give. For keys, maps, compasses and Stone Beaks it's the dungeon number, 1 to 8, or 9 "
-                "for the Color Dungeon. Any uses the dungeon you're in.", "Any");
-        if (opt_button("Give", "Gives the item above.")) {
-            int id = kItems[item].id, idx = index;
-            // (dungeon items: keysanity's index, 0-7 = dungeons 1-8, 9 = Color Dungeon; runtime/hle/keysanity.c)
-            bool dungeon_item = id == 44 || id == 45 || id == 47 || id == 48 || id == 49;
-            if (dungeon_item && idx >= 1 && idx <= 8) idx--;
-            else if (dungeon_item && idx > 9) idx = -1;
-            give_item_request(id, count, idx);
-        }
+        if (opt_button("Give", "Gives the item above.")) give_item_request(kItems[item].id, count, -1);
     }
 }
 
 // The tab, in two columns (as the Controls tab's Configure inputs): the sections on the left, the chosen section's rows
 // on the right, the selected row's description under them.
 enum { SEC_QUICK, SEC_PLAYER, SEC_EQUIPMENT, SEC_AMMO, SEC_SONGS, SEC_BOTTLES, SEC_INSTRUMENTS, SEC_KEYS, SEC_TRADE,
-       SEC_COMPANIONS, SEC_GIVE, N_SEC };
+       SEC_GIVE, N_SEC };
 static const char *const k_sec_name[N_SEC] = {LN("Quick"), LN("Player"), LN("Equipment"), LN("Ammo"),
                                               LN("Ocarina songs"), LN("Bottles"), LN("Siren Instruments"),
-                                              LN("Dungeon keys"), LN("Trading quest"), LN("Companions"),
-                                              LN("Give any item")};
+                                              LN("Dungeon keys"), LN("Trading quest"), LN("Give any item")};
 static void (*const k_sec_rows[N_SEC])(void) = {sec_quick, sec_player, sec_equipment, sec_ammo, sec_songs, sec_bottles,
-                                                sec_instruments, sec_keys, sec_trade, sec_companions, sec_give};
-static bool sec_shown(int c) { return c != SEC_COMPANIONS || rando_seed_dir(); }  // (randomizer seeds: companions are items)
+                                                sec_instruments, sec_keys, sec_trade, sec_give};
 
 static int g_sec = SEC_QUICK;
 static bool g_in_right;            // the cursor is in the right column (last frame)
@@ -384,6 +362,8 @@ static int g_last_frame = -10;     // (a frame without this tab: the cursor star
 static int g_back_frame = -10;     // the frame B went back to the sections (the menu mustn't close on it)
 enum { FOCUS_NONE, FOCUS_SEC, FOCUS_RIGHT };
 static int g_focus;
+static bool g_close_pressed;
+extern "C" bool save_editor_close_pressed(void) { bool r = g_close_pressed; g_close_pressed = false; return r; }
 extern "C" bool save_editor_took_back(void) { return g_back_frame == ImGui::GetFrameCount(); }
 
 extern "C" void save_editor_draw(float scale) {
@@ -404,25 +384,38 @@ extern "C" void save_editor_draw(float scale) {
     static const int sec_cycle = getenv("LARECOMP_SAVE_SEC_CYCLE") ? atoi(getenv("LARECOMP_SAVE_SEC_CYCLE")) : 0;
     static int sec_frames;  // (test) <frames>: each section in turn, that many frames each (screenshot series)
     if (sec_cycle > 0 && sec_frames++ % sec_cycle == 0) g_sec = sec_frames / sec_cycle % N_SEC;
-    if (!sec_shown(g_sec)) g_sec = SEC_QUICK;
     // B / Esc in the right column (and Left on a row that doesn't step with it): back to the section
     if (g_in_right && !ui_text_busy() && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) &&
         (opt_pressed_back() || (opt_pressed_left() && !opt_focused_lr())))
         g_back_frame = frame, g_focus = FOCUS_SEC;
 
-    opt_begin("##save", scale);
+    opt_begin("##save", scale, true);
     opt_compact();
+#if PLAT_TOUCH
+    // each pane's heading on the line of the right pane's X, and both lists starting under it, level
+    float head_top = 10 * scale, head_h = 44 * 1.35f * scale;  // (plastic_close_pane's place and size)
+    auto heading = [&](const char *title) {
+        ImGui::SetCursorPosY(head_top + (head_h - ImGui::GetTextLineHeight()) / 2);
+        ImGui::TextColored(plastic_col(plastic_theme().section), "%s", i18n_upper(L(title)).c_str());
+        ImGui::SetCursorPosY(head_top + head_h + 4 * scale);
+    };
+    heading("Settings");
+#endif
     for (int c = 0; c < N_SEC; c++) {
-        if (!sec_shown(c)) continue;
         if (g_in_right && c == g_sec) opt_mark_next();
         bool open = opt_link(k_sec_name[c], NULL, NULL);
-        bool clicked = ImGui::IsItemClicked();
+        bool clicked = ImGui::IsItemHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Left);  // (the row fires on the release)
         if (c == g_sec && g_focus == FOCUS_SEC) g_focus = FOCUS_NONE, opt_focus_item();
         if ((opt_item_nav_focused() && g_sec != c) || open) g_sec = c;  // (moving down the list shows each)
         if (open && !clicked) g_focus = FOCUS_RIGHT;  // (A / Right: the cursor goes to its rows)
     }
     opt_split();
+#if PLAT_TOUCH
+    g_close_pressed = plastic_close_pane(44 * scale, scale);  // (in this pane's box: the page has the whole height)
+    heading(k_sec_name[g_sec]);
+#else
     opt_section(k_sec_name[g_sec]);
+#endif
     opt_list_begin();
     if (g_focus == FOCUS_RIGHT) g_focus = FOCUS_NONE, opt_focus_next_row();
     k_sec_rows[g_sec]();

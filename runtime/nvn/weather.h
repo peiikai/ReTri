@@ -1,5 +1,5 @@
 // Weather (Cosmetics tab "Weather"): rain, snow, a thunderstorm or a blizzard drawn by the renderer over the game's 3D overworld,
-// looks only (no effect on the game, its logic or a seed). The particles live in the world (they stay put as the
+// looks only (no effect on the game or its logic). The particles live in the world (they stay put as the
 // camera scrolls) and are hidden behind whatever the scene's depth says is in front of them; a rain drop ends in a
 // splash where it meets what the depth says is under it (ground, roof, water), a snow flake settles there and fades. Only on the overworld (level "Field") while it is on screen: not indoors, in dungeons,
 // on the title or file select, nor behind the pause menu (the game draws no scene composite there).
@@ -51,18 +51,8 @@ enum { WEATHER_PROBES = 5 };
 extern const float g_weather_probe_uv[WEATHER_PROBES][2];
 bool weather_frame(WeatherFrame *f, uint64_t frame, const float probe[WEATHER_PROBES]);
 bool weather_probe_world(const WeatherFrame *f, int i, float d, float out[3]);
-// The weather in effect now (WEATHER_OFF/RAIN/SNOW/STORM/BLIZZARD): the seed's weather cycle, else the setting, its
-// random roll, or the seed's own cosmetics' pick
+// The weather in effect now (WEATHER_OFF/RAIN/SNOW/STORM/BLIZZARD): the setting, or its random roll
 int weather_current(void);
-
-// ---- the randomizer's weather cycle (seed option "weather-cycle"; runtime/nvn/weather_cycle.c): the weather
-// changes on its own, saved with each save slot; the Cosmetics tab's Weather row is locked while it's on
-bool weather_cycle_on(void);
-int weather_cycle_kind(float *level);  // the weather showing now and how strongly (0..1: a change fading)
-void weather_cycle_tick(void);         // game thread, every frame
-void weather_cycle_scene(void);        // the renderer: a scene composite was drawn (the cycle's clock runs)
-void weather_cycle_save_read(const char *path, uint64_t addr, int64_t off, int64_t size);     // runtime/services/fs.c
-void weather_cycle_save_written(const char *path, uint64_t addr, int64_t off, int64_t size);
 
 // ---- snow on the ground (snow only; prototype). While it snows, surfaces facing up turn white over ~1.5 minutes
 // (patchy at first), it melts again in ~30 s once the weather is something else. Drawn by the renderer INSIDE the
@@ -80,6 +70,11 @@ typedef struct {
     float tone[4];     // the snow's colour in the scene's (linear, pre-tone-map) units (rgb), w: their reference white
     float shake[8];    // trees shaken bare (a bonk): slot 1..6's share of the cover now (stencil bits 1-3; [0] unused;
                        // [7] 1: the face trees by Crazy Tracy's, no wall for the alcoves' test)
+    float lvp[16];     // the light's view-projection from the game's shadow pass (rows), read by the cover with its
+                       // shadow map: the snow in a cast shadow is shaded as the ground under it was
+    float shd[4];      // x: 1 the shadow map is there this frame, y: its depth -1..1, z / w: its drawn size (texels)
+    float shz[4];      // x / y: its depth range (near, far - near), z: the compare's bias (depth units)
+    float shade[4];    // the snow's colour in a cast shadow, as a share of the lit snow's (rgb: lit by the sky only)
 } SnowFrame;
 // The cover for this frame (false: none - not snowing / nothing settled / not the overworld). vp: the scene pass's
 // view-projection (rows). The renderer fills screen, flags.xy and zr.xy.
@@ -98,6 +93,10 @@ float weather_snow_now(void);  // (their time base: the weather's time)
 // A tree drawn this frame (the renderer: a scenery actor with canopy maps; its model's world position): which shaken
 // tree slot it is (1..6, its snow regrowing after a bonk), 0: none
 int weather_snow_tree(const float pos[3]);
+// A scenery-looking actor drawn this frame (one drawn with the level's own shaders): whether it is animated - an
+// animal (its vertex data, posed for each frame, keeps changing), not a prop or a rock (still). key: its vertex
+// buffer's address, vtx / size: the data there. Render thread
+bool weather_snow_animated(uint64_t key, const void *vtx, uint64_t size, uint64_t frame);
 // Game thread, every frame: Link's position for the footprints and the kicked-up snow (snow on the overworld only),
 // and for a storm's lightning (it aims at him now and then; it shocks him if he is still there when it strikes)
 struct Cpu;
@@ -115,10 +114,8 @@ typedef struct {
 } StrikeFrame;
 bool weather_strike(StrikeFrame *s);  // (false: none showing)
 // Lightning that hurts: Link standing where it strikes gets a Buzz Blob's shock (the game's own damage and reaction).
-// Off by default - the Cosmetics tab's weather and a seed's own are looks only; meant for a randomizer weather option
-// (LARECOMP_WEATHER_HARM=1: on, for tests)
+// Off by default - the Cosmetics tab's weather is looks only (LARECOMP_WEATHER_HARM=1: on, for tests)
 void weather_lightning_harm(bool on);
 // A blizzard's gusts pushing Link a little - not its steady wind between them (through his collision: walls stop it;
-// the stick works against it). Off by default, like weather_lightning_harm - for the randomizer
-// (LARECOMP_WEATHER_PUSH=1: on, for tests)
+// the stick works against it). Off by default, like weather_lightning_harm (LARECOMP_WEATHER_PUSH=1: on, for tests)
 void weather_wind_push(bool on);

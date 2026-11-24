@@ -7,12 +7,9 @@
     tools/menu_strings.py keys                  every English text, with where it comes from
 
 What counts as menu text: L("..."), LN("...") and L_line("...") literals, the literals of option row calls (opt_*),
-in runtime/ui and runtime/*.c; the Warp tab's places (runtime/ui/warp_data.h); the randomizer's progress lines
-(tools/rando/las_headless.py stage()); and the spoiler log's lines (tools/rando/spoiler_view.py), split into the parts
-i18n.mm's L_line puts together - "a  ->  b", "%s" patterns, "x (y)", "a: b", "a, b", "a / b". Spoiler logs in
-rando/ under a data root (LARECOMP_DATA or the main checkout's) add the location names real seeds have.
+in runtime/ui and runtime/*.c; and the Warp tab's places (runtime/ui/warp_data.h), split into the parts i18n.mm's
+L_line puts together - "a  ->  b", "%s" patterns, "x (y)", "a: b", "a, b", "a / b".
 """
-import ast
 import collections
 import glob
 import json
@@ -160,113 +157,6 @@ def warp_keys():
         yield unescape(m.group(2)), 'warp_data.h', True
 
 
-# ---- Python: the randomizer's progress lines, the spoiler log
-
-def fstring_template(node):
-    parts = []
-    for v in node.values:
-        parts.append(v.value if isinstance(v, ast.Constant) else '%s')
-    return ''.join(parts)
-
-
-def py_strings(path, want):
-    """Strings handed to calls named in want (f-strings as %s templates), and the out.append() lines."""
-    tree = ast.parse(open(path, encoding='utf-8').read())
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not node.args:
-            continue
-        fn = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, 'id', '')
-        if fn not in want:
-            continue
-        a = node.args[0]
-        if isinstance(a, ast.Constant) and isinstance(a.value, str):
-            yield a.value
-        elif isinstance(a, ast.JoinedStr):
-            yield fstring_template(a)
-        elif isinstance(a, ast.BinOp) and isinstance(a.left, ast.Constant) and isinstance(a.left.value, str):
-            yield a.left.value + '%s'  # ('Settings: ' + ', '.join(...))
-
-
-MARKUP = re.compile(r'^(# |## |- |  )')
-
-
-def spoiler_keys():
-    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rando'))
-    import spoiler_view as sv
-    path = os.path.join(ROOT, 'tools', 'rando', 'spoiler_view.py')
-    for s in py_strings(path, {'append'}):
-        s = MARKUP.sub('', s)
-        if s and re.search('[A-Za-z]', s) and s != '%s' and '  ->  ' not in s:
-            yield s, 'spoiler_view.py', '%s' not in s
-    yield "%s - enter through %s's entrance", 'spoiler_view.py', False  # (area_name: n += f"...")
-    yield "%s's Soul", 'spoiler_view.py', False
-    yield "%s' Soul", 'spoiler_view.py', False
-    yield '%s:', 'spoiler_view.py', False  # ("- Mabe Village:")
-    for d in (sv.AREAS, sv.DUNGEONS, sv.DPREFIX):
-        for v in d.values():
-            yield v, 'spoiler_view.py', True
-    for k in sv.ITEMS:
-        yield sv.pretty_item(k), 'spoiler_view.py', True
-    for d in sv.DPREFIX:
-        for kind in ('small-key', 'nightmare-key', 'compass', 'map', 'stone-beak'):
-            yield sv.pretty_item(f'{d}-{kind}'), 'spoiler_view.py', True
-    # every location the randomizer has (real seeds add the numbered digs, bushes and pots below)
-    yml = os.path.join(ROOT, 'third_party', 'LAS-Randomizer', 'RandomizerCore', 'Data', 'locations.yml')
-    if os.path.exists(yml):
-        for m in re.finditer(r'^\s+-\s+([a-z0-9-]+)\s*$', open(yml).read(), re.M):
-            yield sv.pretty_loc(m.group(1)), 'spoiler_view.py', True
-    # settings ("Settings: " + the options that are on, dashes as spaces)
-    for f in glob.glob(os.path.join(ROOT, 'runtime', 'ui', 'rando_tab.mm')) + glob.glob(os.path.join(ROOT, 'runtime', 'rando.c')):
-        for m in re.finditer(r'"([a-z0-9]+(?:-[a-z0-9]+)+)"', open(f).read()):
-            yield m.group(1).replace('-', ' '), 'spoiler_view.py', True
-    roots = [os.environ.get('LARECOMP_DATA', ''), ROOT, os.path.join(ROOT, '..', '..', '..')]
-    seen = set()
-    for r in roots:
-        for f in glob.glob(os.path.join(r, 'rando', '*', 'spoiler_view.txt')):
-            f = os.path.realpath(f)
-            if f in seen:
-                continue
-            seen.add(f)
-            for line in open(f, encoding='utf-8', errors='ignore'):
-                line = MARKUP.sub('', line.rstrip('\n'))
-                if line.startswith('Seed '):
-                    continue  # (the seed's own name)
-                yield line, 'spoiler logs', True
-
-
-def tracker_keys():
-    """The check tracker's names (tools/rando/tracker.py writes them into rando/<seed>/tracker.tsv with check_names.py)."""
-    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rando'))
-    import check_names as cn
-    import tracker
-    for v in list(cn.NAMES.values()) + list(cn.KIND_WORD.values()) + list(cn.HOUSES.values()) + [p for p in tracker.PLACE if p]:
-        yield v, 'tracker.py', True
-    for w in ('north', 'south', 'east', 'west', 'north-west', 'north-east', 'south-west', 'south-east', 'centre', 'middle',
-              'inside'):
-        yield w, 'tracker.py', False
-    for p in ('Trendy Game: prize %s', 'Pot (%s)', 'Pot in %s', '%s of 3'):
-        yield p, 'tracker.py', False
-    yml = os.path.join(ROOT, 'third_party', 'LAS-Randomizer', 'RandomizerCore', 'Data', 'locations.yml')
-    if os.path.exists(yml):
-        for m in re.finditer(r'^\s+-\s+([a-zA-Z0-9-]+)\s*$', open(yml).read(), re.M):
-            yield cn.display_name(m.group(1)), 'tracker.py', True
-    for r in (os.environ.get('LARECOMP_DATA', ''), ROOT, os.path.join(ROOT, '..', '..', '..')):
-        for f in glob.glob(os.path.join(r, 'rando', '*', 'tracker.tsv')):
-            for line in open(f, encoding='utf-8', errors='ignore'):
-                c = line.rstrip('\n').split('\t')
-                if c[0] == 'C':
-                    for i in (11, 12):
-                        if len(c) > i and c[i] != '-':
-                            yield c[i], 'tracker logs', True
-
-
-def rando_progress_keys():
-    path = os.path.join(ROOT, 'tools', 'rando', 'las_headless.py')
-    for s in py_strings(path, {'stage'}):
-        yield s, 'las_headless.py', False
-    yield 'Triforce hunt: %s', 'las_headless.py', False
-
-
 # ---- splitting a line into the parts L_line translates (as i18n.mm's compose)
 
 COORD = re.compile(r'^(\d{2}[A-Pa-p](\s+\d+)?|\d+|D\d|#\d+|[\d/.%+x-]+|\d+[A-Z]?)$')
@@ -323,15 +213,14 @@ def split_all(entries):
 # matches them, so they're texts of their own
 PATTERNS = ['leaving %s', 'outside %s', 'Outside %s', 'Room %s', 'Warp hole: %s', 'Level %s', '%s #%s',
             'Bush %s', 'Dig %s', 'Pot %s', 'pot %s', 'pot %s in room %s', '%s: pot %s', '%s: pot %s in room %s',
-            'rupee %s', 'Apple tree (%s), %s of 3', 'Trendy prize %s', 'Trendy figure %s', 'fairy %s', 'Step %s',
+            'rupee %s', 'Apple tree (%s), %s of 3', 'Trendy prize %s', 'Trendy figure %s', 'fairy %s', 'Step %s', 'Sphere %s',
             'Seed %s']
 # the separators L_line joins parts with: a language may have its own ("、" for ", ", " : " in French)
 SEPARATORS = [', ', ': ']
 
 
 def all_keys():
-    entries = [(p, 'patterns (tools/menu_strings.py)', False) for p in PATTERNS] + list(source_keys()) + list(warp_keys()) + list(rando_progress_keys()) + list(spoiler_keys()) + \
-        list(tracker_keys())
+    entries = [(p, 'patterns (tools/menu_strings.py)', False) for p in PATTERNS] + list(source_keys()) + list(warp_keys())
     keys = split_all(entries)
     for sep in SEPARATORS:
         keys[sep] = 'separators (tools/menu_strings.py)'

@@ -1,5 +1,5 @@
-// macOS / Linux session log (included by macos.c and linux.c): lasrecomp.log in the data folder is always the latest
-// run; a new start moves the previous one aside as lasrecomp-backup-<YYYYMMDD-HHMMSS>-<pid>.log (its last write, the
+// macOS / Linux session log (included by macos.c and linux.c): eowrecomp.log in the data folder is always the latest
+// run; a new start moves the previous one aside as eowrecomp-backup-<YYYYMMDD-HHMMSS>-<pid>.log (its last write, the
 // pid from its first line, 0 if unknown) and keeps the five newest of those, as on Windows. Moving instead of
 // truncating also means a copy still running or quitting keeps writing to its own (moved) file. Processes started by
 // this one (the start screen re-executing itself for the game) get LASRECOMP_LOG_APPEND and append to the same log.
@@ -29,9 +29,9 @@ static void session_log_backup(const char *dir, const char *name) {
     }
     char when[32];
     strftime(when, sizeof when, "%Y%m%d-%H%M%S", localtime(&st.st_mtime));
-    snprintf(to, sizeof to, "%s/lasrecomp-backup-%s-%d.log", dir, when, pid);
+    snprintf(to, sizeof to, "%s/eowrecomp-backup-%s-%d.log", dir, when, pid);
     for (int i = 1; access(to, F_OK) == 0 && i < 100; i++)  // (never replace another backup)
-        snprintf(to, sizeof to, "%s/lasrecomp-backup-%s-%d-%d.log", dir, when, pid, i);
+        snprintf(to, sizeof to, "%s/eowrecomp-backup-%s-%d-%d.log", dir, when, pid, i);
     rename(from, to);
 }
 
@@ -50,7 +50,7 @@ static void session_log_prune(const char *dir) {
     char path[1400];
     for (struct dirent *e; (e = readdir(d));) {
         size_t len = strlen(e->d_name);
-        if (strncmp(e->d_name, "lasrecomp-backup-", 17) || len < 22 || len >= sizeof logs->name ||
+        if (strncmp(e->d_name, "eowrecomp-backup-", 17) || len < 22 || len >= sizeof logs->name ||
             strcmp(e->d_name + len - 4, ".log")) continue;
         struct stat st;
         snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
@@ -72,13 +72,13 @@ static void session_log_prune(const char *dir) {
     free(logs);
 }
 
-// stdout / stderr -> <dir>/lasrecomp.log (path_out: its path, emptied on failure).
+// stdout / stderr -> <dir>/eowrecomp.log (path_out: its path, emptied on failure).
 static void session_log_open(const char *dir, char *path_out, size_t n) {
-    snprintf(path_out, n, "%s/lasrecomp.log", dir);
+    snprintf(path_out, n, "%s/eowrecomp.log", dir);
     bool append = getenv("LASRECOMP_LOG_APPEND") != NULL;
     if (!append) {
-        session_log_backup(dir, "lasrecomp.prev.log");  // (the earlier macOS scheme's one backup)
-        session_log_backup(dir, "lasrecomp.log");
+        session_log_backup(dir, "eowrecomp.prev.log");  // (the earlier macOS scheme's one backup)
+        session_log_backup(dir, "eowrecomp.log");
         session_log_prune(dir);
     }
     if (!freopen(path_out, "a", stderr)) { path_out[0] = 0; return; }
@@ -119,4 +119,30 @@ static void raise_open_file_limit(void) {
     if (rl.rlim_max != RLIM_INFINITY) snprintf(hard, sizeof hard, "%llu", (unsigned long long)rl.rlim_max);
     fprintf(stderr, "[fd] open-file limit %llu (was %llu, hard limit %s)\n", (unsigned long long)rl.rlim_cur,
             (unsigned long long)before, hard);
+}
+
+// Command-line runs (plat_cli_begin, runtime/platform.h): stderr as the command found it (a terminal, a pipe), kept
+// before session_log_open takes stderr, so the command's lines reach it as well as the log.
+#include <signal.h>
+static int g_cli_fd = -1;
+static bool g_cli, g_cli_isatty;
+
+static void cli_keep_stderr(void) {
+    g_cli = true;
+    g_cli_fd = dup(STDERR_FILENO);
+    g_cli_isatty = g_cli_fd >= 0 && isatty(g_cli_fd);
+    signal(SIGPIPE, SIG_IGN);  // (a closed pipe: the writes fail instead of ending the run)
+}
+
+// logging: the session log has stderr (else stderr is still the terminal itself: nothing apart from it)
+static bool cli_write(const char *s, size_t n, bool logging) {
+    if (g_cli_fd < 0 || !logging) return false;
+    while (n) {
+        ssize_t w = write(g_cli_fd, s, n);
+        if (w < 0 && errno == EINTR) continue;
+        if (w <= 0) break;
+        s += w;
+        n -= (size_t)w;
+    }
+    return true;
 }

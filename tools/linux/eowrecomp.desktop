@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=ReTri
+Comment=The Legend of Zelda: Echoes of Wisdom, recompiled (bring your own game files)
+Exec=eowrecomp
+Icon=eowrecomp
+Categories=Game;
+Terminal=false

@@ -1,0 +1,81 @@
+<!-- The iOS app icon: icon.svg's art edge to edge (iOS rounds the corners and pads itself), no border, opaque.
+     icon_ios_1024.png is this rendered by rsvg-convert -w 1024, its alpha dropped (App Store icons are opaque). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="100 100 824 824">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f1519"/>
+      <stop offset="0.5" stop-color="#4a3036"/>
+      <stop offset="0.85" stop-color="#94573a"/>
+      <stop offset="1" stop-color="#b8703c"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#f0c27a" stop-opacity="0.7"/>
+      <stop offset="1" stop-color="#e8a85a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="riftedge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e8a85a"/>
+      <stop offset="1" stop-color="#d07aa8"/>
+    </linearGradient>
+    <radialGradient id="riftin" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#05030a"/>
+      <stop offset="0.7" stop-color="#1a0c22"/>
+      <stop offset="1" stop-color="#5a2a58"/>
+    </radialGradient>
+    <linearGradient id="hill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a3438"/>
+      <stop offset="1" stop-color="#2b2026"/>
+    </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8a5a34"/>
+      <stop offset="0.45" stop-color="#c08a52"/>
+      <stop offset="1" stop-color="#5e3a22"/>
+    </linearGradient>
+    <linearGradient id="bronze" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f6e2a0"/>
+      <stop offset="1" stop-color="#a86a2a"/>
+    </linearGradient>
+    <radialGradient id="orb" cx="0.38" cy="0.32" r="0.7">
+      <stop offset="0" stop-color="#fffbf2"/>
+      <stop offset="0.45" stop-color="#f8dca4"/>
+      <stop offset="1" stop-color="#e8a85a"/>
+    </radialGradient>
+  </defs>
+  <g>
+    <rect x="100" y="100" width="824" height="824" fill="url(#sky)"/>
+    <!-- stars -->
+    <g fill="#f0e8dc">
+      <circle cx="180" cy="420" r="4"/><circle cx="260" cy="500" r="3"/><circle cx="820" cy="170" r="4"/>
+      <circle cx="880" cy="250" r="3"/><circle cx="560" cy="170" r="3"/><circle cx="160" cy="300" r="3"/><circle cx="300" cy="200" r="4"/><circle cx="400" cy="300" r="3"/><circle cx="220" cy="160" r="3"/>
+    </g>
+    <!-- the glow of the staff's orb, echoes rippling out of it -->
+    <circle cx="620" cy="420" r="330" fill="url(#glow)"/>
+    <g fill="none" stroke="#f0d890">
+      <circle cx="620" cy="420" r="110" stroke-width="6" opacity="0.5"/>
+      <circle cx="620" cy="420" r="185" stroke-width="5" opacity="0.34"/>
+      <circle cx="620" cy="420" r="265" stroke-width="4" opacity="0.2"/>
+      <circle cx="620" cy="420" r="350" stroke-width="3" opacity="0.1"/>
+    </g>
+    <!-- a far ridge, and a rift torn into it, glowing at the edges -->
+    <path d="M100 570 Q200 500 320 520 Q460 546 580 610 Q660 652 740 700 L740 924 L100 924 Z" fill="#5a3c3e"/>
+    <path d="M168 602 L196 586 L208 596 L232 578 L252 592 L276 576 L292 590 L322 582 L344 598 L320 610 L300 606 L280 622 L258 612 L236 628 L216 616 L194 624 L184 612 Z"
+          fill="url(#riftin)" stroke="url(#riftedge)" stroke-width="7" stroke-linejoin="round"/>
+    <g fill="#1a0c22" stroke="#d07aa8" stroke-width="3" stroke-linejoin="round">
+      <path d="M232 540 L250 530 L256 548 Z"/>
+      <path d="M290 524 L302 518 L306 530 Z"/>
+      <path d="M204 554 L214 550 L214 562 Z"/>
+    </g>
+    <!-- hills at dusk -->
+    <path d="M100 690 Q260 610 440 650 Q640 700 924 600 L924 924 L100 924 Z" fill="url(#hill)"/>
+    <path d="M100 800 Q330 730 600 770 Q790 800 924 740 L924 924 L100 924 Z" fill="#2b2026"/>
+    <!-- the staff, planted in the hill -->
+    <g transform="translate(620 420) rotate(-6)">
+      <path d="M-20 44 L20 44 L16 430 L-16 430 Z" fill="url(#wood)" stroke="#3a2618" stroke-width="5"/>
+      <rect x="-27" y="150" width="54" height="28" rx="8" fill="url(#bronze)" stroke="#5a3616" stroke-width="4"/>
+      <rect x="-25" y="196" width="50" height="16" rx="6" fill="url(#bronze)" stroke="#5a3616" stroke-width="4"/>
+      <path d="M-78 -22 Q-84 56 0 70 Q84 56 78 -22 Q66 36 0 44 Q-66 36 -78 -22 Z" fill="url(#bronze)" stroke="#5a3616" stroke-width="5"/>
+      <circle cx="0" cy="0" r="52" fill="url(#orb)" stroke="#a86a2a" stroke-width="4"/>
+      <circle cx="-16" cy="-18" r="13" fill="#ffffff" opacity="0.85"/>
+    </g>
+    <path d="M520 862 Q600 838 700 858" stroke="#1f181a" stroke-width="14" fill="none" stroke-linecap="round" opacity="0.7"/>
+  </g>
+</svg>

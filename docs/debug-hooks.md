@@ -1,0 +1,371 @@
+# Debug and test hooks
+
+ReTri reads a set of `LARECOMP_*` environment variables. They are for development and testing, not for players:
+scripted test runs, screenshots, warps, logging, and A/B switches for renderer and timing code. Most are read once, at
+startup or at first use, so set them before launching. Hooks that take a frame number act at that presented frame
+(the count starts at 0 when the app starts and goes on across in-game reboots).
+
+This page follows the current development branch (`develop`), so a few hooks may be missing from older releases. It lists the hooks a contributor is likely to need. It is not complete: the full list is in the code
+(`grep -rn 'getenv("LARECOMP_\|ENV("LARECOMP_' runtime/`), and the comment next to each read explains it.
+
+Unless a row says otherwise, "1" means any value turns the hook on, and "0 / 1" means the value is read as a number
+(0 off, anything else on). Paths are relative to the working directory. Test output goes to `build/`.
+
+A typical test run, from a source checkout with the extracted game files in `extracted/`:
+
+```sh
+LARECOMP_NO_AUDIO=1 LARECOMP_NO_MOVIE_AUDIO=1 LARECOMP_SAVE_DIR=build/testsave \
+LARECOMP_LOAD_SAVE=1 tools/shot.sh 4000
+```
+
+Put a copy of a save in `build/testsave/save_0/` first (`save.meta`, `slot00`, ...), so the run never touches real
+saves. Pick a frame after the save is in play (the `[loadsave]` log lines say when).
+`tools/shot.sh <frame> [max seconds]` runs `./build/eowrecomp extracted` with your `LARECOMP_*` variables, saves the
+window at that frame to `build/window.png` and exits.
+
+## Command line
+
+For launchers and scripts. Every option except the one-shot ones (`--prepare`, `--list-settings`, `--help`,
+`--version`) also works as an environment variable, which restarts keep (an update, a data folder move).
+
+| Option | Variable | What it does |
+|---|---|---|
+| `--play` | `LARECOMP_PLAY=1` | Skip the start screen and start the game. Shaders are still prepared first; if that takes more than a moment (the first start), the start screen shows its progress bar and then plays. |
+| `--data-dir <folder>` | `LARECOMP_DATA_ROOT` | Use this folder for game files, saves, settings and caches this run. It comes before every other rule (`runtime/paths.h`), writes no `data_root.txt`, and Settings > System > Data folder can't move it. |
+| `--new-data-dir <folder>` | `LARECOMP_NEW_DATA_DIR` | Where to keep the data when ReTri has none yet (a launcher's game folder). If that folder already has data, it's used. If the usual data folder has data, that one is kept, so a player who played before keeps everything. |
+| `--game-files <folder>` | `LARECOMP_GAME_FILES` | Use the extracted game files in that folder. If the data folder already has that version set up, the game starts. If not, the start screen sets them up (copy, game code build, shaders) and then plays. |
+| `--prepare` | | The setup without a window, then exit: the game files from `--game-files` if needed, the game code, the shaders. Prints `progress <0-1> <step>` lines on stdout and exits 0 when the game is ready to play. On a failure it prints `error <why>` and exits 1 (details in the log). Stopped (SIGINT / SIGTERM): exits 3; the finished game code pieces are kept, so the next run goes on from there. |
+| `--fullscreen` / `--windowed` | | Start fullscreen or in a window this run. Short for `--set fullscreen=1` / `--set fullscreen=0`. |
+| `--set <key>=<value>` | `LARECOMP_SET="key=value;key=value"` | Any `larecomp.ini` setting for this run only. Repeatable; the last one for a key wins. It isn't saved: the file keeps its own value, unless you change that setting in the menu during the run. Unknown keys are ignored with a line in the log. |
+| `--list-settings` | | Print the settings as `larecomp.ini` lines (the data folder's file plus this run's `--set`) and exit. |
+| `--no-update-check` | `LARECOMP_NO_UPDATE_CHECK=1` | No update check this run. |
+| `--version`, `--help` | | Print and exit. |
+| `--load-save <1\|2\|1:3\|folder>` | `LARECOMP_LOAD_SAVE` | Debug: boot straight into a save ([Warps and saves](#warps-and-saves)). Not in `--help`. |
+
+Printed output goes to stdout, also when it's a file or pipe. On Windows the exe is a GUI program: output goes to its
+stdout when one was handed to it (a redirect, a pipe, a launcher capturing it), else to the console it was started from,
+else to a message box. PowerShell doesn't wait for a GUI program: pipe it (`.\eowrecomp.exe --version | Out-String`) or
+use `Start-Process -Wait`.
+
+Started by RecompLauncher (`RECOMPLAUNCHER=1` is set), there is no update check (the launcher installs updates), and
+`RECOMPLAUNCHER_MODE=bigpicture` starts fullscreen unless the command line says `--windowed`.
+
+The Windows zip, the AppImage (at its root) and the Linux tarball carry `recomplauncher.json`
+(`tools/recomplauncher.json`), RecompLauncher's profile: it asks for the extracted game files, runs `--prepare` on
+them, starts the game, and shows a few video settings and the choice of start screen or straight into the game. Both
+pass `--new-data-dir` with the game's install folder: a new player's data goes there, and a player who already has data
+(an earlier install, or ReTri played without the launcher) keeps it where it is. The profile lists both places for
+saves, settings and logs. Not in the macOS .dmg.
+
+Example: a launcher that keeps everything in its own folder.
+
+```sh
+eowrecomp --prepare --data-dir ~/Games/ReTri --game-files ~/Games/ReTri-files   # once: set up, exit 0
+eowrecomp --play --data-dir ~/Games/ReTri --no-update-check --set resolution=2x
+```
+
+## Running and test runs
+
+| Variable | Values | What it does |
+|---|---|---|
+| `LARECOMP_NO_LAUNCHER` | 1 / 0 | Skip the start screen and boot straight into the game. Where the start screen would come up later, the app exits instead. |
+| `LARECOMP_FORCE_LAUNCHER` | 1 | Show the start screen even when `LARECOMP_INPUT` is set (which normally skips it). |
+| `LARECOMP_LAUNCHER_AUTOPLAY` | 1, `once` | Press PLAY on the start screen at once. `once`: only the first time, so a "Title screen" reboot stays on the start screen. |
+| `LARECOMP_LAUNCHER_PLAY_AT` | seconds | Press PLAY on the start screen that many seconds in. |
+| `LARECOMP_LAUNCHER_KEYS` | `frame:key,...` | Press keys on the start screen at those frames (`left right up down enter esc`, controller `pl pr pu pd pa pb`, or `b.<button>` with a larecomp.ini button name such as `b.north` or `b.rtrigger`: a real controller event that goes through ReTri Menu). |
+| `LARECOMP_NO_UPDATE_CHECK` | 1 | Skip the update check on the start screen. Same as `--no-update-check`. |
+| `LARECOMP_INPUT` | script (see below) | Scripted controller input for player 1. Also skips the start screen and blocks your own input. |
+| `LARECOMP_NO_USER_INPUT` | 0 / 1 | Ignore keyboard, mouse and controllers. On by default when a scripted input hook is set; `0` lets your input through during a scripted run. |
+| `LARECOMP_HOST_INPUT` | script (see below) | Scripted host input that goes through the bindings and menus like a player's: keys, controller buttons, typing, mouse, window resize, screenshots. |
+| `LARECOMP_BIND_TEST` | `frame:pad\|key:<input>:<host>,...` | Start a rebind capture of `<input>` (a `bind_*` name such as `a`, `zl`) at that frame and press `<host>` 90 frames later (`esc` cancels, `wait` times out). `frame:reset:pad\|key` resets to defaults. |
+| `LARECOMP_KBD_AUTO` | text | Answer the game's keyboard dialog (name entry) with this text at once. |
+| `LARECOMP_PAD_TYPE` | `xbox`, `playstation` (or `ps`), other = Nintendo | Pretend the controller is of this family (button labels and confirm/back layout). |
+| `LARECOMP_SAVE_DIR` | folder | Use this folder for saves (`save_0/` with `save.meta`, `slot00`, `slot01`) instead of the normal save folder. Test runs should always set it to a scratch copy. |
+| `LARECOMP_SETTINGS` | file path | Use this settings file instead of `larecomp.ini`, so test runs never change the player's settings. |
+| `LARECOMP_DATA_ROOT` | folder | Use this folder as the data folder (game files copy, settings, saves, caches). Same as `--data-dir`. |
+| `LARECOMP_NO_AUDIO` | 1 / 0 | No audio output at all (game and menu sounds). `0` keeps sound. |
+| `LARECOMP_NO_MOVIE_AUDIO` | 1 | Play movies without their audio track. |
+| `LARECOMP_WINDOW` | `WxH` | Window size in points (default: the remembered size, else 1280x720). Also stops fullscreen. |
+| `LARECOMP_WINDOW_POS` | `x,y` | Mac: window position. |
+| `LARECOMP_HIDDEN` | 1 | Never show the window: renders off screen without taking focus. The game also keeps running when unfocused. |
+| `LARECOMP_SCALE` | number | Force the render height in units of 1080 lines (`0.5` = 540 lines, `1` = 1080, `2` = 2160). Overrides the resolution setting. |
+| `LARECOMP_WINDOW_SHOT` | frame | Save the final window image (game and menus) at that frame. |
+| `LARECOMP_SHOT_PATH` | file path | Where `LARECOMP_WINDOW_SHOT` (and the start screen shot) is saved. Default `build/window.png`. |
+| `LARECOMP_EXIT_AFTER_SHOT` | 1 | Exit right after the `LARECOMP_WINDOW_SHOT` image is saved. |
+| `LARECOMP_SHOT_AT` | `frame,frame,...` (ascending) | Save the game image at each frame to `build/frames/frame_N.png`. |
+| `LARECOMP_SCREENSHOT_EVERY` | frames | Save the game image every N frames to `build/frame_N.png`. |
+
+### LARECOMP_INPUT format
+
+A comma-separated list of `frame:BUTTON:length` entries. The button is held from `frame` for `length` frames (default
+10 when the length is left out). Entries may overlap to hold several buttons at once.
+
+- Buttons: `A B X Y L R ZL ZR PLUS MINUS LSTICK RSTICK` and the D-pad `LEFT UP RIGHT DOWN`.
+- Left stick: `STICK_UP`, `STICK_DOWN`, `STICK_LEFT`, `STICK_RIGHT`, or `STICK_<degrees>` for any angle (`STICK_0` is
+  right, `STICK_90` up, `STICK_45` up-right).
+- Right stick: `RSTICK_UP`, `RSTICK_DOWN`, `RSTICK_LEFT`, `RSTICK_RIGHT`.
+
+To get into a save, use `--load-save` (below) rather than a button sequence: it waits for each screen.
+
+```
+LARECOMP_LOAD_SAVE=1 LARECOMP_INPUT="3000:STICK_LEFT:60,3070:Y:6"   # load File 1, then walk left and press Y
+```
+
+### LARECOMP_HOST_INPUT format
+
+Comma-separated entries, each starting with a frame:
+
+- `frame:key:<SDL key name>:frames`, `frame:pad:<button>:frames`: hold a key or controller button (names as in the
+  `bind_*` lines of `larecomp.ini`, e.g. `Z`, `Keypad 0`, `south`, `ltrigger`).
+- `frame:lstick:<x>/<y>:frames`: hold the left stick at raw SDL units.
+- `frame:sdlkey:<key>:frames`, `frame:sdlpad:<button>:frames`, `frame:sdlaxis:<axis>=<value>:frames`: send real SDL
+  events, which reach menus and the on-screen keyboard first.
+- `frame:type:<text>`: type text as key events (`{Escape}` presses that key). No `,` or `:` in the text.
+- `frame:mouse:<dx>/<dy>`, `frame:mouse:click`: move or click the mouse.
+- `frame:shot:<name>`: save the window to `build/<name>.png`.
+- `frame:resize:<W>x<H>`: resize the window.
+- `frame:move:<x>/<y>`: move the window to that position (another display, in points).
+
+## Warps and saves
+
+| Variable | Values | What it does |
+|---|---|---|
+| `--load-save` / `LARECOMP_LOAD_SAVE` | `1`, `2`, `1:3` or a save folder path | Boot straight into a save (see below). |
+| `LARECOMP_WARP_AT` | `frame:level:locator,...` (see below) | Warp to that level and spawn point at each frame. |
+| `LARECOMP_TELEPORT_AT` | `frame:x:y:z:r:x2:y2:z2` | Echoes of Wisdom: move Zelda from near x,y,z to x2,y2,z2 at that frame (see below). |
+| `LARECOMP_TRIGGER_DIR` | folder | Echoes of Wisdom: files dropped in that folder while the game runs act once (see below). |
+
+### Loading a save from the command line (Echoes of Wisdom)
+
+```sh
+./build/eowrecomp extracted --load-save 1                       # File 1, its newest data
+./build/eowrecomp extracted --load-save 2:3                     # File 2, the third row of its data list
+./build/eowrecomp extracted --load-save ~/Downloads/save_0      # a save folder from elsewhere
+```
+
+Skips the start screen, the title and the file select, and loads the save the game's own way: it presses what a
+player would (A on the title, Down for File 2, A, Down to the row, A, Up to Yes on "Load this data?", A), so the game
+lands where that save puts you. Combine with `LARECOMP_WARP_TOUR` or `LARECOMP_WARP_AT` to go somewhere from there.
+It is a debug option, not in `--help`. The shaders are prepared first, as with `--play` (not with `LARECOMP_INPUT` or
+`LARECOMP_NO_LAUNCHER` set).
+
+- `1`, `2`: File 1 or File 2 of the file select (`save/save_0/slot00`, `slot01`), its newest data. `1:3`: the third
+  row of File 1's data list (newest first). `LARECOMP_SAVE_DIR` applies as usual.
+- A path: the save folder holding `save.meta` (`save_0`), the folder above it, or anything inside it (a `slot0N` or
+  `fileNN` folder, a `main.bin`). It is copied into a scratch save folder, `load_save/` in the data folder, and loaded
+  from there. The game saves there for the rest of the session, so your own saves are never read or written. A path
+  inside `slot01` picks File 2; one inside a `fileNN` folder picks that data (by its save time).
+- The save is checked first (`save.meta`, and each data's `main.bin`: tag, size, checksum). A missing or damaged one
+  gives one line in the log and on the terminal, and the app starts as it would without the option.
+- Log lines start with `[loadsave]`: which file and row, each screen passed, and when it is in play. It stops pressing
+  once in play, and gives up (leaving the game as it is) if it isn't in play 90 s after boot.
+
+### LARECOMP_WARP_AT format
+
+One `frame:level:locator` entry: the warp is queued at exactly that frame, so pick one after the save is in play. The
+level and locator are a place from the game's level files, as in the overlay menu's Warp tab;
+`LARECOMP_LOG_PLACES=1` logs them all as `[place]` lines.
+
+Use it with `--load-save` (to get into a save) and `LARECOMP_SAVE_DIR` (so the run does not touch real saves).
+`LARECOMP_WARP_TOUR=<from>[:<to>]` warps to every place in turn instead, with a screenshot of each in `build/tour/`.
+
+### Places with no spawn point, and fights already won (Echoes of Wisdom)
+
+Ugly helpers for getting a test copy to one room or fight. They change the game's memory directly, so use them only
+on a scratch save.
+
+- `LARECOMP_TELEPORT_AT=frame:x:y:z:r:x2:y2:z2` moves every float triple in guest memory within `r` of `x,y,z`
+  (Zelda's position and its copies) by `(x2,y2,z2) - (x,y,z)`. Warp or load to a spawn point first, so Zelda's
+  position is known, and pick the target from the level file's actor positions. Suthorn Ruins' possessed-Link room
+  from the dungeon's restart point: `1000:-209.25:33:-164.25:6:-203.25:33:-72`.
+- `LARECOMP_TRIGGER_DIR=<folder>`: each of these files, dropped into the folder, is read once and deleted:
+  - `flags`: `<main.bin> <section hex> <byte.bit> ...` clears those bits of the save's flag bitfield (the section
+    at `0x610`) in the running game. The game's copy is found by the section's first 64 bytes in that `main.bin`.
+    The bits set between an older and a newer save bring the fights in between back on the next room entry.
+  - `capture`: `<every N frames> <for M frames>` saves the window to `build/cap/frame_<n>.png`. `<N> 0` stops it.
+    At 5120x1440 it slows the game down.
+  - `teleport`: as `LARECOMP_TELEPORT_AT`, the seven numbers separated by spaces.
+  - `hpsnap`: `<x> <y> <z> <r>` copies 16 KB around every float triple near `x,y,z`; `hpdiff` then logs the words
+    there that went down by 1-255 since. Snapshot, hit an enemy once, diff, and repeat once: the address that drops
+    both times is its health (possessed Link: 42, down 2 a hit, 21 in phase 2).
+  - `poke`: `<hex address> <i32|f32|u16|u8> <value>` writes it. Set the health to 1 and hit once to end a fight.
+- Log lines start with `[trigger]`.
+
+## Gameplay features and menus
+
+| Variable | Values | What it does |
+|---|---|---|
+| `LARECOMP_SETTING_AT` | `frame:key=value,...` | Change an in-game menu setting at that frame. Keys: `blur_removal`, `frame_interp` (0 / 1), `text_speed` (0-2), `shadows` (0-5: Off, 0.5x, Default, 2x, 3x, 4x), `screen_filter` (0-3), `fps` (Resolution's FPS, 30 / 60), `fps_target` (Dynamic resolution's, 30 / 60), `dyn_res` (0 / 1). |
+| `LARECOMP_BLUR_REMOVAL` | 0 / 1 | Override the blur removal setting. |
+| `LARECOMP_PROMPTS` | `xbox`, `playstation`, `nintendo`, other = auto | Force the button icon style. |
+| `LARECOMP_MENU_AT` | frame | Open the overlay menu at that frame. |
+| `LARECOMP_MENU_TAB` | page number | The page the overlay menu opens on: `4` Warp, `9` Quit. Other numbers open Settings on that tab (`0` Video, `1` Audio, `8` Controls, `11` General). |
+| `LARECOMP_MENU_BAR` | entry number | Open the menu bar alone, its cursor on that entry: `0` Settings, `3` Warp, `7` Quit, `8` the close button. |
+| `LARECOMP_TOUCH_SHOW_INPUT` | 0 / 1 | iPhone, iPad and Android: show scripted input (`LARECOMP_INPUT`) on the touch controls, the buttons lit and the stick moved. |
+| `LARECOMP_UPDATE_TAGS` | `tag,tag,...` | The update check sees these release tags instead of asking GitHub (no network). |
+| `LARECOMP_UPDATE_JSON` | file | The update check reads this saved releases list instead of asking GitHub (the update dialog's changelog too). |
+| `LARECOMP_UPDATE_OPEN` | `1` / `update` | The update dialog opens as soon as the update check finds one; `update` also presses Update. |
+| `LARECOMP_UPDATE_URL` | URL | Update downloads `<URL>/<tag>/update-<platform>.txt` and the file it names from here instead of GitHub (`http://127.0.0.1:...`, `file:///...`). |
+| `LARECOMP_UPDATE_KEY` | 64 hex | With `LARECOMP_UPDATE_URL`: the public key manifests are checked with (a test key; `tools/update_sign.cpp keygen`). |
+| `LARECOMP_UPDATE_APP` | folder | Windows: the app folder Update replaces files in (default: the exe's). Linux updates `$APPIMAGE`. |
+| `LARECOMP_UPDATE_NO_RESTART` | `1` | After Update installs (or rolls back), quit instead of starting the app again. |
+| `LARECOMP_SPARKLE_FEED` | URL | macOS: Sparkle reads this appcast instead of the build's, and runs even in builds whose channel has no Update yet. |
+| `LARECOMP_SPARKLE_AUTOINSTALL` | `1` | macOS: an update Sparkle downloaded installs at once and the app restarts, as its Install and Relaunch button does (no window to click). |
+| `LARECOMP_FONT` | font file | Use this file for the system fonts the game asks for (.ttf, .otf, .ttc, .bfttf). |
+
+## Logging and diagnostics
+
+All of these write to the log (`eowrecomp.log` in the data folder, or the run's redirected output).
+
+| Variable | Values | What it does |
+|---|---|---|
+| `LARECOMP_FPS_INTERVAL` | seconds | How often the fps line is logged (default 2). |
+| `LARECOMP_LOG_HITCH_MS` | ms | Log every gap between presents longer than this. |
+| `LARECOMP_SLOW_FRAME_MS` | ms | Log a `[slow]` line for frames slower than this, with what the renderer did (default 50, 0 off). |
+| `LARECOMP_HANG_DUMP` | seconds | Write a `[hang]` dump when the game or renderer is stuck this long (default 30, 0 off). |
+| `LARECOMP_LOG_FILES` | 1 | Log each game file read. |
+| `LARECOMP_LOG_INTERVAL` | 1 | Log each change of the game's present interval (its 60 / 30 fps mode). |
+| `LARECOMP_LOG_DYNRES` | 1 | Log every dynamic resolution decision, not only the steps. |
+| `LARECOMP_METAL_HUD` | 1 | Mac, iPhone and iPad. Set by the app itself when it starts with the Metal HUD setting on; not needed by hand. |
+| `LARECOMP_FNPROF` | `from:to` (frames) | Sample which game functions run between those frames, to `build/fnprof.txt`. `0:<to>` starts at process start. |
+| `LARECOMP_FNPROF_EVERY` | frames | Also write that file every that many frames, for runs that end before `to` (the warp tour). |
+| `LARECOMP_DEBUG_FRAME` | frame | Dump that frame's render passes to `build/pass_NNN.png` and log its draws (F9 does the same for the next frame). |
+| `LARECOMP_DEBUG_FRAMES` | count | With `LARECOMP_DEBUG_FRAME` (Vulkan): dump that many frames in a row. |
+| `LARECOMP_LOG_FSHASH` | 1 | In the debug frame: log each fragment shader's hash (for `LARECOMP_SKIP_FSHASH`). |
+| `LARECOMP_SKIP_FSHASH` | `hash,hash,...` (hex) | Drop draws that use these fragment shaders, to find which draw makes what. |
+| `LARECOMP_DUMP_SHADERS` | 1 | Write each program's game shader code to `build/shaders/` (Metal). |
+| `LARECOMP_SAVE_MSL` | 1 | Write translated shaders to `build/msl/` (Metal) or `build/glsl/` (Vulkan), with the source pc as comments. |
+| `LARECOMP_HLE_SKIP` | text | Turn off the host replacement of game functions whose name contains this text. |
+
+## Rendering (shared)
+
+These work on both Metal and Vulkan unless noted.
+
+| Variable | Values | What it does |
+|---|---|---|
+| `LARECOMP_RENDER_THREAD` | 0 | Translate and submit the game's command lists on the game's GPU thread instead of a separate render thread. |
+| `LARECOMP_GPU_OVERLAP` | 0 / 1 | Let the CPU run a frame ahead of the GPU (on by default where supported). |
+| `LARECOMP_OVERLAP_WATCH` | 0 | Turn off the page-write tracking that GPU overlap uses to catch the game rewriting memory the GPU still reads. |
+| `LARECOMP_CHUNK_PASSES` | number | Submit a command buffer every N render passes (default 8; 0 = one per frame). |
+| `LARECOMP_SYNC_SHADERS` | 1 | Compile shaders on first use and wait for them, instead of in the background (repeatable tests). |
+| `LARECOMP_SHADER_PREP` | 0 / 1 | Run the shader preparation at boot. |
+| `LARECOMP_INTEGRATED` | 0 / 1 | Treat the GPU as dedicated (0) or integrated (1) when picking default video settings. |
+| `LARECOMP_DYN_TEST` | number | Pin Dynamic resolution at this render height (units of 1080 lines). |
+| `LARECOMP_GAME_DYNRES` | 1 | Turn the game's own dynamic resolution back on (it is off by default). |
+| `LARECOMP_NO_SCALE` | 1 | Keep all render targets at the game's own size (no resolution scaling). |
+| `LARECOMP_AO_SCALE` | 1 to 4 | Draw the game's ambient occlusion at this many times the Switch's size, whatever the setting and render scale. |
+| `LARECOMP_AO_SCALED` | 1 | Scale the ambient occlusion with the frame, as before issue #356 (shows the old haze and dither). |
+| `LARECOMP_2D_SCALED` | 1 | EoW: scale its 1080-line 2D targets (the composed frame, the HUD) like its 792-line 3D, as before (larger than the window). |
+| `LARECOMP_SHADOW_SCALE` | 0.5 to 4 | Draw the game's shadow map at this many times the Switch's size, whatever the setting. |
+| `LARECOMP_SHADOW_BIAS_RAW` | 1 | Keep the game's polygon offset slope in the shadow map as it is, instead of scaling it with the map's size (A/B tests). |
+| `LARECOMP_AO_NO_GRID` | 1 | Leave the ambient occlusion shaders on the game's own pixel grid when the AO is larger than the Switch's. |
+| `LARECOMP_NO_FRAME_CLEAR` | 1 (Vulkan: 0 / 1) | Don't clear scene render targets at their first use each frame. On Vulkan the default is no clears on integrated GPUs. |
+| `LARECOMP_TEX_FULLHASH` | 1 | Hash every texture in full each time instead of the faster partial checks. |
+| `LARECOMP_NO_WIDESCREEN` | 1 | Turn the widescreen view off (16:9 framing everywhere). |
+| `LARECOMP_NO_PAUSE_FILL` | 1 | Keep the pause screen's backdrop in the 16:9 box on other window shapes (the game shows around it). |
+| `LARECOMP_WIDE_TEST` | ratio | Pretend the window has this shape, relative to 16:9 (e.g. `1.3125` for 21:9). |
+
+## Metal
+
+| Variable | Values | What it does |
+|---|---|---|
+| `LARECOMP_METAL_ARCHIVE` | 0 / 1 | Use a Metal binary archive for pipelines (off by default; off removes the archive). |
+| `LARECOMP_SHADER_SALT` | text | Tag shader sources so Metal's disk cache misses, to measure cold compiles. |
+| `LARECOMP_DISPLAY_SYNC` | 0 | Turn the layer's display sync off. |
+| `LARECOMP_PRESENT_DEADLINE` | 0 | Present without the one-frame deadline. |
+| `LARECOMP_MTL_COUNTER` | `cpu` | Give the game's GPU timing counters the host clock only. |
+| `LARECOMP_SYNC_SUBMIT` | 1 | Wait for the GPU after each command list submit (old behaviour). |
+| `LARECOMP_ASYNC_SHOTS` | `from,every,count` | Save game frames without stalling, to `build/aframes/`. |
+
+## Vulkan
+
+The per-GPU default switches are explained, with the GPUs they were tested on, in
+[vulkan-gpu-defaults.md](vulkan-gpu-defaults.md). The log names each choice near the start (`[vk] ...` lines).
+
+| Variable | Values | What it does |
+|---|---|---|
+| `LARECOMP_GPU` | index | Use this GPU (the index from the `[vk] gpu N:` log lines) instead of the first discrete one. |
+| `LARECOMP_VK_PIPELINE_CACHE` | 0 | Start with an empty Vulkan pipeline cache (the saved one is written over as usual). The Android emulator hangs loading a large one. |
+| `LARECOMP_VK_VALIDATION` | 1 | Turn the Khronos validation layer on (it must be installed) and log its warnings and errors (first 500). |
+| `LARECOMP_VK_VALIDATION_STOP` | 1 | As `LARECOMP_VK_VALIDATION`, and exit at the first validation error. |
+| `LARECOMP_VK_PRESENT` | `mailbox`, `fifo`, `immediate` | Present mode (default mailbox, fifo with frame generation). |
+| `LARECOMP_VK_STRUCTURE` | 0 / 1 | Structured shaders (no jump loop). Default on for Mali and Adreno. |
+| `LARECOMP_VK_STATIC_STACKS` | 0 / 1 | Static branch stacks in shaders. Default follows `LARECOMP_VK_STRUCTURE`'s GPU default. |
+| `LARECOMP_VK_PUSH_CB` | 0 / 1 | Hot constant buffer words as push constants. Default on for Mali and Adreno. |
+| `LARECOMP_VK_INLINE_C1` | 0 / 1 | Inline constant buffer 1 into shaders. Default on for Mali and Adreno. |
+| `LARECOMP_VK_SPLIT_BARRIER` | 0 / 1 | Split pass barriers. Default on for Mali. |
+| `LARECOMP_VK_STACK_ARRAYS` | 0 / 1 | Shader branch stacks as arrays (1) or variables (0). Default variables on Intel, arrays elsewhere. |
+| `LARECOMP_VK_PLACEHOLDER_COLOR` | 0 / 1 | Add a placeholder colour attachment to depth-only passes. Default on for Intel. |
+| `LARECOMP_VK_HEAP_DMABUF` | 0 / 1 | Guest heap as driver memory (Linux). Default on for RADV and PanVK. |
+| `LARECOMP_VK_NO_GMEM` | 1 | Don't bind the guest heap to shaders as storage buffers. |
+| `LARECOMP_VK_GMEM_LAZY` | 0 / 1 | Import the heap to the GPU in chunks on demand. Default on where one import can't hold it. |
+| `LARECOMP_VK_NO_HOST_IMPORT` | 1 | Act as if the driver can't import host memory (tests the copy path on any GPU). |
+| `LARECOMP_VK_HOST_IMPORT` | 1 | Android: import the guest heap even on a phone with under 10 GB of RAM (by default those use the copy path, issue #693). |
+| `LARECOMP_VK_CPU_BC` | 1 | Decode BC textures on the CPU even where the driver lists them (tests the path used on drivers without BC4, BC5 or BC7, issue #693). |
+| `LARECOMP_VK_PRETRANSFORM` | 0 | Android: hand the system landscape window images to turn, instead of drawing them in the panel's own orientation (pre-rotation, the default). |
+| `LARECOMP_VK_RECORDER` | 0 / 1 | Record Vulkan commands on a separate thread. Default on, except on Mali. |
+| `LARECOMP_VK_PIPELINE_BINARY` | 0 / 1 | Our own pipeline binaries cache. Default on for AMD drivers only. |
+| `LARECOMP_VK_DYN_VERTEX` | 0 | Keep the vertex layout in each pipeline instead of dynamic vertex input. |
+| `LARECOMP_VK_OPT_FS` | 0 / 1 | Run spirv-opt on fragment and compute shaders. Default on for Mali. |
+| `LARECOMP_VK_NO_SPIRV_CACHE` | 1 | Don't use the SPIR-V disk cache. |
+| `LARECOMP_VK_SHADER_STATS` | 0 / 1 | Log each pipeline's driver statistics (registers, spills). |
+| `LARECOMP_VK_D24` | 0 | Use D32S8 instead of D24S8 depth. |
+| `LARECOMP_VK_LEAN_USAGE` | 0 / 1 | Fewer image usage flags. Default on for integrated GPUs. |
+| `LARECOMP_VK_SMAA_STENCIL` | 0 / 1 | Stencil-masked SMAA. Default on for integrated GPUs. |
+| `LARECOMP_VK_RING_SYSMEM` | 1 | Put the upload ring in system memory (tests a GPU without resizable BAR). |
+| `LARECOMP_VK_GPU_TIMER` | 0 | No GPU timer. Dynamic resolution then goes by frame times. |
+| `LARECOMP_VK_COUNTER` | `cpu`, `frozen`, `legacy` | How the game's GPU timing counters are filled. |
+| `LARECOMP_VK_PROF` | 1 | Log time per present stage. |
+| `LARECOMP_GPUPROF_AT` | `frame,frame,...` | Log a GPU pass profile of those frames. |
+| `LARECOMP_LOG_SKIPS` | 0 / 1 | Log skipped draws and dispatches and why. |
+| `LARECOMP_VK_DEVLOST_TRACE` | 0 / 1 | Log the steps before a device lost. |
+| `LARECOMP_WRITE_TRACKING` | 0 | Linux: turn off write tracking of guest memory. |
+
+## Frame pacing and performance
+
+| Variable | Values | What it does |
+|---|---|---|
+| `LARECOMP_KEEP_60` | 1 | Pace frames at 60 whatever the game asks (test: its 30 fps mode then runs fast). Shows whether a scene fits 60. |
+| `LARECOMP_SLOW_COUNTER` | `from,to` | The game's GPU timing counters read 25 ms from `from` to `to` seconds (test: a heavy moment; EoW stays at 60). |
+| `LARECOMP_SIM_SLOW_FRAME_MS` | ms | Sleep this long every frame after frame 2600, to simulate a slow machine. |
+| `LARECOMP_SLOW_FRAME_UNTIL` | frame | With `LARECOMP_SIM_SLOW_FRAME_MS`: stop at that frame (recovery tests). |
+| `LARECOMP_SPIKE_MS` | ms | Stall the presenting thread this long every N frames. |
+| `LARECOMP_SPIKE_EVERY` | frames | How often `LARECOMP_SPIKE_MS` stalls (default 60). |
+| `LARECOMP_SPIKE_FROM` | frame | First frame for spikes (default 2700). |
+| `LARECOMP_TICK_SCALE` | number | Scale the game's clock (default 1). |
+| `LARECOMP_INTERP` | `on`, `off` (or `0`), `measure` | Override the frame generation setting. `measure` logs and matches without extra images. |
+| `LARECOMP_INTERP_HZ` | Hz | Use this display refresh rate for frame generation instead of the one reported. |
+| `LARECOMP_PCORE` | 0 | Linux / Windows: no pinning to performance cores. |
+| `LARECOMP_PCORE_GUEST` | 0 | Linux: let game threads run on all cores. |
+| `LARECOMP_THREAD_QOS` | 0 | macOS: don't raise game threads' QoS class. |
+
+## Game-code build
+
+The game code library is built from the player's own extracted game files (`make gen GEN=generated-eow` and `make` in a source checkout,
+the start screen's setup otherwise).
+
+| Variable | Values | What it does |
+|---|---|---|
+| `LARECOMP_GAME_LIB` | file path | Load the game code library from this path first. |
+| `LARECOMP_CC` | file path | Compiler to use instead of the bundled zig. |
+| `LARECOMP_GUEST_BASE` | hex address | Builds with `DYN_BASE=1` only: start the guest window here (4 GB aligned, ending below 2^39). Without it a desktop `DYN_BASE` build uses `0x7100000000`, so the game runs away from its own addresses. iOS (always `DYN_BASE`) ignores it: the window goes into a free gap found at start-up, 1 GB aligned (`plat_place_guest`). |
+
+## Tool scripts
+
+Read by scripts in `tools/`, not by the app.
+
+| Variable | Values | What it does |
+|---|---|---|
+| `LARECOMP_MIN_FREE_GB` | GB | `tools/game_slot.sh`: free memory to wait for before a test copy starts (default 10). |
+
+## Link's Awakening only
+
+These come from LAS Recomp and still read, but do nothing in Echoes of Wisdom: their hooks or game addresses are
+LA's, or they need the randomizer, which is off. `LARECOMP_TEST_CRASH`, `SHOTS`, `WARP_ON_LOAD`, `WARP_MENU_PICK`,
+`SHADER_TOUR`, `PLACE`, `PLACE_Y`, `LOG_LINK`, `GIVE_ITEM`, `SET_FLAGS`, `LOG_FLAGS`, `CHEATS`, `COSMETICS`, `DAMAGE`,
+`WALK_SPEED`, `MOVE_360`, `NO_BUFF`, `HOOKSHOT_8WAY`, `HOOKSHOT_LOG`, `WEATHER`, `WEATHER_HARM`, `WEATHER_PUSH`,
+`LOG_WEATHER`, `PACE`, `RANDO_SEED`, and the seed and `vanilla` forms of `REBOOT_AT`.
+
+Narrow one-off probes (memory dumps and watches at fixed addresses, single-shader skips, per-feature tuning, menu
+screenshot helpers and extra trace switches) are left out here. They are documented in the comment where each one is
+read.

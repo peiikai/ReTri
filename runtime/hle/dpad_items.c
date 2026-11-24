@@ -5,11 +5,11 @@
 //   cursor then: the stick does.
 //   Using: the game's own item code. Each Items page item has a "use it now?" check (main+0xd50e60 .. 0xd52fb0: Y
 //   newly pressed with the item on Y, PlayerStatus +0xa2, or X with it on X, +0xa3) that runs only while Link may use
-//   items. tools/patches.py EQUIP_Y_*_SITES make a newly pressed direction count there too, for its own item: one press
+//   items. runtime/gen/patches.cpp EQUIP_Y_*_SITES make a newly pressed direction count there too, for its own item: one press
 //   uses it, and with Y or X pressed at the same time both items are used (bomb arrows). X / Y keep their items.
-//   An item no longer owned (a bottle traded, a seed's take-back) leaves its direction.
+//   An item no longer owned (a bottle traded) leaves its direction.
 // Saved with each save slot: savedataN.bin -> savedataN.bin.dpad, written with the save and matched to it by the
-// save's body CRC (as the weather cycle, runtime/nvn/weather_cycle.c); a save without one starts empty.
+// save's body CRC; a save without one starts empty.
 // The HUD's small cross: runtime/ui/dpad_overlay.mm. Test: LARECOMP_DPAD_ITEMS=<frame>:<up>,<down>,<left>,<right> (item
 // slots in hex, - for none) sets the directions of the save in play at that presented frame.
 #include <stdio.h>
@@ -26,7 +26,7 @@
 #include "../settings.h"
 
 extern int game_in_play(void);              // runtime/hle/warp.c
-extern int inventory_items_cursor(void);    // runtime/ui/inventory_overlay.mm (-1: not on the Items page)
+extern int inventory_items_cursor(void);    // runtime/ui/pause_pages.mm (-1: not on the Items page)
 extern uint64_t inventory_items_obj(void);  // (its page object)
 extern uint64_t renderer_present_count(void);
 
@@ -119,7 +119,7 @@ uint64_t dpad_items_input(uint64_t b) {
     int item = obj ? LD8(obj + (uint64_t)cur * 0x280 + 0x598) : NONE;
     for (int d = 0; d < 4; d++) {
         if (!(press >> (BTN_LEFT + d) & 1)) continue;
-        if (!owned(ps, item)) { menu_sfx_play(MENU_SFX_BEEP); break; }  // (an empty cell)
+        if (!owned(ps, item)) break;  // (an empty cell: nothing to put there, so no sound, as greyed-out menu rows)
         if (g_d.slot[d] == item) {
             g_d.slot[d] = NONE;
             menu_sfx_play(MENU_SFX_CANCEL);
@@ -134,7 +134,7 @@ uint64_t dpad_items_input(uint64_t b) {
     return b & ~DIRS;  // (the stick moves the cursor)
 }
 
-// ---- the item checks (tools/patches.py EQUIP_Y_TEST_SITES / EQUIP_Y_READ_SITES; game thread)
+// ---- the item checks (runtime/gen/patches.cpp EQUIP_Y_TEST_SITES / EQUIP_Y_READ_SITES; game thread)
 // An item check's Y test: the buttons newly pressed, in the game's own bits (Y 3; the d-pad Left 8, Right 9, Down 10,
 // Up 11). Go on to the item on Y?
 int rt_equip_y_test(uint32_t pressed) {
