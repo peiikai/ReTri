@@ -1,7 +1,7 @@
 # ReTri on Linux (x64 and arm64)
 
-ReTri runs on Linux with Vulkan, the same renderer as Windows. Releases come as an AppImage and a tarball for x64 and
-arm64; arm64 is less tested. `make appimage` packages the AppImage.
+ReTri runs on Linux with Vulkan, the same renderer as Windows. Releases come as an AppImage and a tarball for x64;
+arm64 is on [nightly builds](https://github.com/peiikai/ReTri/releases/tag/nightly) only for now. `make appimage` packages the AppImage.
 
 ## Running the AppImage
     chmod +x ReTri-<version>-linux-x64.AppImage

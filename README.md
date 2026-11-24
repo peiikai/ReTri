@@ -21,15 +21,14 @@ native Windows, macOS and Linux application. Android and iOS builds are in testi
 > - macOS - Apple Silicon only, Metal graphics backend + MetalFX
 > - Windows - x86-64 only, Vulkan graphics backend
 > - Linux - x86-64, Vulkan graphics backend (AppImage)
-> - Linux aarch64 (ARM) - **experimental**: on the [releases](https://github.com/peiikai/ReTri/releases) page; reports
->   welcome ([docs/linux.md](docs/linux.md) lists what to include)
+> - Linux on ARM - aarch64, Vulkan graphics backend (nightly builds)
 > - Windows on ARM - arm64, Vulkan graphics backend (nightly builds)
 > - Android - arm64, Vulkan graphics backend (nightly builds)
 > - iPhone and iPad - arm64, Metal graphics backend (nightly builds, sideloaded: see [iPhone and iPad](#iphone-and-ipad))
 
 > [!TIP]
 > **[Nightly builds](https://github.com/peiikai/ReTri/releases/tag/nightly)** are made from the latest development code.
-> Windows on ARM, Android and iPhone and iPad are on nightly builds only for now. They aren't well tested yet, but your reports help
+> Linux on ARM, Windows on ARM, Android and iPhone and iPad are on nightly builds only for now. They aren't well tested yet, but your reports help
 > us fix whatever you find.
 
 ## System requirements
@@ -255,7 +254,7 @@ that page.
 
 ### Linux
 
-Requirements: x86-64 with AVX2 (or aarch64, experimental), a GPU with Vulkan 1.3, clang, SDL 3.4 or newer, FFmpeg,
+Requirements: x86-64 with AVX2 (or aarch64), a GPU with Vulkan 1.3, clang, SDL 3.4 or newer, FFmpeg,
 shaderc and Vulkan Memory Allocator from your distribution. Packages, cross builds and details in
 [docs/linux.md](docs/linux.md).
 

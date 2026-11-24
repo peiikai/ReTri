@@ -30,7 +30,7 @@ the same with the tag `nightly-<YYYYMMDDHHMM>-<commit>`. Next to them: `update-<
 `appcast-macOS.xml`, signed with the `UPDATE_SIGNING_KEY` secret. Those names never change: every build out there
 fetches them by name. Without the key the scripts only warn, and players use Download.
 
-A release ships macOS, Windows x64, Linux x64 and Linux arm64 (experimental). Android, iOS and Windows on ARM are on
+A release ships macOS, Windows x64 and Linux x64. Linux arm64, Android, iOS and Windows on ARM are on
 the nightly page only; to ship one with releases, add it to `RELEASE` in `release.yml`.
 
 ## Secrets and settings

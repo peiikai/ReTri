@@ -11,9 +11,9 @@
 #     LARECOMP_VERSION; the files keep its name; a pre-release draft).
 #   platforms: test builds only - which files go on the draft (comma list); empty: the release's set.
 #
-# The platforms a release ships (RELEASE below; Beta 1: macOS, Windows x64, Linux x64, and Linux arm64 marked
-# experimental). Android, iOS and Windows on ARM stay on the nightly page for now; to ship one with releases, add it to
-# RELEASE (android, ios, windows-arm64: their jobs are here and run whenever it is named).
+# The platforms a release ships (RELEASE below; Beta 1: macOS, Windows x64, Linux x64). Linux arm64, Android, iOS and
+# Windows on ARM stay on the nightly page for now; to ship one with releases, add it to RELEASE (linux-arm64, android,
+# ios, windows-arm64: their jobs are here and run whenever it is named).
 name: Release
 on:
   push:
@@ -57,7 +57,7 @@ jobs:
           PLATFORMS: ${{ inputs.platforms }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          RELEASE="macos windows linux linux-arm64"  # (the platforms every release ships: see the top of this file)
+          RELEASE="macos windows linux"  # (the platforms every release ships: see the top of this file)
           [[ $TAG =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::tag '$TAG': letters, digits, . _ - only"; exit 1; }
           SHA=$(git rev-parse HEAD)
           VERSION=$(sed -n 's/^#define LARECOMP_VERSION "\(.*\)"/\1/p' runtime/ui/launcher.mm)
@@ -488,10 +488,6 @@ jobs:
             echo
             echo "Built from $SHA."
             echo
-            if [[ " $PLATFORMS " == *" linux-arm64 "* ]]; then
-              echo "Linux arm64 (\`linux-arm64\`) is **experimental**."
-              echo
-            fi
             echo "| File | sha256 |"
             echo "|---|---|"
             for f in *; do echo "| \`$f\` | \`$(sha256sum "$f" | cut -d' ' -f1)\` |"; done
