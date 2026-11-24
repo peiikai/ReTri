@@ -6,7 +6,7 @@ nothing they build or publish holds game code: `tools/check_no_game_files.sh` ch
 | Workflow | Runs on | Does |
 |---|---|---|
 | `ci.yml` | pull requests into `develop` / `release/*`, pushes there, by hand | builds the app on Linux x64 and arm64, Windows x64 and arm64 and Android, and runs the tests that need no game files. macOS and iOS only on a run by hand. |
-| `nightly.yml` | by hand (schedule off) | builds every platform and puts the files on the rolling [`nightly`](https://github.com/peiikai/ReTri/releases/tag/nightly) pre-release |
+| `nightly.yml` | daily at 10:00 UTC if develop moved, a catch-up every 3 hours, by hand | builds every platform and puts the files on the rolling [`nightly`](https://github.com/peiikai/ReTri/releases/tag/nightly) pre-release |
 | `release.yml` | a pushed `vX.Y.Z` tag, by hand | builds the release's files into a draft release, for a person to write the notes and publish |
 | `appcast_notes.yml` | a release published or edited | puts the release notes into the macOS update feed |
 | `log_triage.yml` | an issue or comment added or edited | one bot comment summing up the attached `eowrecomp.log` files, and a `log: ...` label |
@@ -43,7 +43,7 @@ the nightly page only; to ship one with releases, add it to `RELEASE` in `releas
 
 ## Cost
 
-While the repository is private, Actions minutes come out of the plan's monthly allowance, and GitHub counts a Windows
+While a repository is private, Actions minutes come out of the plan's monthly allowance, and GitHub counts a Windows
 minute as two and a macOS minute as ten (each job rounded up to a whole minute). Measured in November 2026, caches
 warm (a job's first run builds its dependencies and takes longer):
 
@@ -54,8 +54,8 @@ warm (a job's first run builds its dependencies and takes longer):
 | `nightly.yml`, every platform | about 15 min | about 110 |
 | `release.yml`, the Beta 1 set | about 10 min | about 50 (estimate) |
 
-So the nightly schedule stays off until the repository is public (public repositories' minutes are free). To turn it
-on, uncomment the two `cron` lines at the top of `nightly.yml`.
+The repository is public now, so its minutes are free and the nightly schedule is on. GitHub runs it from `main`'s
+copy of `nightly.yml`.
 
 ## Tests left out
 
