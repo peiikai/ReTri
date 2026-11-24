@@ -24,7 +24,7 @@ cd android && ./gradlew assembleDebug  # android/app/build/outputs/apk/debug/app
 
 `./gradlew assembleRelease` makes the release build. Android installs an update only over an app signed with the same
 key, so every published APK is signed with one fixed key (`LARECOMP_KEYSTORE`, `LARECOMP_KEYSTORE_PASSWORD`, alias
-`lasrecomp`). Never make a new one: every player would have to uninstall, and lose the app's data folder, to update.
+`retri`, its own key, not the LAS one). Never make a new one: every player would have to uninstall, and lose the app's data folder, to update.
 `LARECOMP_VERSION_NAME` and `LARECOMP_VERSION_CODE` set the version; the code has to grow from build to build (minutes
 since 2026-01-01 works).
 

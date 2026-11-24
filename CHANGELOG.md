@@ -7,6 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- Android: nightly builds now include the APK (`android.apk`), signed with ReTri's own key.
 - Updates from the start screen, as in LAS Recomp: when a newer release is out, its link opens what's new, with
   Download. Windows, Linux (AppImage) and macOS can update in place, checked against a signed update file; this
   stays off for releases until it has been tested on every platform.

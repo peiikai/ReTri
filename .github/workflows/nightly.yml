@@ -413,7 +413,7 @@ jobs:
           tools/nightly_publish.sh build/dist/*-linux-${{ matrix.name }}.tar.gz linux-${{ matrix.name }}.tar.gz -
 
   # Signed with the published APKs' key (docs/android.md: repository secrets ANDROID_KEYSTORE_B64 and
-  # ANDROID_KEYSTORE_PASSWORD, alias lasrecomp), so each nightly installs over the last. Without the secrets the APK
+  # ANDROID_KEYSTORE_PASSWORD, alias retri), so each nightly installs over the last. Without the secrets the APK
   # is built and checked but not put up (an unsigned APK doesn't install).
   android:
     needs: plan
