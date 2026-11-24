@@ -1,7 +1,6 @@
 # Contributing to ReTri
 
-ReTri is a private project for now. This file sets out how work is organised, so that every change follows the
-same path from the start.
+This file sets out how work on ReTri is organised, so that every change follows the same path.
 
 ## The one hard rule: no Nintendo files
 
