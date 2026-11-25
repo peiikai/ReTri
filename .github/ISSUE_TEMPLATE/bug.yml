@@ -30,4 +30,4 @@ body:
     id: log
     attributes:
       label: Log
-      description: Attach eowrecomp.log from the data folder
+      description: Attach eowrecomp.log from the data folder (on Windows: next to eowrecomp.exe)
