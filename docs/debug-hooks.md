@@ -217,7 +217,7 @@ on a scratch save.
 
 ## Logging and diagnostics
 
-All of these write to the log (`eowrecomp.log` in the data folder, or the run's redirected output).
+All of these write to the log (`eowrecomp.log` in the data folder, or next to `eowrecomp.exe` on Windows, or the run's redirected output).
 
 | Variable | Values | What it does |
 |---|---|---|
