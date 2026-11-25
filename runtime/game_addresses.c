@@ -113,9 +113,13 @@ const GameVersion *game_version_of(const char *game_dir) {
 
 const GameVersion *game_other_of(const char *game_dir) {
     char path[1100];
-    uint8_t id[20];
     snprintf(path, sizeof path, "%s/exefs/main", game_dir);
-    if (!read_build_id(path, id)) return NULL;
+    return game_other_of_main(path);
+}
+
+const GameVersion *game_other_of_main(const char *main_path) {
+    uint8_t id[20];
+    if (!read_build_id(main_path, id)) return NULL;
     for (size_t i = 0; i < sizeof games / sizeof *games; i++) {
         const char *h = games[i].v.build_id;
         int k = 0;

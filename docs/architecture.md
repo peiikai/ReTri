@@ -77,5 +77,5 @@ address tables, patches and hooks, and the randomizer's seed plumbing (`runtime/
 ## Debugging
 
 Most debug and test switches are environment variables: see [debug-hooks.md](debug-hooks.md). The log is
-`eowrecomp.log` in the data folder. A crash names the guest address (`main+0x...`), which `tools/sym.py` maps to
+`eowrecomp.log` in the data folder (on Windows next to `eowrecomp.exe`). A crash names the guest address (`main+0x...`), which `tools/sym.py` maps to
 the game's code.

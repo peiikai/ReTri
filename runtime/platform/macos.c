@@ -73,6 +73,7 @@ bool plat_reset_guest(uint64_t lo, uint64_t hi) {
 }
 
 void plat_exec(char *const argv[]) {
+    session_log_tee_drain(true);
     if (argv) { execv(argv[0], argv); return; }
     char path[4096];
     if (plat_exe_path(path, sizeof path)) execv(path, *_NSGetArgv());
@@ -81,6 +82,7 @@ void plat_exec(char *const argv[]) {
 // Fatal error: what happened in plain words (runtime/crash_explain.c) - an alert when running as the app (the
 // terminal shows the log otherwise). CFUserNotification: safe from any thread, no run loop needed.
 void plat_fatal_notice(void) {
+    session_log_tee_drain(false);
     char text[1600];
     rt_crash_explain(text, sizeof text, g_log_path);
     if (!g_log_path[0]) return;

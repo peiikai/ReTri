@@ -86,8 +86,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- Setup no longer refuses supported game files whose main and main.npdm are in the romfs folder or another folder
+  not named exefs (#92). It said "Wrong version of the game" with a supported build ID. The program files are now
+  copied on their own and kept out of the romfs copy.
 - Summoning an echo no longer crashes the game with "no function at ..." (#87, #89). The game code build
   cut one of the game's functions in two. The start screen rebuilds the game code once after the update.
+- RecompLauncher: on Windows, `eowrecomp.log` is now written next to the exe when the launcher starts the game, and on
+  Windows and Linux the launcher's own game output gets the same lines.
 - Windows 10: the game no longer crashes as it starts (#81). The game can't use Windows 10's Yu Gothic font, so
   there the game text uses BIZ UDPGothic, now shipped in the Windows zip, until you import the Switch fonts.
 - Android, Adreno: on the phone's own Qualcomm driver, the start screen recommends a Turnip driver package once,

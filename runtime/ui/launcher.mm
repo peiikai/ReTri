@@ -360,9 +360,16 @@ static std::string refused_main(const std::string &exefs) {
     if (first && k == GAME_MAIN_MISSING) fprintf(stderr, "[launcher] game files: no exefs/main, or it can't be read\n");
     if (first && k == GAME_MAIN_NOT_NSO)
         fprintf(stderr, "[launcher] game files: exefs/main isn't the game's program (no NSO0 header)\n");
-    if (first && k == GAME_MAIN_NSO)
+    // (only a build ID no version has is "unsupported": #92's log said so of a 1.0.2 main the check had missed)
+    const GameVersion *v = NULL;
+    if (first && k == GAME_MAIN_NSO && !(v = game_version_of_main((exefs + "/main").c_str())))
+        v = game_other_of_main((exefs + "/main").c_str());
+    if (first && k == GAME_MAIN_NSO && !v)
         fprintf(stderr, "[launcher] game files: an unsupported version (main build ID %s; supported: 1.0.0, 1.0.1, "
                 "1.0.2, 1.1.0)\n", hex);
+    if (first && k == GAME_MAIN_NSO && v)
+        fprintf(stderr, "[launcher] game files: main build ID %s is version %s, refused all the same\n", hex,
+                game_other_release_of(v) ? game_other_release_of(v) : v->label);
     return k == GAME_MAIN_NSO ? std::string(hex, 16) : std::string();
 }
 // (with the build ID's first 16 hex digits; without one, the line alone)
@@ -430,13 +437,13 @@ static const char *const OTHER_VERSION = LN("This app is for another version of 
 static const char *const OTHER_VERSION_HINT = LN("This app was exported for version %s of the game, these game files are "
                                                  "version %s. Export the app again from these game files, or set up "
                                                  "files of version %s.");
-static bool app_fits_files(const std::string &exefs_parent, std::string *app_v, std::string *files_v) {
+static bool app_fits_files(const std::string &exefs, std::string *app_v, std::string *files_v) {
     char built[64], label[32];
     const GameVersion *a = gamelib_built_for(built, sizeof built) ? game_version_by_build_prefix(built) : NULL;
-    const GameVersion *f = game_version_of(exefs_parent.c_str());
-    if (!f) f = game_other_of(exefs_parent.c_str());  // (EoW: each build its own game code too)
+    const GameVersion *f = game_version_of_main((exefs + "/main").c_str());
+    if (!f) f = game_other_of_main((exefs + "/main").c_str());  // (EoW: each build its own game code too)
     if (!a || !f || a == f) return true;
-    const char *fl = game_release_label((exefs_parent + "/exefs").c_str(), label, sizeof label);
+    const char *fl = game_release_label(exefs.c_str(), label, sizeof label);
     const char *ar = game_other_release_of(a);
     if (app_v) *app_v = ar ? ar : a->label;
     if (files_v) *files_v = fl ? fl : f->label;
@@ -453,7 +460,7 @@ static std::string other_version_hint(const std::string &app_v, const std::strin
 static std::string check_game_files(const std::string &root) {
     std::string why = check_copied_files(root);
 #if PLAT_IOS
-    if (why.empty() && !gamelib_present(root.c_str()) && !app_fits_files(root, NULL, NULL)) return OTHER_VERSION;
+    if (why.empty() && !gamelib_present(root.c_str()) && !app_fits_files(root + "/exefs", NULL, NULL)) return OTHER_VERSION;
 #endif
     if (why.empty() && !gamelib_present(root.c_str())) return LN("Game not built yet");
     return why;
@@ -475,7 +482,7 @@ static const char *status_hint(const std::string &why) {
     if (why == OTHER_VERSION) {
         static std::string h;
         std::string a, f;
-        app_fits_files(g_root, &a, &f);
+        app_fits_files(g_root + "/exefs", &a, &f);
         h = other_version_hint(a, f);
         return h.c_str();
     }
@@ -538,11 +545,12 @@ static void find_game(const std::string &dir, std::string &exefs, std::string &r
     exefs = e, romfs = r;
 }
 
-// A supported game version (runtime/game_addresses/versions.h)? Logs which one.
+// A supported game version (runtime/game_addresses/versions.h, games.h)? Logs which one. From the found folder's own
+// main: it needn't be named exefs (#92: main and main.npdm beside region_common in romfs\).
 static bool build_id_ok(const std::string &exefs) {
     char label[32];
     const char *v = game_release_label(exefs.c_str(), label, sizeof label);
-    const GameVersion *o = v ? NULL : game_other_of(exefs.substr(0, exefs.rfind('/')).c_str());  // (EoW)
+    const GameVersion *o = v ? NULL : game_other_of_main((exefs + "/main").c_str());  // (EoW)
     if (v || o) fprintf(stderr, "[launcher] game files: version %s\n", v ? v : o->label);
     else refused_main(exefs);
     return v || o;
@@ -675,8 +683,8 @@ static void *extract_thread(void *) {
     if (!build_id_ok(exefs)) { set_version_failure(exefs); goto done; }
 #if PLAT_IOS
     {  // (refused before the earlier copy is removed: the app's game code wouldn't run them)
-        std::string app_v, files_v, parent = exefs.substr(0, exefs.find_last_of("/\\"));
-        if (!app_fits_files(parent, &app_v, &files_v)) {
+        std::string app_v, files_v;
+        if (!app_fits_files(exefs, &app_v, &files_v)) {
             fprintf(stderr, "[launcher] game files: version %s, the app's game code: %s\n", files_v.c_str(), app_v.c_str());
             set_job(OTHER_VERSION, true, other_version_hint(app_v, files_v));
             goto done;
@@ -703,8 +711,10 @@ static void *extract_thread(void *) {
         unsigned long long rbytes = romfs_dir_bytes(romfs.c_str());
         g_total = rbytes;
         set_job(LN("Copying the game files..."));
-        if (!romfs_copy_tree(exefs.c_str(), (g_root + "/exefs").c_str(), NULL) ||
-            !romfs_copy_tree(romfs.c_str(), (g_root + "/romfs").c_str(), setup_progress)) {
+        // (the program files alone: the exefs folder found may hold the romfs too, or be it - #92 - and then they're
+        // left out of the romfs copy)
+        if (!romfs_copy_exefs(exefs.c_str(), (g_root + "/exefs").c_str()) ||
+            !romfs_copy_romfs(romfs.c_str(), (g_root + "/romfs").c_str(), exefs == romfs, setup_progress)) {
             set_failure(FAIL_COPY);
             goto done;
         }
@@ -725,7 +735,7 @@ check:
 #if PLAT_IOS
         else if (why == OTHER_VERSION) {
             std::string a, f;
-            app_fits_files(g_root, &a, &f);
+            app_fits_files(g_root + "/exefs", &a, &f);
             set_job(OTHER_VERSION, true, other_version_hint(a, f));
         }
 #endif

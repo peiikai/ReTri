@@ -48,7 +48,9 @@ else to a message box. PowerShell doesn't wait for a GUI program: pipe it (`.\eo
 use `Start-Process -Wait`.
 
 Started by RecompLauncher (`RECOMPLAUNCHER=1` is set), there is no update check (the launcher installs updates), and
-`RECOMPLAUNCHER_MODE=bigpicture` starts fullscreen unless the command line says `--windowed`.
+`RECOMPLAUNCHER_MODE=bigpicture` starts fullscreen unless the command line says `--windowed`. The log is written as
+for any start (`eowrecomp.log`: next to the exe on Windows, in the data folder on Linux), and its lines also go to the
+stderr the launcher captures.
 
 The Windows zip, the AppImage (at its root) and the Linux tarball carry `recomplauncher.json`
 (`tools/recomplauncher.json`), RecompLauncher's profile: it asks for the extracted game files, runs `--prepare` on
@@ -215,7 +217,7 @@ on a scratch save.
 
 ## Logging and diagnostics
 
-All of these write to the log (`eowrecomp.log` in the data folder, or the run's redirected output).
+All of these write to the log (`eowrecomp.log` in the data folder, or next to `eowrecomp.exe` on Windows, or the run's redirected output).
 
 | Variable | Values | What it does |
 |---|---|---|

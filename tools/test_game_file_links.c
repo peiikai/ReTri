@@ -4,6 +4,8 @@
 //      elsewhere) fails instead of writing into it: "wb" on the link truncated the player's file.
 //   2. Deleting the data folder's copy removes the link only: the player's file stays, with its bytes, and a
 //      read-only one stays read-only (Windows cleared the attribute to delete, and a link shares it).
+//   3. Game files with main beside region_common in romfs/ (issue #92): the copy keeps the program files and the
+//      romfs apart.
 // Scratch folders only: tools/test_game_file_links.py <empty scratch dir>.
 #include <stdint.h>
 #include <stdio.h>
@@ -125,6 +127,48 @@ int main(int argc, char **argv) {
         plat_remove_tree(data);
     }
     plat_remove_tree(player);
+
+    // 3. #92: main and main.npdm beside region_common in a folder named romfs. Found there as both folders; the
+    //    copy's exefs gets the program files alone, its romfs everything but them.
+    char flat[1100], p[1300], exefs[2200], romfs[2200];
+    snprintf(flat, sizeof flat, "%s/flat", argv[1]);
+    mkdir(flat, 0755);
+    snprintf(p, sizeof p, "%s/romfs", flat), mkdir(p, 0755);
+    snprintf(p, sizeof p, "%s/romfs/region_common", flat), mkdir(p, 0755);
+    snprintf(p, sizeof p, "%s/romfs/region_common/a.bin", flat), put(p, "romfs data");
+    snprintf(p, sizeof p, "%s/romfs/top.bin", flat), put(p, "romfs root file");
+    static const char *const prog[] = {"main", "main.npdm", "rtld", "sdk", "subsdk0", "subsdk1"};
+    for (int i = 0; i < 6; i++) snprintf(p, sizeof p, "%s/romfs/%s", flat, prog[i]), put(p, prog[i]);
+    bool unusable = false;
+    romfs_find_game(flat, exefs, sizeof exefs, romfs, sizeof romfs, &unusable);
+    snprintf(p, sizeof p, "%s/romfs", flat);
+    CHECK(!strcmp(exefs, p) && !strcmp(romfs, p) && !unusable);
+    char de[1200], dr[1200];
+    snprintf(de, sizeof de, "%s/exefs", data), snprintf(dr, sizeof dr, "%s/romfs", data);
+    mkdir(data, 0755);
+    CHECK(romfs_copy_exefs(exefs, de));
+    CHECK(romfs_copy_romfs(romfs, dr, !strcmp(exefs, romfs), NULL));
+    for (int i = 0; i < 6; i++) {
+        snprintf(p, sizeof p, "%s/%s", de, prog[i]);
+        CHECK(same(p, prog[i]));
+        snprintf(p, sizeof p, "%s/%s", dr, prog[i]);
+        CHECK(access(p, F_OK) != 0);
+    }
+    snprintf(p, sizeof p, "%s/region_common", de);
+    CHECK(access(p, F_OK) != 0);
+    snprintf(p, sizeof p, "%s/top.bin", de);
+    CHECK(access(p, F_OK) != 0);
+    snprintf(p, sizeof p, "%s/region_common/a.bin", dr);
+    CHECK(same(p, "romfs data"));
+    snprintf(p, sizeof p, "%s/top.bin", dr);
+    CHECK(same(p, "romfs root file"));
+    // (an exefs folder without main: refused)
+    snprintf(p, sizeof p, "%s/romfs/region_common", flat);
+    CHECK(!romfs_copy_exefs(p, de));
+    printf("main beside region_common: exefs %s, romfs %s\n", !strcmp(exefs, romfs) ? "found there" : "NOT FOUND",
+           failures ? "copied WRONG" : "copied apart");
+    plat_remove_tree(data);
+    plat_remove_tree(flat);
 
     if (failures) { printf("%d check(s) failed\n", failures); return 1; }
     printf("all checks passed\n");
