@@ -458,6 +458,38 @@ std::string eow_dynres(Module &m, uint64_t a) {
                ax(a), ": ldrb w8, [x26, #0x480] (the game's dynamic resolution: off) */");
 }
 
+// (font, as LA's FONT_BOX_GLYPH_SITE, LAS #45) setting up a font (1.0.2: main+0x8ac1c), the game looks up the glyph of
+// "□" (U+25A1, its box for a missing character) and marks it (`ldrb w8, [x0, #0x38]` after the lookup) without
+// checking for none; its second lookup in the same function does check. A font the game finds no such glyph in (issue
+// #81: Windows 10's Yu Gothic, although its cmap lists it; or one set with LARECOMP_FONT) crashed reading 0x38. No
+// glyph now skips to the function's end, where the second lookup's check goes.
+uint64_t eow_font_box_skip;
+std::string eow_font_box_glyph(Module &m, uint64_t a) {
+    uint32_t w = m.image_word(a);
+    check(w == 0x3940e008, a, w);  // ldrb w8, [x0, #0x38]
+    return cat("if (c->x[0] == 0) goto L_", hexs(eow_font_box_skip), "; c->x[8] = LD8(c->x[0] + 0x38);", "  /* ", ax(a),
+               ": ldrb w8, [x0, #0x38] (font box glyph: none skips the marking) */");
+}
+
+// (font, as LA's FONT_FALLBACK_SITES, LAS #452) a character the font has no glyph for is measured and drawn as that same
+// "□" (the font's [+0x34]): its width (1.0.2: main+0x8adac), its widths (main+0x8ae5c) and its glyph (main+0x8af2c)
+// read the box's glyph without checking for none. With a font whose "□" the game can't use, the first missing
+// character crashed there. No box glyph now reads as an empty one (no width, nothing drawn).
+std::string eow_font_fallback(Module &m, uint64_t a) {
+    uint32_t w = m.image_word(a);
+    const char *as = nullptr, *op = nullptr;
+    switch (w) {
+        case 0x79409800: as = "ldrh w0, [x0, #0x4c]", op = "c->x[0] = LD16(c->x[0] + 0x4c);"; break;
+        case 0x39413809: as = "ldrb w9, [x0, #0x4e]", op = "c->x[9] = LD8(c->x[0] + 0x4e);"; break;
+        case 0x79409816: as = "ldrh w22, [x0, #0x4c]", op = "c->x[22] = LD16(c->x[0] + 0x4c);"; break;
+        case 0x79409c08: as = "ldrh w8, [x0, #0x4e]", op = "c->x[8] = LD16(c->x[0] + 0x4e);"; break;
+    }
+    check(as != nullptr, a, w);
+    return cat("{ static uint8_t empty_glyph_[0x60] __attribute__((aligned(16))); ",
+               "if (c->x[0] == 0) c->x[0] = (uint64_t)(uintptr_t)empty_glyph_; } ", op, "  /* ", ax(a), ": ", as,
+               " (font fallback glyph: none reads as an empty one) */");
+}
+
 // (frame pacing, runtime/nvn/pace.c rt_other_fps_limit) the frame controller's own 30 / 60 fps switch, off: the frame
 // time it calls slow, 1/60 s (`movk wD, #0x3c88, lsl #16` after `mov wD, #0x8889`) - in its 30 fps branch (a 12-frame
 // window with none slow goes back to 60), its 60 fps branch (slow frames there go to 30) and the flag of a slow frame
@@ -668,6 +700,10 @@ void build_other_patches(const std::string &game, const AddressTable *t, Module 
         P[T("FPS_LIMIT_30_SITE")] = eow_fps_limit;
         P[T("FPS_LIMIT_60_SITE")] = eow_fps_limit;
         P[T("FPS_LIMIT_FLAG_SITE")] = eow_fps_limit;
+        eow_font_box_skip = T("FONT_BOX_GLYPH_SKIP");
+        P[T("FONT_BOX_GLYPH_SITE")] = eow_font_box_glyph;
+        for (const char *n : {"FONT_FALLBACK_SITE_0", "FONT_FALLBACK_SITE_1", "FONT_FALLBACK_SITE_2", "FONT_FALLBACK_SITE_3"})
+            P[T(n)] = eow_font_fallback;
         // (in name order, as gen.py: the index is the site's number for the runtime)
         eow_aspect_sites.clear(), eow_spot_sites.clear();
         for (auto &e : *t) {
