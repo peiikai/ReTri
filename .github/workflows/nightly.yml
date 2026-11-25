@@ -119,7 +119,7 @@ jobs:
                 [ -n "$OLD" ] && echo "$OLD"
               fi
               echo
-              echo "To report a problem, open an [issue]($URL/issues), say it's a nightly and which date, and attach the log (\`eowrecomp.log\` in the data folder)."
+              echo "To report a problem, open an [issue]($URL/issues), say it's a nightly and which date, and attach the log (\`eowrecomp.log\` in the data folder; on Windows, next to \`eowrecomp.exe\`)."
               echo
               echo "<!-- nightly-round: $STAMP $SHA -->"
             } > notes.md
