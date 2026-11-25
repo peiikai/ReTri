@@ -39,11 +39,8 @@ extern "C" const char *game_release_label(const char *exefs_dir, char *buf, size
     char path[1100];
     snprintf(path, sizeof path, "%s/main", exefs_dir);
     const GameVersion *v = game_version_of_main(path);
-    if (!v) {  // (another game: its build's own release, games.h)
-        std::string dir(exefs_dir);
-        size_t slash = dir.find_last_of("/\\");
-        std::string parent = slash == std::string::npos ? "." : dir.substr(0, slash);
-        const char *r = game_other_release_of(game_other_of(parent.c_str()));
+    if (!v) {  // (another game: its build's own release, games.h; from this folder's main, whatever its name: #92)
+        const char *r = game_other_release_of(game_other_of_main(path));
         if (!r) return nullptr;
         snprintf(buf, size, "%s", r);
         return buf;

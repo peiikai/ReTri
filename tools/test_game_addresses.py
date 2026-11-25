@@ -203,6 +203,15 @@ assert native('label', g0/'exefs') == ['1.0.0']
 assert ' '.join(native('label', g1/'exefs')) == '1.0.1 / 1.1.0'  # (an npdm of neither release)
 assert native('label', gx/'exefs') == ['none']
 assert native('label', tmp/'missing') == ['none']
+# #92: another game's main in a folder not named exefs (main and main.npdm beside region_common in romfs/): its
+# release read from that folder's own main, not from <parent>/exefs/main
+for b in builds:
+    d = tmp/f"flat_{b['key']}_{b['table']}"/'romfs'
+    d.mkdir(parents=True)
+    (d/'main').write_bytes(b'NSO0' + bytes(0x3c) + bytes.fromhex(b['build_id']) + bytes(0x0c) + bytes(0x20))
+    (d/'main.npdm').write_bytes(b'fixture npdm')
+    (d/'region_common').mkdir()
+    assert native('label', d) == [b['release']], (b, native('label', d))
 assert native('select', g1)[:2] == ['1', 'v1_0_1']
 out = native('select', gx)
 assert out[0] == '0' and 'unsupported version' in ' '.join(out), out
