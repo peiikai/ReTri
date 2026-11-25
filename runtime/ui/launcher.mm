@@ -1,6 +1,6 @@
 // Start screen, shown before the game boots (user 2026-10-08, styled after Dusklight's launcher): PLAY (the vanilla
 // game), RANDOMIZER (‹ New Seed / a seed ›: user 2026-11-09), SETTINGS, QUIT, game-files status at the lower left.
-// Nothing of the game ships with ReTri: on first launch the user picks the folder with their own game files (1.0.0, 1.0.1 or 1.0.2), we check
+// Nothing of the game ships with ReTri: on first launch the user picks the folder with their own game files (1.0.0, 1.0.1, 1.0.2 or 1.1.0), we check
 // the main module's build id (runtime/game_addresses/versions.h), copy the files and build the game's data image; PLAY stays disabled until that worked. The background is the game's own title movie (from the user's files) once extracted: a frame of it, or for EoW on Metal the movie playing.
 //
 // Skipped with --play, LARECOMP_NO_LAUNCHER=1, or any scripted test run (LARECOMP_INPUT): tests boot straight in
@@ -366,15 +366,15 @@ static std::string refused_main(const std::string &exefs) {
         v = game_other_of_main((exefs + "/main").c_str());
     if (first && k == GAME_MAIN_NSO && !v)
         fprintf(stderr, "[launcher] game files: an unsupported version (main build ID %s; supported: 1.0.0, 1.0.1, "
-                "1.0.2)\n", hex);
+                "1.0.2, 1.1.0)\n", hex);
     if (first && k == GAME_MAIN_NSO && v)
         fprintf(stderr, "[launcher] game files: main build ID %s is version %s, refused all the same\n", hex,
                 game_other_release_of(v) ? game_other_release_of(v) : v->label);
     return k == GAME_MAIN_NSO ? std::string(hex, 16) : std::string();
 }
 // (with the build ID's first 16 hex digits; without one, the line alone)
-static const char *const VERSION_HINT = LN("ReTri needs version 1.0.0, 1.0.1 or 1.0.2 of the game.");
-static const char *const VERSION_ID_HINT = LN("ReTri needs version 1.0.0, 1.0.1 or 1.0.2 of the game. These game "
+static const char *const VERSION_HINT = LN("ReTri needs version 1.0.0, 1.0.1, 1.0.2 or 1.1.0 of the game.");
+static const char *const VERSION_ID_HINT = LN("ReTri needs version 1.0.0, 1.0.1, 1.0.2 or 1.1.0 of the game. These game "
                                               "files have build ID %s.");
 // (English, as the setup lines: shown() puts it in the menus' language)
 static std::string version_hint(const std::string &exefs) {

@@ -419,8 +419,8 @@
 // runtime/ui/launcher.mm
 {"Game files incomplete, %d of %d files", "ゲームファイルが不完全です（%d / %d ファイル）"},
 {"The romfs folder only has %d of the game's %d files, usually from a copy or unzip that stopped partway. Copy them again and choose the folder again.", "romfsフォルダにはファイルが%d個しかありません（ゲームには%d個あります）。たいていはコピーや解凍が途中で止まったのが原因です。もう一度コピーして、フォルダを選び直してください。"},
-{"ReTri needs version 1.0.0, 1.0.1 or 1.1.0 of the game.", "ReTriにはゲームのバージョン1.0.0、1.0.1、1.1.0のいずれかが必要です。"},
-{"ReTri needs version 1.0.0, 1.0.1 or 1.1.0 of the game. These game files have build ID %s.", "ReTriにはゲームのバージョン1.0.0、1.0.1、1.1.0のどれかが必要です。このゲームファイルのビルドIDは%sです。"},
+{"ReTri needs version 1.0.0, 1.0.1, 1.0.2 or 1.1.0 of the game.", "ReTriにはゲームのバージョン1.0.0、1.0.1、1.0.2、1.1.0のいずれかが必要です。"},
+{"ReTri needs version 1.0.0, 1.0.1, 1.0.2 or 1.1.0 of the game. These game files have build ID %s.", "ReTriにはゲームのバージョン1.0.0、1.0.1、1.0.2、1.1.0のどれかが必要です。このゲームファイルのビルドIDは%sです。"},
 {"No game files yet", "ゲームファイルがまだありません"},
 {"Wrong version of the game", "ゲームのバージョンが違います"},
 {"Game files damaged or changed", "ゲームファイルが壊れているか、変更されています"},
