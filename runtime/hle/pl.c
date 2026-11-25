@@ -12,15 +12,16 @@
 //     language's characters are the substitute's, so Chinese / Korean text can show missing glyphs.
 //     Standard's Japanese gothics are skipped when the game plays in Russian: Japanese fonts carry Cyrillic as
 //     full-width characters (JIS X 0208), every letter a square apart (issue #32) - Arial / DejaVu Sans then.
-//  4. Standard only, on Linux and any other platform without a known system font (not macOS / Windows), ahead of
+//  4. Standard only, on Linux and any other platform without a known system font (not macOS / Windows 11), ahead of
 //     the OS's own: BIZ UDPGothic shipped with the app (third_party/fonts/BIZUDPGothic, SIL OFL), Morisawa's free
 //     font from the same universal-design gothic family as UD Shin Go. (Skipped for Russian like the other Japanese
-//     gothics.)
+//     gothics.) Windows 10 is one of these for Standard: the game can't use its Yu Gothic (yu_gothic_unusable).
 //  5. Standard only: DejaVu Sans shipped with the app (third_party/fonts/DejaVu, free license), for systems with none
 //     of the above (Bazzite / Fedora Atomic have no DejaVu - issue #37).
 // On those same platforms a substitute (anything but the console's own files) gets the console font's OS/2 Windows
 // metrics, which the game sizes text by (match_switch_metrics): without that every substitute draws about 1.5x too
-// large. macOS and Windows keep Hiragino / Yu Gothic exactly as they are, at their current size (OS_FONTS_KNOWN).
+// large. macOS and Windows keep Hiragino / Yu Gothic exactly as they are, at their current size (OS_FONTS_KNOWN); the
+// bundled BIZ UDPGothic gets the console's metrics wherever it serves.
 // .bfttf is the console's obfuscated TTF: 8-byte header (magic, size) then every u32 XORed with a fixed key (bfttf_decode).
 // .ttc collections get face 0 copied out as a standalone font (the game's font engine wants one sfnt).
 #include <stdlib.h>
@@ -37,6 +38,23 @@
 #else
 #define OS_FONTS_KNOWN 0  // (Linux; iOS: the system's font files aren't readable by an app)
 #endif
+#define BUNDLED_GOTHIC "BIZUDPGothic-Regular.ttf"
+
+// Windows 10's Yu Gothic (YuGothR / YuGothM.ttc, before build 22000) can't be used by the game's font engine
+// (nn::fontll, Monotype's): it lists "□" (U+25A1) in its cmap, so font_usable passes it, yet the engine's
+// CheckGlyphExist (FSS_map_char, cmap 3/10 else 3/1) answers no for it. The registers at the crash still hold the
+// engine's table search of load_ttf ('vmtx'), so most likely the engine fails to load the face and none of its glyphs
+// exist for the game. The game then reads the box glyph it failed to create, without checking, and crashed at 0x38
+// (issue #81: Windows 10 22H2, build 19045, a 13,271,836-byte YuGothR.ttc; LAS issue #45 was likely the same).
+// Windows 11's copy (a different file) works. On Windows 10 the bundled BIZ UDPGothic serves instead, the same
+// universal-design gothic look.
+static bool yu_gothic_unusable(void) {
+#ifdef _WIN32
+    return plat_windows_build() < 22000;  // (0, unknown: the bundled font, which works everywhere)
+#else
+    return false;
+#endif
+}
 
 typedef struct { uint64_t addr, size; } Font;
 // SharedFontType: 0 Standard, 1 ChineseSimple, 2 ChineseSimpleExt, 3 ChineseTraditional, 4 Korean, 5 NintendoExt
@@ -201,7 +219,9 @@ static int load_one_checked(const char *path, Font *ft, bool check) {
         d = f0;
         len = l2;
     }
-    if (!console_font && !OS_FONTS_KNOWN) match_switch_metrics(d, len);  // (a .ttf of the console's own: already so)
+    bool bundled_gothic = n >= sizeof BUNDLED_GOTHIC - 1 && !strcmp(path + n - (sizeof BUNDLED_GOTHIC - 1), BUNDLED_GOTHIC);
+    if (!console_font && (!OS_FONTS_KNOWN || bundled_gothic))  // (a .ttf of the console's own: already so)
+        match_switch_metrics(d, len);
     if (check && !font_usable(d, len)) {
         LOG("[pl] %s: no glyph for a space or \"\u25A1\" (U+25A1) - skipped\n", path);
         free(d);
@@ -274,6 +294,7 @@ static void load_fonts(void) {
     extern const char *settings_language(void);
     const char *lang = settings_language();
     bool cyrillic = !strcmp(lang, "ru");
+    bool no_yu_gothic = yu_gothic_unusable(), bundled_first = !OS_FONTS_KNOWN || no_yu_gothic;
     const char *const *std_native = !strcmp(lang, "zh-Hans") ? std_zh_cn
                                     : !strcmp(lang, "zh-Hant") ? std_zh_tw
                                     : !strcmp(lang, "ko")      ? std_ko
@@ -304,13 +325,14 @@ static void load_fonts(void) {
                     load_one_checked(std_native[k], &fonts[t], true);
                 if (fonts[t].addr) break;
             }
-            // Standard, before the OS's fonts where none is known: the bundled BIZ UDPGothic (a Japanese gothic
-            // too: not for Russian)
-            if (!OS_FONTS_KNOWN && t == F_STD && !own && !cyrillic && i && strncmp(chains[t][i - 1], "fonts/", 6) == 0 &&
-                rt_resource("BIZUDPGothic-Regular.ttf", "third_party/fonts/BIZUDPGothic/BIZUDPGothic-Regular.ttf", bundled, sizeof bundled) &&
+            // Standard, before the OS's fonts where none is known (or none the game can use: Windows 10): the
+            // bundled BIZ UDPGothic (a Japanese gothic too: not for Russian)
+            if (bundled_first && t == F_STD && !own && !cyrillic && i && strncmp(chains[t][i - 1], "fonts/", 6) == 0 &&
+                rt_resource(BUNDLED_GOTHIC, "third_party/fonts/BIZUDPGothic/" BUNDLED_GOTHIC, bundled, sizeof bundled) &&
                 load_one_checked(bundled, &fonts[t], true))
                 break;
             if (t == F_STD && cyrillic && (strstr(f, "/System/Library/Fonts/ヒラギノ") || strstr(f, "YuGoth"))) continue;
+            if (no_yu_gothic && strstr(f, "YuGoth")) continue;
             load_one_checked(f, &fonts[t], !own);
         }
     }
