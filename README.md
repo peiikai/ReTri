@@ -273,7 +273,7 @@ Where files live (game files, saves, settings and logs):
 - iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > ReTri).
 - You can move it to another folder or drive in Settings > System > Data folder.
 - `--data-dir <dir>` (or `LARECOMP_DATA_ROOT=<dir>`) overrides all of these.
-- For a bug report, attach `eowrecomp.log` from that folder. On Windows it stays next to `eowrecomp.exe`, even if you move the data folder. Started from RecompLauncher, there is no `eowrecomp.log`: use the launcher's copy in `%APPDATA%\com.recomplauncher.app\game-output\`, or Settings > About > Troubleshoot > Export Logs.
+- For a bug report, attach `eowrecomp.log` from that folder. On Windows it stays next to `eowrecomp.exe`, even if you move the data folder. Started from RecompLauncher, the launcher also keeps a copy in `%APPDATA%\com.recomplauncher.app\game-output\` (or Settings > About > Troubleshoot > Export Logs).
 
 ### Android
 
