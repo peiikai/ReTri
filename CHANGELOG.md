@@ -87,6 +87,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 - Summoning an echo no longer crashes the game with "no function at ..." (#87, #89). The game code build
   cut one of the game's functions in two. The start screen rebuilds the game code once after the update.
+- RecompLauncher: on Windows, `eowrecomp.log` is now written next to the exe when the launcher starts the game, and on
+  Windows and Linux the launcher's own game output gets the same lines.
 - Windows 10: the game no longer crashes as it starts (#81). The game can't use Windows 10's Yu Gothic font, so
   there the game text uses BIZ UDPGothic, now shipped in the Windows zip, until you import the Switch fonts.
 - Android, Adreno: on the phone's own Qualcomm driver, the start screen recommends a Turnip driver package once,
