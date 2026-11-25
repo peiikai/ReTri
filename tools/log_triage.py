@@ -88,15 +88,25 @@ NOTABLE = [
 ]
 
 
+# The game's version (runtime/game_addresses.c), or the start screen's message for an unsupported one
+GAME_RE = re.compile(r"\[game\] Echoes of Wisdom (\d+\.\d+\.\d+) \(main build ID ([0-9A-F]{16})\)")
+UNSUPPORTED_RE = re.compile(r"unsupported version of the game \(main build ID ([0-9A-F]{16})\)")
+
+
 def parse(text):
     lines = text.splitlines()
     r = {"backend": None, "gpu": None, "gpus": [], "api": None, "driver": None, "os": None, "cpu": None,
          "system": None, "build": None, "settings": None, "swapchain": None, "integrated": False, "fps": [], "slow": [],
-         "notable": {}, "records": [], "seed": None, "end": None, "end_line": None, "lines": len(lines), "romfs": None}
+         "notable": {}, "records": [], "seed": None, "end": None, "end_line": None, "lines": len(lines), "romfs": None,
+         "game": None}
     romfs = {}  # per check ("launcher" / "fs"): what it found (each file once: a check can run again)
     fatal = exc = crash_head = None
     devlost = hang = closed = False
     for i, ln in enumerate(lines):
+        if m := GAME_RE.search(ln):
+            r["game"] = f"Echoes of Wisdom {m.group(1)} (build ID {m.group(2)})"
+        elif m := UNSUPPORTED_RE.search(ln):
+            r["game"] = f"unsupported version (build ID {m.group(1)}): ReTri needs 1.0.0, 1.0.1 or 1.0.2"
         if m := INFO_RE.match(ln):  # (the build's own name: wins over a folder name in the data path)
             r["build"] = m.group(1) + (f" ({m.group(3)})" if m.group(3) else "")
             r["system"] = m.group(2)
@@ -212,6 +222,7 @@ def summarise(r):
     else:
         out.append("- **GPU:** not in the log")
     out.append(f"- **Backend:** {r['backend'] or 'not in the log'}")
+    out.append(f"- **Game:** {code(r['game']) if r['game'] else 'not in the log'}")
     if r["seed"]: out.append(f"- **Randomizer seed:** {code(r['seed'], 120)}")
     if r["romfs"]:
         c, gf = r["romfs"], []

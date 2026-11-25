@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- Shader list: 110 more variants from player logs (fewer stutters).
+- Android: nightly builds now include the APK (`android.apk`), signed with ReTri's own key.
 - Updates from the start screen, as in LAS Recomp: when a newer release is out, its link opens what's new, with
   Download. Windows, Linux (AppImage) and macOS can update in place, checked against a signed update file; this
   stays off for releases until it has been tested on every platform.
@@ -87,6 +89,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 - Summoning an echo no longer crashes the game with "no function at ..." (#87, #89). The game code build
   cut one of the game's functions in two. The start screen rebuilds the game code once after the update.
+- RecompLauncher: on Windows, `eowrecomp.log` is now written next to the exe when the launcher starts the game, and on
+  Windows and Linux the launcher's own game output gets the same lines.
 - Windows 10: the game no longer crashes as it starts (#81). The game can't use Windows 10's Yu Gothic font, so
   there the game text uses BIZ UDPGothic, now shipped in the Windows zip, until you import the Switch fonts.
 - Android, Adreno: on the phone's own Qualcomm driver, the start screen recommends a Turnip driver package once,

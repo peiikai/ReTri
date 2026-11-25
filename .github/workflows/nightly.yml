@@ -9,17 +9,17 @@
 # same commit with the same version.
 # The round (its stamp and commit) is kept in the release's notes, as a "nightly-round:" line.
 #
-# Schedule: OFF while the repository is private (Actions minutes; macOS ones count ten times: docs/ci.md). To turn it
-# on, uncomment the two cron lines below: a new round at 10:00 UTC if develop moved, a catch-up every 3 hours.
+# Schedule (on since the repository went public; its Actions minutes are free): a new round at 10:00 UTC if develop
+# moved, a catch-up every 3 hours. GitHub runs scheduled triggers from the default branch's (main's) copy of this file.
 # GitHub drops scheduled triggers at times: if the 10:00 one never ran, the first catch-up after it starts the round.
 #
 # By hand: gh workflow run nightly.yml [-f new_round=false] [-f ref=<branch>]
 #   ref: what a new round builds (default develop). A branch's round still goes on the one nightly page.
 name: Nightly
 on:
-  # schedule:
-  #   - cron: '0 10 * * *'   # a new round, if develop moved
-  #   - cron: '0 */3 * * *'  # catch-up for the current round
+  schedule:
+    - cron: '0 10 * * *'   # a new round, if develop moved
+    - cron: '0 */3 * * *'  # catch-up for the current round
   workflow_dispatch:
     inputs:
       new_round:
@@ -119,7 +119,7 @@ jobs:
                 [ -n "$OLD" ] && echo "$OLD"
               fi
               echo
-              echo "To report a problem, open an [issue]($URL/issues), say it's a nightly and which date, and attach the log (\`eowrecomp.log\` in the data folder)."
+              echo "To report a problem, open an [issue]($URL/issues), say it's a nightly and which date, and attach the log (\`eowrecomp.log\` in the data folder; on Windows, next to \`eowrecomp.exe\`)."
               echo
               echo "<!-- nightly-round: $STAMP $SHA -->"
             } > notes.md
@@ -413,7 +413,7 @@ jobs:
           tools/nightly_publish.sh build/dist/*-linux-${{ matrix.name }}.tar.gz linux-${{ matrix.name }}.tar.gz -
 
   # Signed with the published APKs' key (docs/android.md: repository secrets ANDROID_KEYSTORE_B64 and
-  # ANDROID_KEYSTORE_PASSWORD, alias lasrecomp), so each nightly installs over the last. Without the secrets the APK
+  # ANDROID_KEYSTORE_PASSWORD, alias retri), so each nightly installs over the last. Without the secrets the APK
   # is built and checked but not put up (an unsigned APK doesn't install).
   android:
     needs: plan
