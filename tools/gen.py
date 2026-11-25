@@ -242,7 +242,10 @@ class Module:
         start = cmp
         while start - 4 >= entry and cmp - (start - 4) <= 4 * 12 and self.lift(start - 4).kind in ('op', 'asm'):
             start -= 4
-        idx_regs = self._index_regs(start, cmp, idx)
+        # (through the br: EoW's echo summon code, main+0x4367ac on 1.0.2, does `cmp w8, #12; b.hi; and x8, x0, #0xff`
+        # and indexes with that x8, so x0 must hold the index too - with only w8 set, every value read the same case,
+        # the others looked unreached and the orphan pass split the function there: issues #87, #89)
+        idx_regs = self._index_regs(start, br_pc, idx)
         mu = self.emu()
         targets = []
 
