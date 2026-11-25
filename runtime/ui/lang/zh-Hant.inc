@@ -419,8 +419,8 @@
 // runtime/ui/launcher.mm
 {"Game files incomplete, %d of %d files", "遊戲檔案不完整，%d／%d個檔案"},
 {"The romfs folder only has %d of the game's %d files, usually from a copy or unzip that stopped partway. Copy them again and choose the folder again.", "romfs資料夾只有%d個檔案（遊戲共有%d個），通常是複製或解壓縮中途停止所致。請重新複製，再重新選擇資料夾。"},
-{"ReTri needs version 1.0.0, 1.0.1 or 1.1.0 of the game.", "ReTri需要遊戲的1.0.0、1.0.1或1.1.0版。"},
-{"ReTri needs version 1.0.0, 1.0.1 or 1.1.0 of the game. These game files have build ID %s.", "ReTri需要1.0.0、1.0.1或1.1.0版本的遊戲。這些遊戲檔案的建置ID為%s。"},
+{"ReTri needs version 1.0.0, 1.0.1, 1.0.2 or 1.1.0 of the game.", "ReTri需要遊戲的1.0.0、1.0.1、1.0.2或1.1.0版。"},
+{"ReTri needs version 1.0.0, 1.0.1, 1.0.2 or 1.1.0 of the game. These game files have build ID %s.", "ReTri需要1.0.0、1.0.1、1.0.2或1.1.0版本的遊戲。這些遊戲檔案的建置ID為%s。"},
 {"No game files yet", "尚無遊戲檔案"},
 {"Wrong version of the game", "遊戲版本不符"},
 {"Game files damaged or changed", "遊戲檔案損壞或遭修改"},

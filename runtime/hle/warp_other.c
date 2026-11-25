@@ -479,8 +479,11 @@ void warp_other_game_tick(Cpu *c) {
     if (getenv("LARECOMP_WARP_CALL") && g_owner && g_ctx) {  // (experiment) run the request processor on a job of our own
         // P: {vtable, the game's owner, our request, 0, the last context, 0} - no reference counts of the game's to drop.
         // The processor first pops its own entry off the owner's job queue (+0x200 block array of 256 16-byte entries,
-        // +0x218 front index, +0x220 count): with the queue empty, one empty entry is put at the front for it.
-        uint64_t O = g_owner, idx = *(uint64_t *)(uintptr_t)(O + 0x218), cnt = *(uint64_t *)(uintptr_t)(O + 0x220);
+        // +0x218 front index, +0x220 count; 1.1.0: 0xa0 lower): with the queue empty, one empty entry is put at the
+        // front for it.
+        const char *rel = game_other_release_of(game_version());
+        uint64_t O = g_owner + (rel && !strcmp(rel, "1.1.0") ? 0x160 - 0x200 : 0);  // (O + 0x200: the queue)
+        uint64_t idx = *(uint64_t *)(uintptr_t)(O + 0x218), cnt = *(uint64_t *)(uintptr_t)(O + 0x220);
         uint64_t blocks = *(uint64_t *)(uintptr_t)(O + 0x200), blk = blocks ? *(uint64_t *)(uintptr_t)(blocks + (idx >> 8) * 8) : 0;
         if (cnt || !blk) {
             LOG("[warp] job queue busy (index %llu, count %llu, block %llx): not now\n", (unsigned long long)idx, (unsigned long long)cnt, (unsigned long long)blk);
@@ -495,14 +498,14 @@ void warp_other_game_tick(Cpu *c) {
         memcpy((void *)(uintptr_t)(R2 + 0x200), (void *)(uintptr_t)(r + 0x200), 0xc0);
         memset((void *)(uintptr_t)P, 0, 0x200);
         *(uint64_t *)(uintptr_t)P = OTHER(WARP_REQUEST_PROC_VTABLE);
-        *(uint64_t *)(uintptr_t)(P + 8) = O;
+        *(uint64_t *)(uintptr_t)(P + 8) = g_owner;
         *(uint64_t *)(uintptr_t)(P + 0x10) = R2;
         *(uint64_t *)(uintptr_t)(P + 0x20) = g_ctx;
         uint64_t saved[31], sp = c->sp, pc = c->pc;
         memcpy(saved, c->x, sizeof saved);
         c->x[0] = P;
         LOG("[warp] calling the request processor on job %llx (owner %llx, context %llx)\n", (unsigned long long)P,
-            (unsigned long long)O, (unsigned long long)g_ctx);
+            (unsigned long long)g_owner, (unsigned long long)g_ctx);
         guest_call(c, OTHER(WARP_REQUEST_PROC));
         memcpy(c->x, saved, sizeof saved);
         c->sp = sp, c->pc = pc;

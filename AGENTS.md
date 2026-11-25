@@ -30,7 +30,7 @@
   | Rendering | `runtime/nvn/cmdbuf.c` (recording), `renderer.m` / `metal.m` (Metal), `vulkan/exec.c` (Vulkan), `maxwell/translate.c` (shaders); per-GPU Vulkan defaults: [docs/vulkan-gpu-defaults.md](docs/vulkan-gpu-defaults.md) |
   | Game behaviour or a new feature | `runtime/hle/` (EoW's: `*_other.c`) and EoW's patches in `runtime/gen/patches.cpp` (`build_other_patches`; `tools/patches.py` is the reference) |
   | Saves | [docs/save-format.md](docs/save-format.md), `runtime/services/fs.c` |
-  | Game addresses | CONTRIBUTING "Project layout" (`runtime/game_addresses/games.h`, `eow_v1_0_x.h`, `OTHER(NAME)`) |
+  | Game addresses | CONTRIBUTING "Project layout" (`runtime/game_addresses/games.h`, `eow_v1_x_x.h`, `OTHER(NAME)`) |
   | Menu text | `python3 tools/menu_strings.py check` |
 
 - **No Nintendo files, ever.**
@@ -53,8 +53,13 @@
   - Patch the game's own code minimally rather than replacing whole systems.
 
 - **Addresses and patches.**
-  - EoW ships as 1.0.0, 1.0.1 and 1.0.2. Each build is a row of `runtime/game_addresses/games.h`, found by its main
-    program's build ID, with its own table (`eow_v1_0_x.h`, the same names in each). Unknown build IDs are refused.
+  - EoW ships as 1.0.0, 1.0.1, 1.0.2 and 1.1.0. Each build is a row of `runtime/game_addresses/games.h`, found by its main
+    program's build ID, with its own table (`eow_v1_x_x.h`, the same names in each). Unknown build IDs are refused.
+  - 1.1.0 is a bigger update: a newer sdk (packed relative relocations DT_RELR and only a GNU hash table, both read by
+    `runtime/loader.c` and both NSO readers; svcGetInfo 28; IApplicationFunctions 210, an event its GetOperationMode
+    polls; the npad hold type read from hid shared memory +0x3e200), many changed functions, and objects with other
+    offsets (the frame controller's dynres byte at +0x360, the warp owner's queue 0xa0 lower). Its table was mapped
+    from 1.0.2; ASPECT_SITE_21..25 are 0x0.
   - Every EoW address goes through those tables: `OTHER(NAME)` in the runtime, `T("NAME")` in `runtime/gen/patches.cpp`
     (`build_other_patches`) and `T['NAME']` in `tools/gen.py`. The `GA(NAME)` tables (`versions.h`,
     `patches_v1_0_*.h`, `runtime_v1_0_*.h`) are LA's.

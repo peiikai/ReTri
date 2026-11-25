@@ -15,12 +15,25 @@ static uint32_t new_event_handle(void) {
 // ------------------------------------------------------------------ hid
 KSharedMem *g_hid_shmem;
 static uint32_t hid_shmem_handle;
-RT_ON_RESET(hid_reset) { g_hid_shmem = NULL; hid_shmem_handle = 0; }
+
+// Newer sdks (game 1.1.0's) read the npad hold type from the shared memory instead of asking (GetNpadJoyHoldType):
+// the npad condition at +0x3e200, {last active npad id u32, its valid byte, ..., hold type u32 at +8, set byte at +0xc}.
+// Without the set byte they report "not initialized" and the game stops. Older sdks don't read it.
+#define HID_NPAD_CONDITION 0x3e200
+static uint32_t hid_hold_type;
+static void hid_condition_write(void) {
+    if (!g_hid_shmem || !g_hid_shmem->guest_addr) return;
+    uint8_t *c = (uint8_t *)(uintptr_t)(g_hid_shmem->guest_addr + HID_NPAD_CONDITION);
+    memcpy(c + 8, &hid_hold_type, 4);
+    c[0xc] = 1;
+}
+static void hid_shmem_mapped(KSharedMem *m) { (void)m; hid_condition_write(); }
+RT_ON_RESET(hid_reset) { g_hid_shmem = NULL; hid_shmem_handle = 0; hid_hold_type = 0; }
 
 static void applet_resource(Service *s, IpcReq *req, IpcResp *resp) {
     (void)s;
     if (req->cmd == 0) {  // GetSharedMemoryHandle
-        if (!g_hid_shmem) g_hid_shmem = kernel_create_shared_memory(0x40000, NULL, &hid_shmem_handle);
+        if (!g_hid_shmem) g_hid_shmem = kernel_create_shared_memory(0x40000, hid_shmem_mapped, &hid_shmem_handle);
         resp->copy_handles[resp->ncopy++] = hid_shmem_handle;
     }
 }
@@ -31,6 +44,9 @@ SERVICE("hid", hid) {
     case 0: ipc_return_object(resp, service_new("IAppletResource", applet_resource, NULL)); break;
     case 40: case 106: resp->copy_handles[resp->ncopy++] = new_event_handle(); break;
     case 101: OUT(uint32_t, 0) = 0x1F; resp_size(resp, 4); break;  // GetSupportedNpadStyleSet
+    case 120:  // SetNpadJoyHoldType (ARUID, hold type): also the shared memory's npad condition (newer sdks read it)
+        if (req->data_size >= 16) hid_hold_type = (uint32_t)IN(uint64_t, 8), hid_condition_write();
+        break;
     case 121: OUT(int64_t, 0) = 0; resp_size(resp, 8); break;      // GetNpadJoyHoldType
     case 129: OUT(int64_t, 0) = 0; resp_size(resp, 8); break;      // GetNpadHandheldActivationMode
     case 201: {  // SendVibrationValue: handle, four floats, padding, ARUID

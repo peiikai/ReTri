@@ -606,12 +606,14 @@ def main():
             # up to 1.9x the window's pixels (6982x1964 for 5120x1440), new targets at each step, and frames over
             # 16.7 ms once our own window step (SMAA, upscale) came on top. Read as 0: it stays at 1408x792.
             # LARECOMP_GAME_DYNRES=1 (test): the game's own again.
+            # (1.0.x: `ldrb w8, [x26, #0x480]`; 1.1.0's object is smaller: `ldrb w8, [x25, #0x360]`)
             def _eow_dynres(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-                assert w == 0x39520348, hex(w)  # ldrb w8, [x26, #0x480]
+                assert (w & 0xFFC00000) == 0x39400000, hex(w)  # ldrb wT, [xN, #off]
+                rt, rn, off = w & 31, (w >> 5) & 31, (w >> 10) & 0xFFF
                 return ('{ extern int rt_game_dynres(void); '
-                        'c->x[8] = rt_game_dynres() ? LD8(c->x[26] + 0x480) : 0; }'
-                        f'  /* {a:#x}: ldrb w8, [x26, #0x480] (the game\'s dynamic resolution: off) */')
+                        f'c->x[{rt}] = rt_game_dynres() ? LD8(c->x[{rn}] + {off:#x}) : 0; }}'
+                        f'  /* {a:#x}: ldrb w{rt}, [x{rn}, #{off:#x}] (the game\'s dynamic resolution: off) */')
             PATCHES[T['DYNRES_SITE']] = _eow_dynres
             # (frame pacing, runtime/nvn/pace.c rt_other_fps_limit) the frame controller's own 30 / 60 fps switch, off:
             # the frame time it calls slow, 1/60 s (`movk wD, #0x3c88, lsl #16` after `mov wD, #0x8889`) - in its 30 fps
@@ -659,6 +661,7 @@ def main():
                 PATCHES[T[n]] = _eow_font_fallback
             # (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
             # `movz wD, #0x8e39; movk wD, #0x3fe3, lsl #16`: the movk gets the runtime's aspect instead
+            # (0x0: not in this build; the others keep their number)
             eow_aspect = [v for k, v in sorted(T.items()) if k.startswith('ASPECT_SITE_')]
             def _eow_aspect(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
@@ -667,7 +670,8 @@ def main():
                 return (f'{{ extern uint32_t rt_aspect_other(int); c->x[{d}] = rt_aspect_other({eow_aspect.index(a)}); }}'
                         f'  /* {a:#x}: movk w{d}, #0x3fe3, lsl #16 (16:9) */')
             for a in eow_aspect:
-                PATCHES[a] = _eow_aspect
+                if a:
+                    PATCHES[a] = _eow_aspect
             # (widescreen, runtime/hle/widescreen.c rt_screen_spot) layouts placed at a target's spot on screen (the
             # lock-on reticle L_LockOn_00 and the others below): the code works the spot out with the widened camera
             # and turns it into the 16:9 layout's units (x 960, y 540 from the centre), then stores it as the root
@@ -682,7 +686,8 @@ def main():
                         f'rt_screen_spot({eow_spot.index(a)}, c->x[{rn}], xy_); memcpy((void *)(uintptr_t)(c->x[{rn}] + 0x30), xy_, 8); }}'
                         f'  /* {a:#x}: stp s{ra}, s{rb}, [x{rn}, #0x30] (a layout at a spot on screen: widescreen) */')
             for a in eow_spot:
-                PATCHES[a] = _eow_spot
+                if a:
+                    PATCHES[a] = _eow_spot
         if args.name == 'main' and os.environ.get('GEN_TRACE_STORE_OFF'):  # (debug) every `str xT, [xN, #off]` and
             # `stp` whose either slot is at one of these offsets (comma-separated): the runtime hears of it
             # (rt_trace_store: site, base, value) - finding where an object is registered

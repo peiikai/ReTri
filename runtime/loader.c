@@ -9,7 +9,8 @@ Module g_modules[4];
 int g_nmodules;
 
 enum { DT_NULL = 0, DT_PLTRELSZ = 2, DT_HASH = 4, DT_STRTAB = 5, DT_SYMTAB = 6, DT_RELA = 7, DT_RELASZ = 8,
-       DT_JMPREL = 23, DT_INIT_ARRAY = 25, DT_FINI_ARRAY = 26, DT_INIT_ARRAYSZ = 27, DT_FINI_ARRAYSZ = 28 };
+       DT_JMPREL = 23, DT_INIT_ARRAY = 25, DT_FINI_ARRAY = 26, DT_INIT_ARRAYSZ = 27, DT_FINI_ARRAYSZ = 28,
+       DT_RELRSZ = 35, DT_RELR = 36, DT_GNU_HASH = 0x6ffffef5 };
 enum { R_ABS64 = 257, R_GLOB_DAT = 1025, R_JUMP_SLOT = 1026, R_RELATIVE = 1027 };
 
 typedef struct { uint32_t name; uint8_t info, other; uint16_t shndx; uint64_t value, size; } Elf64Sym;
@@ -50,6 +51,20 @@ static uint8_t *read_file(const char *path, size_t *len) {
     return p;
 }
 
+// The number of dynamic symbols from a GNU hash table (game 1.1.0's sdk has no DT_HASH): past the last bucket's
+// start, the chain whose entry has bit 0 set ends the table.
+static uint64_t gnu_hash_nsyms(const uint8_t *h) {
+    uint32_t nbuckets, symoffset, bloom_size;
+    memcpy(&nbuckets, h, 4), memcpy(&symoffset, h + 4, 4), memcpy(&bloom_size, h + 8, 4);
+    const uint32_t *buckets = (const uint32_t *)(h + 16 + 8ull * bloom_size), *chain = buckets + nbuckets;
+    uint32_t last = 0;
+    for (uint32_t i = 0; i < nbuckets; i++)
+        if (buckets[i] > last) last = buckets[i];
+    if (last < symoffset) return symoffset;
+    while (!(chain[last - symoffset] & 1)) last++;
+    return (uint64_t)last + 1;
+}
+
 static void load_nso(Module *m, const char *path, uint64_t base) {
     size_t len;
     uint8_t *raw = read_file(path, &len);
@@ -83,11 +98,13 @@ static void load_nso(Module *m, const char *path, uint64_t base) {
     uint32_t mod0 = *(uint32_t *)(base + 4);
     uint64_t mod = base + mod0;
     m->dynamic = mod + *(int32_t *)(mod + 4);
+    uint64_t gnu_hash = 0;
     for (uint64_t *d = (uint64_t *)m->dynamic; d[0] != DT_NULL; d += 2) {
         switch (d[0]) {
         case DT_SYMTAB: m->symtab = base + d[1]; break;
         case DT_STRTAB: m->strtab = base + d[1]; break;
         case DT_HASH: m->nsyms = *(uint32_t *)(base + d[1] + 4); break;
+        case DT_GNU_HASH: gnu_hash = base + d[1]; break;
         case 12: m->init = base + d[1]; break;  // DT_INIT
         case 13: m->fini = base + d[1]; break;  // DT_FINI
         case DT_INIT_ARRAY: m->init_array = base + d[1]; break;
@@ -96,6 +113,7 @@ static void load_nso(Module *m, const char *path, uint64_t base) {
         case DT_FINI_ARRAYSZ: m->fini_array_sz = d[1]; break;
         }
     }
+    if (!m->nsyms && gnu_hash) m->nsyms = gnu_hash_nsyms((const uint8_t *)(uintptr_t)gnu_hash);
     LOG("loaded %-5s at %llx size %llx syms %llu\n", m->name, base, size, m->nsyms);
 }
 
@@ -145,12 +163,27 @@ static uint64_t resolve(Module *m, uint32_t symidx) {
 }
 
 static void relocate(Module *m) {
-    uint64_t rela = 0, relasz = 0, jmprel = 0, pltsz = 0;
+    uint64_t rela = 0, relasz = 0, jmprel = 0, pltsz = 0, relr = 0, relrsz = 0;
     for (uint64_t *d = (uint64_t *)m->dynamic; d[0] != DT_NULL; d += 2) {
+        if (d[0] == DT_RELR) relr = m->base + d[1];
+        if (d[0] == DT_RELRSZ) relrsz = d[1];
         if (d[0] == DT_RELA) rela = m->base + d[1];
         if (d[0] == DT_RELASZ) relasz = d[1];
         if (d[0] == DT_JMPREL) jmprel = m->base + d[1];
         if (d[0] == DT_PLTRELSZ) pltsz = d[1];
+    }
+    // packed relative relocations (DT_RELR, game 1.1.0's modules): an even entry is a place, an odd one a bitmap of the
+    // 63 places after the last; each place gets the module's base added
+    uint64_t *rp = NULL;
+    for (uint64_t i = 0, *e = (uint64_t *)relr; relr && i < relrsz / 8; i++) {
+        if (!(e[i] & 1)) {
+            rp = (uint64_t *)(m->base + e[i]);
+            *rp++ += m->base;
+            continue;
+        }
+        for (int k = 0; k < 63; k++)
+            if (e[i] >> (k + 1) & 1) rp[k] += m->base;
+        rp += 63;
     }
     int unresolved = 0;
     for (int pass = 0; pass < 2; pass++) {
