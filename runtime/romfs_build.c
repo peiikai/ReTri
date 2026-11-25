@@ -343,9 +343,49 @@ bool romfs_copy_file(const char *src, const char *dst) {
     return copy_file(src, dst, (uint64_t)st.st_size, &done, (uint64_t)st.st_size, NULL);
 }
 
+bool romfs_exefs_file(const char *name) {
+    static const char *const names[] = {"main", "main.npdm", "rtld", "sdk"};
+    for (size_t i = 0; i < sizeof names / sizeof *names; i++)
+        if (!strcmp(name, names[i])) return true;
+    return !strncmp(name, "subsdk", 6) && name[6] >= '0' && name[6] <= '9' && !name[7];
+}
+
+bool romfs_copy_exefs(const char *src, const char *dst) {
+    mkdir(dst, 0755);
+    char from[2300], to[2300];
+    uint64_t done = 0;
+    for (int i = -4; i < 10; i++) {  // (by name: the folder may hold the romfs too, 6 GB not to copy)
+        static const char *const names[] = {"main", "main.npdm", "rtld", "sdk"};
+        char sub[16];
+        snprintf(sub, sizeof sub, "subsdk%d", i);
+        const char *name = i < 0 ? names[i + 4] : sub;
+        snprintf(from, sizeof from, "%s/%s", src, name), snprintf(to, sizeof to, "%s/%s", dst, name);
+        struct stat st;
+        if (stat(from, &st) != 0 || !S_ISREG(st.st_mode)) {
+            if (i == -4) return false;  // (no main)
+            continue;
+        }
+        if (!copy_file(from, to, (uint64_t)st.st_size, &done, 0, NULL)) return false;
+    }
+    return true;
+}
+
 bool romfs_copy_tree(const char *src, const char *dst, void (*progress)(uint64_t, uint64_t)) {
+    return romfs_copy_romfs(src, dst, false, progress);
+}
+
+bool romfs_copy_romfs(const char *src, const char *dst, bool skip_exefs, void (*progress)(uint64_t, uint64_t)) {
     Dir *t = scan(src, "", NULL, 0);
     if (!t) return false;
+    if (skip_exefs) {  // (the game's program files beside region_common: not the romfs's)
+        int k = 0;
+        for (int i = 0; i < t->nfiles; i++) {
+            File *f = t->files[i];
+            if (romfs_exefs_file(f->name)) free(f->name), free(f->path), free(f);
+            else t->files[k++] = f;
+        }
+        t->nfiles = k;
+    }
     Lists l = {0};
     flatten(t, &l);
     uint64_t total = 0, done = 0;
