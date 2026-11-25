@@ -97,9 +97,12 @@ def main():
     scen = {'live releases': (live, None)}
     scen[f'+ {version} (this one)'] = ([release(version)] + live, '-')
     scen['+ v0.1.0-beta.1 (a pre-release suffix: not a release)'] = ([release('v0.1.0-beta.1')] + live, '-')
-    scen['+ v0.1.1'] = ([release('v0.1.1'), release(version)] + live, 'v0.1.1')
-    scen['+ v0.2.0'] = ([release('v0.2.0'), release('v0.1.1'), release(version)] + live, 'v0.2.0')
-    scen['+ v1.0.0'] = ([release('v1.0.0'), release('v0.2.0')] + live, 'v1.0.0')
+    # (the next patch and minor after this build's own version, so the test holds after every version bump)
+    mj, mn, pt = map(int, re.match(r'v(\d+)\.(\d+)\.(\d+)', version).groups())
+    patch, minor, major = f'v{mj}.{mn}.{pt + 1}', f'v{mj}.{mn + 1}.0', f'v{mj + 1}.0.0'
+    scen[f'+ {patch}'] = ([release(patch), release(version)] + live, patch)
+    scen[f'+ {minor}'] = ([release(minor), release(patch), release(version)] + live, minor)
+    scen[f'+ {major}'] = ([release(major), release(minor)] + live, major)
     bad = 0
     for sn, (rels, want) in scen.items():
         fn = os.path.join(TMP, 'releases.json')
