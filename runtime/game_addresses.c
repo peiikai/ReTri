@@ -38,6 +38,9 @@ static const OtherAddrs eow_v1_0_1 = {
 static const OtherAddrs eow_v1_0_2 = {
 #include "game_addresses/eow_v1_0_2.h"
 };
+static const OtherAddrs eow_v1_1_0 = {
+#include "game_addresses/eow_v1_1_0.h"
+};
 #undef OTHER_ADDR
 static const GameAddrs ga_none;
 static const struct { GameVersion v; const char *release; const OtherAddrs *addrs; uint64_t sdk_base; } games[] = {
@@ -168,7 +171,7 @@ bool game_version_select(const char *game_dir, char *why, size_t why_size) {
     }
     if (!v) {
         snprintf(why, why_size, "these game files are an unsupported version of the game (main build ID "
-                 "%02X%02X%02X%02X%02X%02X%02X%02X): ReTri needs version 1.0.0, 1.0.1 or 1.0.2",
+                 "%02X%02X%02X%02X%02X%02X%02X%02X): ReTri needs version 1.0.0, 1.0.1, 1.0.2 or 1.1.0",
                  id[0], id[1], id[2], id[3], id[4], id[5], id[6], id[7]);
         return false;
     }

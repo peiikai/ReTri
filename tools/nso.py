@@ -5,6 +5,7 @@ import lz4.block
 
 DT_NULL, DT_NEEDED, DT_PLTRELSZ, DT_HASH, DT_STRTAB, DT_SYMTAB, DT_RELA, DT_RELASZ = 0, 1, 2, 4, 5, 6, 7, 8
 DT_STRSZ, DT_JMPREL, DT_RELACOUNT = 10, 23, 0x6FFFFFF9
+DT_RELRSZ, DT_RELR, DT_GNU_HASH = 35, 36, 0x6FFFFEF5
 R_AARCH64_ABS64, R_AARCH64_GLOB_DAT, R_AARCH64_JUMP_SLOT, R_AARCH64_RELATIVE = 257, 1025, 1026, 1027
 
 
@@ -58,10 +59,23 @@ class Nso:
         strtab = dyn.get(DT_STRTAB, 0)
         self.strtab = strtab
         self.needed = [self.cstr(strtab + n) for n in needed]
-        # dynsym count from DT_HASH nchain
+        # dynsym count from DT_HASH nchain (game 1.1.0's sdk has only a GNU hash table: past the last bucket's start,
+        # the chain whose entry has bit 0 set ends the table)
         self.syms = []
-        if DT_HASH in dyn and DT_SYMTAB in dyn:
-            nchain = self.u32(dyn[DT_HASH] + 4)
+        if (DT_HASH in dyn or DT_GNU_HASH in dyn) and DT_SYMTAB in dyn:
+            if DT_HASH in dyn:
+                nchain = self.u32(dyn[DT_HASH] + 4)
+            else:
+                h = dyn[DT_GNU_HASH]
+                nbuckets, symoffset, bloom_size = self.u32(h), self.u32(h + 4), self.u32(h + 8)
+                buckets = h + 16 + 8 * bloom_size
+                last = max([self.u32(buckets + 4 * i) for i in range(nbuckets)] or [0])
+                if last < symoffset:
+                    nchain = symoffset
+                else:
+                    while not self.u32(buckets + 4 * nbuckets + 4 * (last - symoffset)) & 1:
+                        last += 1
+                    nchain = last + 1
             st = dyn[DT_SYMTAB]
             for i in range(nchain):
                 o = st + i * 24
@@ -75,6 +89,22 @@ class Nso:
                 for i in range(n):
                     r_off, r_info, r_add = struct.unpack_from('<QQq', self.image, b + i * 24)
                     self.relocs.append((r_off, r_info & 0xFFFFFFFF, r_info >> 32, r_add))
+        # packed relative relocations (DT_RELR, game 1.1.0's modules): listed as RELATIVE ones, the addend being the
+        # value already at the place
+        if DT_RELR in dyn:
+            b, where = dyn[DT_RELR], 0
+            for i in range(dyn[DT_RELRSZ] // 8):
+                e = self.u64(b + i * 8)
+                if not e & 1:
+                    where = e
+                    self.relocs.append((where, R_AARCH64_RELATIVE, 0, self.u64(where)))
+                    where += 8
+                    continue
+                for k in range(63):
+                    if e >> (k + 1) & 1:
+                        o = where + k * 8
+                        self.relocs.append((o, R_AARCH64_RELATIVE, 0, self.u64(o)))
+                where += 63 * 8
 
     def cstr(self, off):
         end = self.image.index(b'\0', off)

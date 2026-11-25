@@ -74,14 +74,19 @@ static const std::pair<const char *, uint64_t> eow_v1_0_1[] = {
 static const std::pair<const char *, uint64_t> eow_v1_0_2[] = {
 #include "../game_addresses/eow_v1_0_2.h"
 };
+static const std::pair<const char *, uint64_t> eow_v1_1_0[] = {
+#include "../game_addresses/eow_v1_1_0.h"
+};
 #undef OTHER_ADDR
 
 const AddressTable &other_table(const OtherGame &g) {
-    static const AddressTable t0 = make_table(eow_v1_0_0), t1 = make_table(eow_v1_0_1), t2 = make_table(eow_v1_0_2);
+    static const AddressTable t0 = make_table(eow_v1_0_0), t1 = make_table(eow_v1_0_1), t2 = make_table(eow_v1_0_2),
+                              t3 = make_table(eow_v1_1_0);
     std::string k = std::string(g.key) + "_" + g.table;
     if (k == "eow_v1_0_0") return t0;
     if (k == "eow_v1_0_1") return t1;
     if (k == "eow_v1_0_2") return t2;
+    if (k == "eow_v1_1_0") return t3;
     throw GenError("No address table " + k);
 }
 

@@ -62,7 +62,7 @@ To bootstrap a release branch, the maintainer can allow a single push with `EOW_
 
 ## Building
 
-You need your own extracted game files of Echoes of Wisdom (version 1.0.0, 1.0.1 or 1.0.2), with `exefs/` and `romfs/` in a folder
+You need your own extracted game files of Echoes of Wisdom (version 1.0.0, 1.0.1, 1.0.2 or 1.1.0), with `exefs/` and `romfs/` in a folder
 named `extracted/` in the checkout. Then:
 
     make -j GEN=generated-eow                 # the app, build/eowrecomp
@@ -83,8 +83,8 @@ Linux: [docs/linux.md](docs/linux.md); iPhone and iPad: [docs/ios.md](docs/ios.m
 
 - `runtime/gen/`: the game code generator (C++, also built into the app). It turns `exefs/main` and `exefs/sdk` into
   C. `patches.cpp` changes or hooks game instructions while generating; EoW's are in `build_other_patches`.
-- `runtime/game_addresses/`: `games.h` lists the supported EoW builds (1.0.0, 1.0.1, 1.0.2) by the main program's
-  build ID, each with its own address table `eow_v1_0_x.h` (read through `OTHER(NAME)`). The other tables in that
+- `runtime/game_addresses/`: `games.h` lists the supported EoW builds (1.0.0, 1.0.1, 1.0.2, 1.1.0) by the main program's
+  build ID, each with its own address table `eow_v1_x_x.h` (read through `OTHER(NAME)`). The other tables in that
   folder (`versions.h`, `patches_v1_0_*.h`, `runtime_v1_0_*.h`, read through `GA(NAME)`) are LA's, from LAS Recomp.
 - `runtime/`: the host.
   - `kernel.c`, `loader.c`, `services/`: the Switch OS stand-in (threads, memory, files and saves, input, audio).
