@@ -560,11 +560,22 @@ bool plat_module_name(uint64_t pc, char *out, size_t n) {
 
 // RtlGetVersion (ntdll): the real version - GetVersionEx answers with the manifest's idea of it
 typedef LONG(WINAPI *RtlGetVersionFn)(OSVERSIONINFOW *);
-void plat_system_info(PlatSysInfo *si) {
-    OSVERSIONINFOW v = {.dwOSVersionInfoSize = sizeof v};
+static void real_version(OSVERSIONINFOW *v) {
+    *v = (OSVERSIONINFOW){.dwOSVersionInfoSize = sizeof *v};
     HMODULE ntdll = GetModuleHandleA("ntdll.dll");
     RtlGetVersionFn rtl = ntdll ? (RtlGetVersionFn)(void *)GetProcAddress(ntdll, "RtlGetVersion") : NULL;
-    if (!rtl || rtl(&v) != 0) v.dwMajorVersion = 0;
+    if (!rtl || rtl(v) != 0) v->dwMajorVersion = v->dwBuildNumber = 0;
+}
+
+unsigned plat_windows_build(void) {
+    OSVERSIONINFOW v;
+    real_version(&v);
+    return (unsigned)v.dwBuildNumber;
+}
+
+void plat_system_info(PlatSysInfo *si) {
+    OSVERSIONINFOW v;
+    real_version(&v);
     SYSTEM_INFO sys;
     GetNativeSystemInfo(&sys);
     const char *arch = sys.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64 ? "x64"
