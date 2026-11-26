@@ -86,6 +86,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   screen's Randomizer row is hidden until EoW has a randomizer of its own.
 
 ### Fixed
+- Game version 1.1.0: sound is read right, and the game no longer crashes after a while with a signal 11 in
+  the audio thread. Its newer audio format has longer voice records, which were read at the old size.
 - Setup no longer refuses supported game files whose main and main.npdm are in the romfs folder or another folder
   not named exefs (#92). It said "Wrong version of the game" with a supported build ID. The program files are now
   copied on their own and kept out of the romfs copy.
