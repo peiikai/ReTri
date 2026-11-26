@@ -3092,6 +3092,9 @@ extern "C" void launcher_run(const char *root) {
             float touch_px = g_touch.frame(io.DeltaTime, [&](float x, float y) { io.AddMousePosEvent(x, y); },
                                            [&](bool down) { io.AddMouseButtonEvent(0, down); });
             ui_nav_repeat(io, ui_text_busy());
+            // B / Esc on the start screen has nothing to go back to: ImGui's cancel at a root window would clear the
+            // nav item, and no row would be selected until the next d-pad press. Other pages keep ImGui's default.
+            io.ConfigNavEscapeClearFocusItem = page != MAIN;
             ImGui::NewFrame();
             g_touch.scroll_apply(touch_px);
             const Page frame_page = page;  // (menu_sfx_frame: B on the main page does nothing)
