@@ -16,7 +16,6 @@ static uint64_t g_pc;      // a crash's host pc (0: a FATAL)
 int rt_romfs_files = -1;   // the game's own RomFS files (runtime/services/fs.c; -1: not read yet)
 uint64_t rt_romfs_bytes;   // their sizes summed (issue #391: one damaged file, every file there)
 int rt_romfs_missing;      // the game's files not found by name and size (#391: a renamed file keeps count and bytes)
-enum { ROMFS_FILES = 3836 };  // (every supported version: runtime/ui/launcher.mm counts the same)
 
 void rt_fatal_msg(const char *fmt, ...) {
     char b[512];
@@ -73,11 +72,12 @@ void rt_crash_explain(char *out, size_t n, const char *log_path) {
     static const char *const report = "Please report it as a GitHub issue and attach the log file below. "
                                       "Your progress up to your last save or autosave is safe.";
     char head[160], what[400];
-    if (rt_romfs_files >= 0 && rt_romfs_files < ROMFS_FILES) {
+    const int want_files = game_romfs_files(game_version());  // (runtime/ui/launcher.mm counts the same)
+    if (rt_romfs_files >= 0 && rt_romfs_files < want_files) {
         snprintf(head, sizeof head, "Your game files are incomplete");
         snprintf(what, sizeof what, "ReTri found %d of the game's %d files, and the game stopped when it needed "
                  "one that's missing. Copy your game files again so none are missing, then set them up again on the "
-                 "start screen (System).", rt_romfs_files, (int)ROMFS_FILES);
+                 "start screen (System).", rt_romfs_files, want_files);
     } else if (has("doesn't fit its language")) {
         snprintf(head, sizeof head, "Your game files' text has been changed");
         snprintf(what, sizeof what, "The game's text for this language comes from another language (a translation "
@@ -95,7 +95,7 @@ void rt_crash_explain(char *out, size_t n, const char *log_path) {
         snprintf(head, sizeof head, "No font for the game's text");
         snprintf(what, sizeof what, "Import the Switch fonts in Settings (Game font), or reinstall ReTri - it "
                  "comes with a font of its own.");
-    } else if (rt_romfs_files >= ROMFS_FILES &&
+    } else if (rt_romfs_files >= want_files &&
                (rt_romfs_missing > 0 ||
                 (game_romfs_bytes(game_version()) && rt_romfs_bytes != game_romfs_bytes(game_version())))) {
         snprintf(head, sizeof head, "Your game files are damaged or changed");

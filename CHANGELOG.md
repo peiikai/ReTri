@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+- Setup now refuses an incomplete romfs and says so, instead of the game crashing as it starts (#104). It counted
+  the files against the wrong total, so a romfs with less than half of the game's files got through. The romfs
+  must be the full game's, extracted with the update applied for 1.0.1 and later.
+
 ## [0.1.1] - 2026-11-25
 
 ### Added
