@@ -419,8 +419,8 @@
 // runtime/ui/launcher.mm
 {"Game files incomplete, %d of %d files", "Файлы игры неполные: %d из %d"},
 {"The romfs folder only has %d of the game's %d files, usually from a copy or unzip that stopped partway. Copy them again and choose the folder again.", "В папке romfs только %d из %d файлов игры. Обычно так бывает, если копирование или распаковка прервались. Скопируйте их заново и снова выберите папку."},
-{"ReTri needs version 1.0.0, 1.0.1 or 1.1.0 of the game.", "ReTri нужна версия игры 1.0.0, 1.0.1 или 1.1.0."},
-{"ReTri needs version 1.0.0, 1.0.1 or 1.1.0 of the game. These game files have build ID %s.", "ReTri нужна версия игры 1.0.0, 1.0.1 или 1.1.0. У этих файлов игры build ID %s."},
+{"ReTri needs version 1.0.0, 1.0.1, 1.0.2 or 1.1.0 of the game.", "ReTri нужна версия игры 1.0.0, 1.0.1, 1.0.2 или 1.1.0."},
+{"ReTri needs version 1.0.0, 1.0.1, 1.0.2 or 1.1.0 of the game. These game files have build ID %s.", "ReTri нужна версия игры 1.0.0, 1.0.1, 1.0.2 или 1.1.0. У этих файлов игры build ID %s."},
 {"No game files yet", "Файлов игры пока нет"},
 {"Wrong version of the game", "Не та версия игры"},
 {"Game files damaged or changed", "Файлы игры повреждены или изменены"},

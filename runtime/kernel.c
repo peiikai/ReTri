@@ -864,6 +864,7 @@ static void svc_impl(Cpu *c, uint32_t imm, uint64_t pc) {
         case 16: case 17: v = 0; break;
         case 18: v = 0x01006BB00C6F0000ull; break;
         case 20: v = 0; break;
+        case 28: v = 0; break;  // the alias region's extra size (newer system versions; game 1.1.0's sdk asks)
         default: r = R_INVALID_ENUM; LOG("[kernel] GetInfo unknown id %u/%llu\n", id0, x[3]);
         }
         x[0] = r;

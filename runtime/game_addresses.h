@@ -56,6 +56,8 @@ const GameVersion *game_version_of_main(const char *main_path);
 const GameVersion *game_version_of(const char *game_dir);
 // Another game on the same engine (game_addresses/games.h) in game_dir, or NULL (LA, missing or unknown).
 const GameVersion *game_other_of(const char *game_dir);
+// The same for a main program file wherever it is (a found exefs folder needn't be named exefs: issue #92).
+const GameVersion *game_other_of_main(const char *main_path);
 // Where that game's sdk module is loaded (SDK_BASE for NULL): the generator needs it before the game is selected.
 uint64_t game_other_sdk_base_of(const GameVersion *v);
 // That game build's release ("1.0.2"), or NULL for LA's versions.
