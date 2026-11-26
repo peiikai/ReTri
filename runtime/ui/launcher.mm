@@ -272,15 +272,24 @@ static bool file_exists(const std::string &p) {
     return stat(p.c_str(), &st) == 0;
 }
 
-// The game's RomFS (the same in every supported version) has exactly ROMFS_FILES files: a copy with fewer is incomplete (a copy or unzip that
-// stopped partway) and the game crashes on the first one it misses (issues #24, #35). Only the number ships.
+// The game's RomFS has game_romfs_files() files (per version): a copy with fewer is incomplete (a copy that stopped
+// partway, or an update's files alone) and the game crashes on the first one it misses (issues #24, #35, #104). Only
+// the numbers ship.
 // Their sizes add up to game_romfs_bytes() (per version): every file there with another total is a damaged or
 // changed file (issue #391). The game still plays then; the start screen says so. Files that aren't the game's are
 // counted but their bytes left out (issue #553: an extra file beside the game's isn't a changed one).
 // With check (base: where the path inside romfs starts), the files that aren't the game's are named in the log, the
 // first ROMFS_ODD_LOGGED of them (check->odd counts them all), and copies of the game code at the romfs root
 // (game_romfs_exefs_copy, game: the game folder) are left out of the count and the bytes (check->copies).
-enum { ROMFS_FILES = 3836, ROMFS_ODD_LOGGED = 20 };
+enum { ROMFS_ODD_LOGGED = 20 };
+// The file count of the game files' version, by their exefs folder's main (LA's for an unknown one: the version check
+// refuses those first). Set before each count; the messages below show it.
+static std::atomic<int> g_want_files{3836};
+static int want_files(const std::string &exefs) {
+    const GameVersion *v = game_version_of_main((exefs + "/main").c_str());
+    if (!v) v = game_other_of_main((exefs + "/main").c_str());
+    return g_want_files = game_romfs_files(v);
+}
 struct RomfsCheckWalk { GameRomfsCheck *check; size_t base; int odd; const char *game; int copies; };
 static int count_files(const std::string &dir, int depth = 0, uint64_t *bytes = NULL, RomfsCheckWalk *check = NULL) {
     DIR *d = depth < 12 ? opendir(dir.c_str()) : NULL;
@@ -330,11 +339,15 @@ static bool has_build_cache(void) { read_build_cache(); return g_has_build_cache
 
 // (kept English, as the lines below: shown() puts them in the menus' language)
 static const char *const INCOMPLETE_FMT = LN("Game files incomplete, %d of %d files");
-static const char *const MISSING_FMT = LN("The romfs folder only has %d of the game's %d files, usually from a copy or "
-                                          "unzip that stopped partway. Copy them again and choose the folder again.");
+static const char *const MISSING_FMT = LN("The romfs folder only has %d of the game's %d files, so it's incomplete. It "
+                                          "must be the full game's romfs, extracted with the update applied for 1.0.1 "
+                                          "and later. Extract it again and choose the folder again.");
+static const char *const INCOMPLETE_HINT = LN("Some of the game's files are missing. The romfs must be the full game's, "
+                                              "extracted with the update applied for 1.0.1 and later. Extract it again, "
+                                              "then choose that folder and set it up again.");
 static std::string incomplete(int have) {
     char b[96];
-    snprintf(b, sizeof b, INCOMPLETE_FMT, have, (int)ROMFS_FILES);
+    snprintf(b, sizeof b, INCOMPLETE_FMT, have, g_want_files.load());
     return b;
 }
 // A status / setup line kept in English (LN) -> the menus' language, the numbers of the two above put in again
@@ -398,8 +411,10 @@ static std::string check_copied_files(const std::string &root) {
         refused_main(root + "/exefs");  // (the log line)
         return LN("Wrong version of the game");
     }
-    if (!file_exists(root + "/romfs/region_common")) return incomplete(0);
+    static int want;  // (read with the count: once, not every frame)
+    if (!file_exists(root + "/romfs/region_common")) return want_files(root + "/exefs"), incomplete(0);
     if (g_romfs_count < 0) {
+        want = want_files(root + "/exefs");
         g_romfs_bytes = 0;
         const GameVersion *v = game_version_of(root.c_str());  // (another game: NULL, no file list or totals)
         RomfsCheckWalk check = {game_romfs_check_begin(v), root.size() + strlen("/romfs/"), 0, root.c_str(), 0};
@@ -413,11 +428,13 @@ static std::string check_copied_files(const std::string &root) {
             fprintf(stderr, "[launcher] romfs: %d more files that aren't the game's\n", check.odd - ROMFS_ODD_LOGGED);
         if (missing) fprintf(stderr, "[launcher] romfs: %d of the game's files missing or changed\n", missing);
         g_romfs_want = game_romfs_bytes(v);
-        if (g_romfs_count >= ROMFS_FILES && g_romfs_want && g_romfs_bytes != g_romfs_want)
+        if (g_romfs_count < want)
+            fprintf(stderr, "[launcher] romfs: %d of the game's %d files: incomplete game files\n", g_romfs_count, want);
+        if (g_romfs_count >= want && g_romfs_want && g_romfs_bytes != g_romfs_want)
             fprintf(stderr, "[launcher] romfs: %llu bytes in %d files, this version's are %llu: damaged or changed "
                     "game files\n", (unsigned long long)g_romfs_bytes, g_romfs_count, (unsigned long long)g_romfs_want);
     }
-    if (g_romfs_count < ROMFS_FILES) return incomplete(g_romfs_count);
+    if (g_romfs_count < want) return incomplete(g_romfs_count);
     return "";
 }
 
@@ -469,8 +486,7 @@ static std::string check_game_files(const std::string &root) {
 // What to do about a check_game_files() problem (the line under it on the start screen), in the menus' language
 static const char *status_hint(const std::string &why) {
     if (why.rfind("Game files incomplete", 0) == 0)
-        return L("Some of the game's files are missing, usually from a copy or unzip that stopped partway. Copy your game "
-                 "files again, then choose that folder and set them up again.");
+        return L(INCOMPLETE_HINT);
     if (why == "Wrong version of the game") {
         static std::string h;
         h = shown(version_hint(g_root + "/exefs"));
@@ -524,13 +540,12 @@ static void set_failure(int k, int have = -1, const char *reason = NULL) {
         LN("ReTri needs the extracted exefs and romfs folders, not .xci, .nsp or .nca files."),
         LN("Make sure there's about 12 GB free and try again."),
         VERSION_HINT,
-        LN("Some of the game's files are missing, usually from a copy or unzip that stopped partway. Copy them again "
-           "and choose the folder again."),
+        INCOMPLETE_HINT,
         LN("Make sure there's about 2 GB free and try again. If it keeps happening, report it on GitHub.")};
     if (k < 1 || k > 6) return;
     if (k == FAIL_MISSING && have >= 0) {
         char b[320];
-        snprintf(b, sizeof b, MISSING_FMT, have, (int)ROMFS_FILES);
+        snprintf(b, sizeof b, MISSING_FMT, have, g_want_files.load());
         set_job(head[k], true, b);
         return;
     }
@@ -668,7 +683,7 @@ static void *extract_thread(void *) {
         int r = android_import_game(src.c_str(), g_root.c_str(), import_progress, build_cancelled);
         if (r) { set_failure(r == 1 ? FAIL_NOT_FOUND : r == 2 ? FAIL_UNUSABLE : FAIL_COPY); goto done; }
         if (!build_id_ok(g_root + "/exefs")) { set_version_failure(g_root + "/exefs"); goto done; }
-        if (int have = count_files(g_root + "/romfs"); have < ROMFS_FILES) { set_failure(FAIL_MISSING, have); goto done; }
+        if (int have = count_files(g_root + "/romfs"); have < want_files(g_root + "/exefs")) { set_failure(FAIL_MISSING, have); goto done; }
         g_phase_base = g_total, g_done = (unsigned long long)g_total;
         pthread_mutex_lock(&g_lock);
         g_src.clear();
@@ -691,8 +706,8 @@ static void *extract_thread(void *) {
         }
     }
 #endif
-    if (int have = count_files(romfs); have < ROMFS_FILES) {  // (an incomplete copy: refused before copying it)
-        fprintf(stderr, "[launcher] %s: %d of %d romfs files\n", romfs.c_str(), have, (int)ROMFS_FILES);
+    if (int have = count_files(romfs), want = want_files(exefs); have < want) {  // (an incomplete copy: refused before copying it)
+        fprintf(stderr, "[launcher] %s: %d of %d romfs files\n", romfs.c_str(), have, want);
         set_failure(FAIL_MISSING, have);
         goto done;
     }

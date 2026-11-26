@@ -209,6 +209,17 @@ uint64_t game_romfs_bytes(const GameVersion *v) {
     return 0;
 }
 
+int game_romfs_files(const GameVersion *v) {
+    // EoW's (issue #104: 4362 files passed LA's 3836, and the game crashed on the first missing one). 1.0.1 adds a
+    // file and 1.1.0 another: each release counts its own.
+    static const struct { const char *release; int files; } eow[] = {
+        {"1.0.0", 10963}, {"1.0.1", 10964}, {"1.0.2", 10964}, {"1.1.0", 10965}};
+    const char *r = game_other_release_of(v);
+    for (size_t i = 0; r && i < sizeof eow / sizeof *eow; i++)
+        if (!strcmp(r, eow[i].release)) return eow[i].files;
+    return 3836;  // (LA: every version)
+}
+
 static const struct { uint64_t hash; uint8_t versions; } romfs_files[] = {
 #include "game_addresses/romfs_files.h"
 };
