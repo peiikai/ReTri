@@ -381,7 +381,10 @@ bool Gen::jump_table_fallthrough(uint64_t br_pc, uint64_t entry, uint64_t end, s
     uint64_t start = cmp;
     while (start >= entry + 4 && cmp - (start - 4) <= 4 * 12 && lift_kind_in(start - 4, {Kind::op, Kind::asm_}))
         start -= 4;
-    std::vector<int> idx_regs = index_regs(start, cmp, idx);
+    // (through the br: EoW's echo summon code, main+0x4367ac on 1.0.2, does `cmp w8, #12; b.hi; and x8, x0, #0xff` and
+    // indexes with that x8, so x0 must hold the index too - with only w8 set, every value read the same case, the
+    // others looked unreached and the orphan pass split the function there: issues #87, #89)
+    std::vector<int> idx_regs = index_regs(start, br_pc, idx);
     Emu &mu = emu();
     std::vector<uint64_t> targets;
     for (int i = 0; i < count; i++) {

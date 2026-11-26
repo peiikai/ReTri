@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-25
+
+### Added
+- Game version 1.1.0 works too, besides 1.0.0, 1.0.1 and 1.0.2.
+- Shader list: 119 more variants from player logs and play tests (fewer stutters).
+
+### Fixed
+- Game version 1.1.0: sound is read right, and the game no longer crashes after a while with a signal 11 in
+  the audio thread. Its newer audio format has longer voice records, which were read at the old size.
+- Setup no longer refuses supported game files whose main and main.npdm are in the romfs folder or another folder
+  not named exefs (#92). It said "Wrong version of the game" with a supported build ID. The program files are now
+  copied on their own and kept out of the romfs copy.
+- Summoning an echo no longer crashes the game with "no function at ..." (#87, #89). The game code build
+  cut one of the game's functions in two. The start screen rebuilds the game code once after the update.
+- RecompLauncher: on Windows, `eowrecomp.log` is now written next to the exe when the launcher starts the game, and on
+  Windows and Linux the launcher's own game output gets the same lines.
+- Windows 10: the game no longer crashes as it starts (#81). The game can't use Windows 10's Yu Gothic font, so
+  there the game text uses BIZ UDPGothic, now shipped in the Windows zip, until you import the Switch fonts.
+- Any font the game can't fully use no longer crashes it: characters it lacks are left out instead.
+
+## [0.1.0] - 2026-11-23
+
 ### Added
 - Updates from the start screen, as in LAS Recomp: when a newer release is out, its link opens what's new, with
   Download. Windows, Linux (AppImage) and macOS can update in place, checked against a signed update file; this

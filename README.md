@@ -81,7 +81,7 @@ These are the minimums during the beta and may change as development continues.
 
 > [!NOTE]
 > **No game files are included.** ReTri needs your own legally obtained copy of the extracted game files of
-> *Echoes of Wisdom* **v1.0.0, v1.0.1 or v1.0.2**. When setting up, choose a folder that contains the `exefs`
+> *Echoes of Wisdom* **v1.0.0, v1.0.1, v1.0.2 or v1.1.0**. When setting up, choose a folder that contains the `exefs`
 > and `romfs` folders, or their contents. Instructions on how to obtain these files will **NOT** be provided.
 > On first launch the app sets up what it needs, including the actual recompilation locally. No game files, assets or fonts are included.
 > The screenshot shows the start screen after setup; no Nintendo artwork is included until provided by the user.
@@ -154,7 +154,7 @@ GetMoreRam. More on the iOS app is there too.
 ## Features
 
 - **This is not emulation.** It runs natively on Windows, macOS, Linux, Android, iPhone and iPad.
-- Works with game versions 1.0.0, 1.0.1 and 1.0.2.
+- Works with game versions 1.0.0, 1.0.1, 1.0.2 and 1.1.0.
 - Wider screens show more of the world, up to ultrawide: the camera, the echo list and the pause screen fill the
   window. You can switch back to the original 16:9.
 - Higher resolutions, a "match your display" option and dynamic resolution with an FPS target, with MetalFX (Mac)
@@ -171,7 +171,7 @@ GetMoreRam. More on the iOS app is there too.
 
 > [!IMPORTANT]
 > **You must bring your own extracted game files.** They come as two folders, `exefs` and `romfs`. ReTri works with
-> versions 1.0.0, 1.0.1 and 1.0.2.
+> versions 1.0.0, 1.0.1, 1.0.2 and 1.1.0.
 
 1. Download the release for your platform from the [releases](https://github.com/peiikai/ReTri/releases) page and
    open ReTri. On iPhone and iPad, follow [iPhone and iPad](#iphone-and-ipad) instead.
@@ -217,7 +217,7 @@ These are under Video and General in ReTri's menu.
 
 ## Building from source
 
-Every platform needs your own game files (v1.0.0, v1.0.1 or v1.0.2): build first, then use the start screen's game-file setup.
+Every platform needs your own game files (v1.0.0, v1.0.1, v1.0.2 or v1.1.0): build first, then use the start screen's game-file setup.
 `make gen GEN=generated-eow` then recompiles the game code from your own game files into `generated-eow/`
 (the generator, `build/lasgen`, is built first), and `make` builds it into its own library next to the app (`build/eowgame.*`); without it the start
 screen builds that library itself, as it does for players. Release builds hold none of the game's code: the start
@@ -273,7 +273,7 @@ Where files live (game files, saves, settings and logs):
 - iPhone and iPad: the app's folder in Files (On My iPhone / On My iPad > ReTri).
 - You can move it to another folder or drive in Settings > System > Data folder.
 - `--data-dir <dir>` (or `LARECOMP_DATA_ROOT=<dir>`) overrides all of these.
-- For a bug report, attach `eowrecomp.log` from that folder.
+- For a bug report, attach `eowrecomp.log` from that folder. On Windows it stays next to `eowrecomp.exe`, even if you move the data folder. Started from RecompLauncher, the launcher also keeps a copy in `%APPDATA%\com.recomplauncher.app\game-output\` (or Settings > About > Troubleshoot > Export Logs).
 
 ### Android
 
@@ -310,7 +310,7 @@ Thanks also to everyone who reports issues and tests builds. Your logs and scree
 - [Dear ImGui](https://github.com/ocornut/imgui) - overlay menu and start screen (MIT)
 - [Hylia Serif](https://artsyomni.com/hyliaserif) by Omni Jacala - the start screen's title and this page's header (free, not for profit; `third_party/fonts/HyliaSerif/README.md`)
 - [Baloo 2](https://github.com/EkType/Baloo2) by Ek Type - the start screen's font (SIL Open Font License 1.1, `third_party/fonts/Baloo2/OFL.txt`)
-- [BIZ UDPGothic](https://github.com/googlefonts/morisawa-biz-ud-gothic) by Morisawa - the game's text on Linux when you haven't imported the Switch fonts: a free font from the same universal-design gothic family as the Switch's UD Shin Go (SIL Open Font License 1.1, `third_party/fonts/BIZUDPGothic/OFL.txt`)
+- [BIZ UDPGothic](https://github.com/googlefonts/morisawa-biz-ud-gothic) by Morisawa - the game's text on Linux and Windows 10 when you haven't imported the Switch fonts: a free font from the same universal-design gothic family as the Switch's UD Shin Go (SIL Open Font License 1.1, `third_party/fonts/BIZUDPGothic/OFL.txt`)
 - [DejaVu Sans](https://dejavu-fonts.github.io) - the in-game menu and button letters when no system font fits, and the game text's last resort (Bitstream Vera / DejaVu license, `third_party/fonts/DejaVu/LICENSE`)
 - [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) - Windows and Linux renderer (MIT)
 - [Monocypher](https://monocypher.org) by Loup Vaillant and contributors - checks the signature of updates on Windows and
@@ -378,7 +378,7 @@ Release builds include these components; their source code for the exact version
 | winpthreads (Windows, mingw-w64) | 14.0.0 | MIT / BSD | https://www.mingw-w64.org/ |
 | Hylia Serif font (Beta) | 0.009 | Free, not for profit (no license file) | https://artsyomni.com/hyliaserif |
 | Baloo 2 font (SemiBold) | 1.640 | SIL OFL 1.1 | https://github.com/EkType/Baloo2 |
-| BIZ UDPGothic font (Regular, Linux) | 1.05 (Google Fonts) | SIL OFL 1.1 | https://github.com/googlefonts/morisawa-biz-ud-gothic, https://github.com/google/fonts/tree/main/ofl/bizudpgothic |
+| BIZ UDPGothic font (Regular, Linux and Windows) | 1.05 (Google Fonts) | SIL OFL 1.1 | https://github.com/googlefonts/morisawa-biz-ud-gothic, https://github.com/google/fonts/tree/main/ofl/bizudpgothic |
 | DejaVu Sans font (Book, Bold) | 2.37 | Bitstream Vera license (DejaVu changes public domain) | https://github.com/dejavu-fonts/dejavu-fonts/releases/tag/version_2_37 |
 | SMAA (shader and lookup textures, built in) | 2013 (repository master) | MIT | https://github.com/iryoku/smaa |
 

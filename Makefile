@@ -452,6 +452,8 @@ dist:
 	cp third_party/fonts/Baloo2/OFL.txt "$(DIST)/Baloo2-OFL.txt"
 	cp third_party/fonts/HyliaSerif/HyliaSerifBeta-Regular.otf "$(DIST)/"  # (start screen title)
 	cp third_party/fonts/HyliaSerif/README.md "$(DIST)/HyliaSerif-README.md"
+	cp third_party/fonts/BIZUDPGothic/BIZUDPGothic-Regular.ttf "$(DIST)/"  # (game text font on Windows 10, OFL: runtime/hle/pl.c)
+	cp third_party/fonts/BIZUDPGothic/OFL.txt "$(DIST)/BIZUDPGothic-OFL.txt"
 	cp third_party/fonts/DejaVu/DejaVuSans.ttf third_party/fonts/DejaVu/DejaVuSans-Bold.ttf "$(DIST)/"  # (last-resort fonts, free license)
 	cp third_party/fonts/DejaVu/LICENSE "$(DIST)/DejaVu-LICENSE.txt"
 	cp README.md LICENSE "$(DIST)/"  # (licenses and source links of the bundled components: README "License")

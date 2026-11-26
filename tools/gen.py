@@ -242,7 +242,10 @@ class Module:
         start = cmp
         while start - 4 >= entry and cmp - (start - 4) <= 4 * 12 and self.lift(start - 4).kind in ('op', 'asm'):
             start -= 4
-        idx_regs = self._index_regs(start, cmp, idx)
+        # (through the br: EoW's echo summon code, main+0x4367ac on 1.0.2, does `cmp w8, #12; b.hi; and x8, x0, #0xff`
+        # and indexes with that x8, so x0 must hold the index too - with only w8 set, every value read the same case,
+        # the others looked unreached and the orphan pass split the function there: issues #87, #89)
+        idx_regs = self._index_regs(start, br_pc, idx)
         mu = self.emu()
         targets = []
 
@@ -603,12 +606,14 @@ def main():
             # up to 1.9x the window's pixels (6982x1964 for 5120x1440), new targets at each step, and frames over
             # 16.7 ms once our own window step (SMAA, upscale) came on top. Read as 0: it stays at 1408x792.
             # LARECOMP_GAME_DYNRES=1 (test): the game's own again.
+            # (1.0.x: `ldrb w8, [x26, #0x480]`; 1.1.0's object is smaller: `ldrb w8, [x25, #0x360]`)
             def _eow_dynres(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
-                assert w == 0x39520348, hex(w)  # ldrb w8, [x26, #0x480]
+                assert (w & 0xFFC00000) == 0x39400000, hex(w)  # ldrb wT, [xN, #off]
+                rt, rn, off = w & 31, (w >> 5) & 31, (w >> 10) & 0xFFF
                 return ('{ extern int rt_game_dynres(void); '
-                        'c->x[8] = rt_game_dynres() ? LD8(c->x[26] + 0x480) : 0; }'
-                        f'  /* {a:#x}: ldrb w8, [x26, #0x480] (the game\'s dynamic resolution: off) */')
+                        f'c->x[{rt}] = rt_game_dynres() ? LD8(c->x[{rn}] + {off:#x}) : 0; }}'
+                        f'  /* {a:#x}: ldrb w{rt}, [x{rn}, #{off:#x}] (the game\'s dynamic resolution: off) */')
             PATCHES[T['DYNRES_SITE']] = _eow_dynres
             # (frame pacing, runtime/nvn/pace.c rt_other_fps_limit) the frame controller's own 30 / 60 fps switch, off:
             # the frame time it calls slow, 1/60 s (`movk wD, #0x3c88, lsl #16` after `mov wD, #0x8889`) - in its 30 fps
@@ -624,8 +629,39 @@ def main():
                         f'  /* {a:#x}: movk w{d}, #0x3c88, lsl #16 (1/60 s: a slow frame) */')
             for a in (T['FPS_LIMIT_30_SITE'], T['FPS_LIMIT_60_SITE'], T['FPS_LIMIT_FLAG_SITE']):
                 PATCHES[a] = _eow_fps_limit
+            # (font, as LA's FONT_BOX_GLYPH_SITE, LAS #45) setting up a font (1.0.2: main+0x8ac1c), the game looks up
+            # the glyph of "□" (U+25A1, its box for a missing character) and marks it (`ldrb w8, [x0, #0x38]` after the
+            # lookup) without checking for none; its second lookup in the same function does check. A font the game
+            # finds no such glyph in (issue #81: Windows 10's Yu Gothic, although its cmap lists it; or one set with
+            # LARECOMP_FONT) crashed reading 0x38. No glyph now skips to the function's end, where the second lookup's
+            # check goes.
+            def _eow_font_box_glyph(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w == 0x3940e008, hex(w)  # ldrb w8, [x0, #0x38]
+                return (f"if (c->x[0] == 0) goto L_{T['FONT_BOX_GLYPH_SKIP']:x}; c->x[8] = LD8(c->x[0] + 0x38);"
+                        f'  /* {a:#x}: ldrb w8, [x0, #0x38] (font box glyph: none skips the marking) */')
+            PATCHES[T['FONT_BOX_GLYPH_SITE']] = _eow_font_box_glyph
+            # (font, as LA's FONT_FALLBACK_SITES, LAS #452) a character the font has no glyph for is measured and drawn
+            # as that same "□" (the font's [+0x34]): its width (1.0.2: main+0x8adac), its widths (main+0x8ae5c) and its
+            # glyph (main+0x8af2c) read the box's glyph without checking for none. With a font whose "□" the game
+            # can't use, the first missing character crashed there. No box glyph now reads as an empty one (no width,
+            # nothing drawn).
+            _font_fallback_ops = {0x79409800: ('ldrh w0, [x0, #0x4c]', 'c->x[0] = LD16(c->x[0] + 0x4c);'),
+                                  0x39413809: ('ldrb w9, [x0, #0x4e]', 'c->x[9] = LD8(c->x[0] + 0x4e);'),
+                                  0x79409816: ('ldrh w22, [x0, #0x4c]', 'c->x[22] = LD16(c->x[0] + 0x4c);'),
+                                  0x79409c08: ('ldrh w8, [x0, #0x4e]', 'c->x[8] = LD16(c->x[0] + 0x4e);')}
+            def _eow_font_fallback(gen, a):
+                w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
+                assert w in _font_fallback_ops, hex(w)
+                asm, op = _font_fallback_ops[w]
+                return ('{ static uint8_t empty_glyph_[0x60] __attribute__((aligned(16))); '
+                        'if (c->x[0] == 0) c->x[0] = (uint64_t)(uintptr_t)empty_glyph_; } ' + op +
+                        f'  /* {a:#x}: {asm} (font fallback glyph: none reads as an empty one) */')
+            for n in ('FONT_FALLBACK_SITE_0', 'FONT_FALLBACK_SITE_1', 'FONT_FALLBACK_SITE_2', 'FONT_FALLBACK_SITE_3'):
+                PATCHES[T[n]] = _eow_font_fallback
             # (widescreen, runtime/hle/widescreen.c rt_aspect_other) the code builds 16:9 (0x3fe38e39) as
             # `movz wD, #0x8e39; movk wD, #0x3fe3, lsl #16`: the movk gets the runtime's aspect instead
+            # (0x0: not in this build; the others keep their number)
             eow_aspect = [v for k, v in sorted(T.items()) if k.startswith('ASPECT_SITE_')]
             def _eow_aspect(gen, a):
                 w = struct.unpack_from('<I', gen.nso.image, a - gen.base)[0]
@@ -634,7 +670,8 @@ def main():
                 return (f'{{ extern uint32_t rt_aspect_other(int); c->x[{d}] = rt_aspect_other({eow_aspect.index(a)}); }}'
                         f'  /* {a:#x}: movk w{d}, #0x3fe3, lsl #16 (16:9) */')
             for a in eow_aspect:
-                PATCHES[a] = _eow_aspect
+                if a:
+                    PATCHES[a] = _eow_aspect
             # (widescreen, runtime/hle/widescreen.c rt_screen_spot) layouts placed at a target's spot on screen (the
             # lock-on reticle L_LockOn_00 and the others below): the code works the spot out with the widened camera
             # and turns it into the 16:9 layout's units (x 960, y 540 from the centre), then stores it as the root
@@ -649,7 +686,8 @@ def main():
                         f'rt_screen_spot({eow_spot.index(a)}, c->x[{rn}], xy_); memcpy((void *)(uintptr_t)(c->x[{rn}] + 0x30), xy_, 8); }}'
                         f'  /* {a:#x}: stp s{ra}, s{rb}, [x{rn}, #0x30] (a layout at a spot on screen: widescreen) */')
             for a in eow_spot:
-                PATCHES[a] = _eow_spot
+                if a:
+                    PATCHES[a] = _eow_spot
         if args.name == 'main' and os.environ.get('GEN_TRACE_STORE_OFF'):  # (debug) every `str xT, [xN, #off]` and
             # `stp` whose either slot is at one of these offsets (comma-separated): the runtime hears of it
             # (rt_trace_store: site, base, value) - finding where an object is registered

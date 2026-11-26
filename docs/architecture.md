@@ -6,8 +6,8 @@ fit together. File names are on the current development branch.
 ## From the game files to a running game
 
 1. **Game files.** The player picks a folder with their own extracted game files (`exefs/` and `romfs/`). The start
-   screen (`runtime/ui/launcher.mm`) checks the game version by the main program's build ID (Echoes of Wisdom 1.0.0, 1.0.1
-   and 1.0.2, `runtime/game_addresses/games.h`) and keeps the files in the data folder. Nothing from the game ships with the app.
+   screen (`runtime/ui/launcher.mm`) checks the game version by the main program's build ID (Echoes of Wisdom 1.0.0, 1.0.1,
+   1.0.2 and 1.1.0, `runtime/game_addresses/games.h`) and keeps the files in the data folder. Nothing from the game ships with the app.
 2. **Recompiling.** The generator (`runtime/gen/`, in the app; `make lasgen` builds it as a command-line tool) turns
    the AArch64 code of
    `exefs/main` and `exefs/sdk` into C, one C function per game function. Indirect calls go through a lookup table
@@ -35,8 +35,8 @@ fit together. File names are on the current development branch.
 - **HLE** (`runtime/hle/`): replacements for SDK functions (libc, heaps, input, movies) plus the game features that
   hook into the game's code. EoW's are named `*_other` (`warp_other.c`, `rt_aspect_other` for wide windows,
   `rt_other_fps_limit` in `runtime/nvn/pace.c`).
-- **Addresses**: Echoes of Wisdom's builds (1.0.0, 1.0.1, 1.0.2) are rows of `runtime/game_addresses/games.h`, each
-  with its own table (`eow_v1_0_x.h`, the same names in each), read through `OTHER(NAME)` by the runtime and by both
+- **Addresses**: Echoes of Wisdom's builds (1.0.0, 1.0.1, 1.0.2, 1.1.0) are rows of `runtime/game_addresses/games.h`, each
+  with its own table (`eow_v1_x_x.h`, the same names in each), read through `OTHER(NAME)` by the runtime and by both
   generators. So one source supports every game version. The `GA(NAME)` tables (`versions.h`, `patches_v1_0_*.h`,
   `runtime_v1_0_*.h`) are LA's, from LAS Recomp, and EoW doesn't use them.
 
@@ -77,5 +77,5 @@ address tables, patches and hooks, and the randomizer's seed plumbing (`runtime/
 ## Debugging
 
 Most debug and test switches are environment variables: see [debug-hooks.md](debug-hooks.md). The log is
-`eowrecomp.log` in the data folder. A crash names the guest address (`main+0x...`), which `tools/sym.py` maps to
+`eowrecomp.log` in the data folder (on Windows next to `eowrecomp.exe`). A crash names the guest address (`main+0x...`), which `tools/sym.py` maps to
 the game's code.

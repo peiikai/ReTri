@@ -156,6 +156,7 @@ void plat_terminate_code(int code);  // the same with that exit status (--prepar
 #ifdef _WIN32
 // fn on a close request (WM_CLOSE) to any of the process's windows, from the thread that owns it (--prepare: taskkill)
 void plat_on_close_request(void (*fn)(void));
+unsigned plat_windows_build(void);  // the real build number (19045: Windows 10 22H2; 22000 and later: Windows 11), 0 unknown
 #endif
 
 // Child processes (game code generator, game-file extraction). stdout + stderr go to log_path (NULL = /dev/null).
