@@ -89,7 +89,7 @@ void rt_crash_explain(char *out, size_t n, const char *log_path) {
                  "files by itself.");
     } else if (has("unsupported version of the game")) {
         snprintf(head, sizeof head, "Wrong version of the game");
-        snprintf(what, sizeof what, "ReTri needs version 1.0.0, 1.0.1 or 1.0.2 of the game. Set up those game "
+        snprintf(what, sizeof what, "ReTri needs version 1.0.0, 1.0.1, 1.0.2 or 1.1.0 of the game. Set up those game "
                  "files on the start screen (System).");
     } else if (has("no font for the game's text")) {
         snprintf(head, sizeof head, "No font for the game's text");

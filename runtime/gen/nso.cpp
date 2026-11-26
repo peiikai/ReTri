@@ -75,7 +75,8 @@ std::string Nso::cstr(uint64_t off) const {
 }
 
 constexpr uint64_t DT_NULL = 0, DT_NEEDED = 1, DT_PLTRELSZ = 2, DT_HASH = 4, DT_STRTAB = 5, DT_SYMTAB = 6, DT_RELA = 7,
-                   DT_RELASZ = 8, DT_JMPREL = 23;
+                   DT_RELASZ = 8, DT_JMPREL = 23, DT_RELRSZ = 35, DT_RELR = 36,
+                   DT_GNU_HASH = 0x6ffffef5;
 
 Nso::Nso(const std::string &path) {
     std::ifstream f(path, std::ios::binary);
@@ -129,9 +130,23 @@ Nso::Nso(const std::string &path) {
         dyn.emplace(tag, val);  // (setdefault: the first one wins)
     }
     uint64_t strtab = dyn.count(DT_STRTAB) ? dyn[DT_STRTAB] : 0;
-    // dynsym count from DT_HASH nchain
-    if (dyn.count(DT_HASH) && dyn.count(DT_SYMTAB)) {
-        uint32_t nchain = u32(dyn[DT_HASH] + 4);
+    // dynsym count from DT_HASH nchain (game 1.1.0's sdk has only a GNU hash table: as nso.py)
+    if ((dyn.count(DT_HASH) || dyn.count(DT_GNU_HASH)) && dyn.count(DT_SYMTAB)) {
+        uint32_t nchain;
+        if (dyn.count(DT_HASH)) {
+            nchain = u32(dyn[DT_HASH] + 4);
+        } else {
+            uint64_t h = dyn[DT_GNU_HASH];
+            uint32_t nbuckets = u32(h), symoffset = u32(h + 4), bloom_size = u32(h + 8), last = 0;
+            uint64_t buckets = h + 16 + 8ull * bloom_size, chain = buckets + 4ull * nbuckets;
+            for (uint32_t i = 0; i < nbuckets; i++) last = std::max(last, u32(buckets + 4ull * i));
+            if (last < symoffset) {
+                nchain = symoffset;
+            } else {
+                while (!(u32(chain + 4ull * (last - symoffset)) & 1)) last++;
+                nchain = last + 1;
+            }
+        }
         uint64_t st = dyn[DT_SYMTAB];
         for (uint32_t i = 0; i < nchain; i++) {
             uint64_t o = st + i * 24ull;
@@ -153,6 +168,23 @@ Nso::Nso(const std::string &path) {
             uint64_t r_off = u64(b + i * 24), r_info = u64(b + i * 24 + 8);
             int64_t r_add = (int64_t)u64(b + i * 24 + 16);
             relocs.push_back({r_off, (uint32_t)(r_info & 0xFFFFFFFF), (uint32_t)(r_info >> 32), r_add});
+        }
+    }
+    // packed relative relocations (DT_RELR, game 1.1.0's modules): listed as RELATIVE ones, the addend being the value
+    // already at the place (as nso.py)
+    if (dyn.count(DT_RELR) && dyn.count(DT_RELRSZ)) {
+        uint64_t b = dyn[DT_RELR], n = dyn[DT_RELRSZ] / 8, where = 0;
+        for (uint64_t i = 0; i < n; i++) {
+            uint64_t e = u64(b + i * 8);
+            if (!(e & 1)) {
+                where = e;
+                relocs.push_back({where, R_AARCH64_RELATIVE, 0, (int64_t)u64(where)});
+                where += 8;
+                continue;
+            }
+            for (int k = 0; k < 63; k++)
+                if (e >> (k + 1) & 1) relocs.push_back({where + k * 8ull, R_AARCH64_RELATIVE, 0, (int64_t)u64(where + k * 8ull)});
+            where += 63 * 8;
         }
     }
 }

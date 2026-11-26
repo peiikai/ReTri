@@ -40,6 +40,13 @@ void romfs_find_game(const char *dir, char *exefs, size_t exefs_size, char *romf
 // Copies the folder tree src to dst (hard links where the file system allows: no second copy of 6 GB). progress as
 // above. false = failed.
 bool romfs_copy_tree(const char *src, const char *dst, void (*progress)(uint64_t done, uint64_t total));
+// The same, without the game's program files (romfs_exefs_file) at src's top level when skip_exefs: some extracted
+// layouts put them in the romfs folder beside region_common (issue #92).
+bool romfs_copy_romfs(const char *src, const char *dst, bool skip_exefs, void (*progress)(uint64_t done, uint64_t total));
+// The game's program files (main, main.npdm, rtld, sdk, subsdk0-9) of the exefs folder src into dst, nothing else:
+// the folder found as exefs may also hold the romfs, or be it (issue #92). false = failed, or no main there.
+bool romfs_copy_exefs(const char *src, const char *dst);
+bool romfs_exefs_file(const char *name);
 // One file the same way (an existing dst is replaced).
 bool romfs_copy_file(const char *src, const char *dst);
 // A new file to write, never an existing one (NULL, errno EEXIST): the data folder's game files can be hard links to
