@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   must be the full game's, extracted with the update applied for 1.0.1 and later.
 - Vulkan: shadows no longer flicker or vanish after opening a game menu, such as the echo list (#109). Only a
   restart brought them back.
+- Remember window size: a remembered window taller or wider than the screen no longer opens with its title bar
+  off the screen. It is fitted inside the screen, clear of the taskbar.
 
 ## [0.1.1] - 2026-11-25
 
