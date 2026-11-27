@@ -9,9 +9,8 @@
 > As with anything on the internet, you run the code at your own discretion.
 
 > [!WARNING]
-> **This is the first public release.** A playable game with a good experience isn't a certainty yet. It works on our
-> hardware; now we need yours to find the gaps. Please open a [GitHub issue](https://github.com/peiikai/ReTri/issues)
-> for any problem you come across, and include your `eowrecomp.log` file and your system specifications.
+> **ReTri is in beta.** Please open a [GitHub issue](https://github.com/peiikai/ReTri/issues) for any problem you
+> come across, and include your `eowrecomp.log` file and your system specifications.
 
 **ReTri** is a static recompilation of *The Legend of Zelda: Echoes of Wisdom* (Nintendo Switch, 2024) into a
 native Windows, macOS and Linux application. Android and iOS builds are in testing on nightly builds.
