@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- Updates: release builds on macOS, Windows and Linux now update in place from the start screen (Update in the
+  update dialog; macOS through Sparkle). Download stays there too.
 - Android: nightly builds now include the APK (`android.apk`), signed with ReTri's own key.
 
 ### Fixed

@@ -127,9 +127,9 @@ static void save_png(id<MTLTexture> tex, const char *path) {
 // Nightly builds (a nightly build sets this): the build's time (YYYYMMDDHHMM, UTC; 0: not a nightly).
 // They only look for a newer nightly build of their own platform, never a release or an experimental build.
 #define LARECOMP_NIGHTLY_STAMP 0LL
-// Update in the update dialog (runtime/update.h; macOS: Sparkle): nightlies have it; release builds only once this
-// is 1, after it has worked on nightlies for a while on every platform. Until then they offer Download only.
-#define LARECOMP_UPDATE_RELEASES 0
+// Update in the update dialog (runtime/update.h; macOS: Sparkle): nightlies and release builds have it (0: releases
+// offer Download only). Test builds and phones never do.
+#define LARECOMP_UPDATE_RELEASES 1
 // An experimental platform that joins the normal releases: from this release on, its experimental builds offer it
 // (and any later one) ahead of a newer experimental build. Android ships in Beta 6.
 #ifdef __ANDROID__
@@ -1231,13 +1231,13 @@ static void notice_popup(float s) {
 // ------------------------------------------------------------------ update dialog
 // The start screen's update link opens it: what's new since this build, then Update (this platform updates itself:
 // runtime/update.h; macOS: Sparkle), Download (the release page: always there, also if Update ever fails) and Back.
-// Phones and tablets: no Update. Release builds: no Update until LARECOMP_UPDATE_RELEASES.
+// Phones and tablets: no Update. Release builds: Update while LARECOMP_UPDATE_RELEASES is 1.
 static bool g_update_open;
 static std::string g_update_notes, g_update_title;
 // (the updater's steps, for the translation tables: runtime/update.cpp sets them in English)
 static const char *const UPDATE_STEPS[] = {LN("Checking the update"), LN("Downloading"), LN("Checking the download"),
                                            LN("Unpacking"), LN("Installing")};
-// this build's channel has Update at all: nightlies, and releases once LARECOMP_UPDATE_RELEASES is on (never test builds)
+// this build's channel has Update at all: nightlies, and releases while LARECOMP_UPDATE_RELEASES is on (never test builds)
 static bool update_channel_on(void) {
     if (PLAT_TOUCH) return false;
     if (LARECOMP_NIGHTLY_STAMP != 0) return true;
