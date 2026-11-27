@@ -125,17 +125,19 @@ enum { BAR_SETTINGS, BAR_COSMETICS, BAR_RANDO, BAR_WARP, BAR_EDITOR, BAR_CHEATS,
 static std::atomic<int> g_page{-1};  // the entry whose page is open (-1: the bar alone)
 static int g_bar_cur;  // the bar's cursor (render thread)
 static void page_open(int page);
-// Another game on the engine: the bar without LA's own pages (Cosmetics, Randomizer, Save Editor read LA's state;
-// Cheats has its own page for EoW: cheats.mm) and without Reset (only LA's reboot is known to work - as Quit's Return
-// to Launcher)
+// Another game on the engine: the bar without LA's own pages (Cosmetics, Randomizer read LA's state; Cheats and the
+// Save Editor have their own for EoW: cheats.mm, save_editor.mm) and without Reset (only LA's reboot is known to work
+// - as Quit's Return to Launcher)
 static bool bar_shown(int e) {
     if (e == BAR_RANDO && !RANDO_ON) return false;  // (waiting for the EoW randomizer: runtime/rando.h)
-    return !game_other() || !(e == BAR_COSMETICS || e == BAR_EDITOR || e == BAR_RESET);
+    return !game_other() || !(e == BAR_COSMETICS || e == BAR_RESET);
 }
 extern "C" bool cheats_other_ready(void);  // runtime/hle/cheats_other.c
+extern "C" bool save_editor_ready(void);   // save_editor.mm (a save in play it can edit)
 static bool page_needs_save(int page) {  // (Warp, the Save Editor and Cheats)
     if (page == BAR_CHEATS && game_other()) return !cheats_other_ready();
-    return (page == BAR_WARP || page == BAR_EDITOR || page == BAR_CHEATS) && !game_in_play();
+    if (page == BAR_EDITOR) return !save_editor_ready();
+    return (page == BAR_WARP || page == BAR_CHEATS) && !game_in_play();
 }
 extern "C" void menu_toggle(void) { set_open(!g_open.load()); }  // (the touch controls' menu button)
 static int g_tab = -1000, g_tab_request = -2;  // (-2: no request; -1 is the Prelaunch tab; -1000: the first tab)
@@ -1691,7 +1693,7 @@ static void tabs_body(float scale, bool in_game, void (*prelaunch)(float), int o
         case 0: tab_display(); break;
         case 1: tab_audio(); break;
         case 2:
-            if (game_in_play()) save_editor_draw(scale);
+            if (save_editor_ready()) save_editor_draw(scale);
             else ImGui::TextDisabled("%s", L("Load a save to edit it."));
             break;
         case 3: rando_tab_draw(scale); break;

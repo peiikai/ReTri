@@ -33,16 +33,31 @@ save/save_0/
 All integers are little-endian. `maps.bin` and `thumb.bin` aren't mapped.
 
 After the header, `main.bin` is a list of blocks: a two-letter tag, u16 version, u32 hash, u32 size (the 16-byte
-block header included). One of them, `Pl` (hash 0x597a2cab, at +0x160 in the saves seen so far), holds the player:
+block header included), in this order: `Ba`, `Lc`, `Pl`, `Cp`, `Fg`, `[]`, `Fl`, `Qt`, `Sr`, `Ui`, `Dc`, `Ka`, `Md`,
+`Hr`, `Mn`, `Rp`, `Am`. A 1.0.x file is 0x9d70 bytes; 1.1.0 writes 0xad80, its `Ui` block (version 2) being 0x3070
+instead of 0x2060, so the blocks after it move. `Pl` (hash 0x597a2cab) is at +0x160 in both and holds the player:
 
 | Block offset (after its header) | What |
 |---|---|
 | +0x0 (u32) | rupees |
 | +0x4 (u16) | health, in quarter hearts |
+| +0x6 (u16) | Heart Containers, one bit each |
+| +0x8 (u64) | Pieces of Heart, one bit each |
+| +0x10 (u32) | flags; 0x2000, 0x4000, 0x8000: the energy gauge's upgrades |
 | +0x74 (float) | Swordfighter Form energy |
 
-The game plays from a live copy of these values, not from the save: the Cheats page changes that copy
-(`runtime/hle/cheats_other.c`), and the save gets the values only when the game saves.
+Max health isn't saved: the game works it out as 3 hearts, plus one for each Heart Container and each four Pieces of
+Heart, at most 20 (in quarter hearts: 12 + 4 x (containers + pieces / 4), at most 80). The energy gauge holds 15, or
+20, 30 or 40 with its upgrades.
+
+### In memory
+
+While a save is in play the game keeps three images of `main.bin` in one object, (size + 0x420) bytes apart: the
+save as loaded, the game's current data, and an empty one. The middle one is live: the game reads it (the max health
+above comes from its `Pl` block) and saves from it, with a fresh checksum. Health, max health, rupees and the energy
+gauge are played from a status object of their own instead (`runtime/hle/cheats_other.c`) and copied into `Pl` when
+the game saves. The Cheats page changes the status; the Save Editor (`runtime/hle/save_other.c`,
+`runtime/ui/save_editor.mm`) changes both, and the game's next save writes them.
 
 ## How ReTri writes them
 
