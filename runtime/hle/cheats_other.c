@@ -22,11 +22,12 @@
 #include "../hle.h"
 #include "../kernel.h"
 #include "../settings.h"
+#include "player_other.h"
 
 extern int warp_other_in_play(void);  // runtime/hle/warp_other.c
 
-enum { MAX_HP = -0x90, HP = -0x8c, RUPEES = 0, ENERGY = 0x18, ENERGY_LVL = 0x1c };
-enum { RUPEE_MAX = 9999 };
+enum { MAX_HP = PLAYER_OTHER_MAX_HP, HP = PLAYER_OTHER_HP, RUPEES = PLAYER_OTHER_RUPEES, ENERGY = PLAYER_OTHER_ENERGY,
+       ENERGY_LVL = PLAYER_OTHER_ENERGY_LVL, RUPEE_MAX = PLAYER_OTHER_RUPEE_MAX };
 
 static int32_t rupee_field(void) {
     static int32_t off = -2;
@@ -70,6 +71,7 @@ static _Atomic int g_once;  // the one-time buttons (render thread) for the game
 enum { ONCE_HEARTS = 1, ONCE_ENERGY = 2, ONCE_RUPEES = 4 };
 void cheats_other_once(int what) { atomic_fetch_or(&g_once, what); }
 bool cheats_other_ready(void) { return status_r() != 0; }
+uint64_t cheats_other_status(void) { return status_r(); }  // (player_other.h: the Save Editor's too)
 
 // Game thread, once a frame
 void cheats_other_tick(void) {
