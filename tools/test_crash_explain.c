@@ -16,6 +16,7 @@ const char *rt_host_fn_name(uint64_t pc, uint64_t *offset) {
 }
 const GameVersion *game_version(void) { return NULL; }
 uint64_t game_romfs_bytes(const GameVersion *v) { (void)v; return 0; }
+int game_romfs_files(const GameVersion *v) { (void)v; return 3836; }  // (LA's: the counts below)
 
 static const char *const drivers[] = {
     "/usr/lib/x86_64-linux-gnu/libvulkan_radeon.so",

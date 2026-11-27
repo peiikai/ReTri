@@ -78,6 +78,9 @@ uint64_t game_sdk_base(void);
 // The bytes of all the game's RomFS files in version v, summed (0: unknown). A copy with every file there but another
 // total has a damaged or changed file (issue #391). Only the totals ship.
 uint64_t game_romfs_bytes(const GameVersion *v);
+// The file count of version v's RomFS (another game's build too; NULL: LA's). A copy with fewer is incomplete: the
+// game crashes on the first file it misses (issues #24, #104).
+int game_romfs_files(const GameVersion *v);
 // File by file: some copies have files that no version has, or a damaged one, beside the game's (game_addresses/
 // romfs_files.h: hashes of the game's paths and sizes only). Begin with the copy's version (NULL: unknown version, the
 // check does nothing), pass every file found (path relative to romfs, '/' separators) and end it.

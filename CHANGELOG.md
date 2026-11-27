@@ -10,6 +10,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Android: nightly builds now include the APK (`android.apk`), signed with ReTri's own key.
 
 ### Fixed
+- Setup now refuses an incomplete romfs and says so, instead of the game crashing as it starts (#104). It counted
+  the files against the wrong total, so a romfs with less than half of the game's files got through. The romfs
+  must be the full game's, extracted with the update applied for 1.0.1 and later.
+- Vulkan: shadows no longer flicker or vanish after opening a game menu, such as the echo list (#109). Only a
+  restart brought them back.
+- Remember window size: a remembered window taller or wider than the screen no longer opens with its title bar
+  off the screen. It is fitted inside the screen, clear of the taskbar.
 - Start screen: Back (B or Esc) no longer clears the selected row when there is nothing to go back to.
 
 ## [0.1.1] - 2026-11-25
