@@ -108,16 +108,30 @@ uint64_t rt_actor_create_fn(uint64_t fn, uint32_t type) {
 // 'blur-removal', patch by theboy181, renames the string in the module - which only took effect at the next start,
 // the copy being made once). runtime/gen/patches.cpp TILT_INIT_SITE hands us the object; its copy's first letter is
 // switched P <-> X as the setting changes, live. EoW has the same object (renderer +0x600, runtime/gen/patches.cpp),
-// but its buffer keeps the name pointer at +0x68.
+// but there the name stays: EoW's cutscenes also draw their depth of field from this block (the possessed-Link fight's
+// opening talk in Suthorn Ruins), and with the block unbound the shader read zeros or another draw's data - the scene
+// black behind the text box, then white. Its in-focus band (object +0x20, a fraction of the screen: 0.3 - 0.55 in
+// play) is set to 100 each frame instead, after the game writes its own: the whole screen in focus, nothing blurred.
 static uint64_t g_tilt_obj;
 static int g_tilt_applied = -1;  // blur removal as last applied (-1: not yet)
-RT_ON_RESET(qol_reset) { g_tilt_obj = 0; g_tilt_applied = -1; }  // (reboot: a new post-process)
+static float g_tilt_band = -1;  // (EoW) the game's own in-focus band, last seen
+RT_ON_RESET(qol_reset) { g_tilt_obj = 0; g_tilt_applied = -1; g_tilt_band = -1; }  // (reboot: a new post-process)
 
-void rt_tilt_obj(uint64_t obj) { g_tilt_obj = obj; g_tilt_applied = -1; }
+void rt_tilt_obj(uint64_t obj) { g_tilt_obj = obj; g_tilt_applied = -1; g_tilt_band = -1; }
 
+#define TILT_BAND_OFF 0x20  // (EoW) the in-focus band
+#define TILT_BAND_ALL 100.0f
 static bool apply_tilt(int removed) {  // false: not set up yet (or not the name we know)
+    if (game_other()) {
+        if (!g_tilt_obj) return false;
+        float *band = (float *)(uintptr_t)(g_tilt_obj + TILT_BAND_OFF);
+        if (*band != TILT_BAND_ALL) g_tilt_band = *band;  // (the game's: a new preset)
+        if (removed) *band = TILT_BAND_ALL;
+        else if (*band == TILT_BAND_ALL && g_tilt_band >= 0) *band = g_tilt_band;
+        return true;
+    }
     uint64_t buf = g_tilt_obj ? LD64(g_tilt_obj + 0x50) : 0;
-    char *name = buf ? (char *)(uintptr_t)LD64(buf + (game_other() ? 0x68 : 0x60)) : NULL;
+    char *name = buf ? (char *)(uintptr_t)LD64(buf + 0x60) : NULL;
     if (!name || memcmp(name + 1, "FXTiltShiftParam", 17) || (name[0] != 'P' && name[0] != 'X')) return false;
     name[0] = removed ? 'X' : 'P';
     return true;
@@ -169,9 +183,8 @@ void qol_tick(void) {
     setting_at_tick();
     static int env = -1;  // LARECOMP_BLUR_REMOVAL=0/1: test override
     if (env < 0) { const char *e = getenv("LARECOMP_BLUR_REMOVAL"); env = e ? atoi(e) != 0 : 2; }
-    // (EoW: off, its row hidden, until the cutscene depth-of-field fix has been tested more - LARECOMP_BLUR_REMOVAL=1 still
-    // turns it on for tests)
-    int want = env == 2 ? g_settings.blur_removal && !game_other() : env;
+    int want = env == 2 ? g_settings.blur_removal : env;
+    if (game_other() && want) apply_tilt(want);  // (EoW: each frame - the game writes its band back with each preset)
     if (want != g_tilt_applied && apply_tilt(want)) {
         LOG("[qol] blur removal %s\n", want ? "on" : "off");
         g_tilt_applied = want;

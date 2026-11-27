@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 - Android: nightly builds now include the APK (`android.apk`), signed with ReTri's own key.
+- "Remove tilt-shift blur" setting (General tab, Off by default): the top and bottom of the screen stay sharp (#108).
+  It switches live. Cutscenes keep working: it puts the whole screen in focus instead of turning the effect off.
 
 ### Fixed
 - Start screen: Back (B or Esc) no longer clears the selected row when there is nothing to go back to.
