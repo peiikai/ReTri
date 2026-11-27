@@ -74,6 +74,7 @@ static GameAddrs test_ga = {  // the 1.0.0 table, with the live save in host mem
 const GameAddrs *g_ga = &test_ga;
 const GameVersion *game_version(void) { return NULL; }
 uint64_t game_romfs_bytes(const GameVersion *v) { return 0; }
+int game_romfs_files(const GameVersion *v) { return 0; }
 GameRomfsCheck *game_romfs_check_begin(const GameVersion *v) { return NULL; }
 bool game_romfs_check_file(GameRomfsCheck *c, const char *rel, uint64_t size, uint64_t *bytes) {
     if (bytes) *bytes += size;

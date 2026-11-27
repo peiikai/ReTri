@@ -455,6 +455,11 @@ static void rom_index(void) {
     int missing = game_romfs_check_end(check);
     rt_romfs_missing = missing;
     if (missing) LOG("[fs] romfs: %d of the game's files missing or changed\n", missing);
+    // (the start screen refuses these; a game started directly says so before it crashes on a missing file: #104)
+    if (rt_romfs_files < game_romfs_files(game_version()))
+        LOG("[fs] romfs: only %d of the game's %d files: the game files are incomplete (the romfs must be the full "
+            "game's, extracted with the update applied for 1.0.1 and later)\n", rt_romfs_files,
+            game_romfs_files(game_version()));
     uint64_t want = game_romfs_bytes(game_version());
     if (want && rt_romfs_bytes != want)
         LOG("[fs] romfs: %llu bytes in %d files, this version's are %llu: damaged or changed game files\n",

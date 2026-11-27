@@ -24,7 +24,7 @@ void menu_apply_window_requests(void *sdl_window);
 bool ui_in_background(void);
 // Before the window is made: its opening size, the remembered one (Remember window size), else left as is.
 void rt_window_size(int *w, int *h);
-// The window made: its size is saved at exit (Remember window size).
+// The window made: its size is saved at exit, and a remembered size is fitted on the screen (Remember window size).
 void rt_window_remember(void *sdl_window);
 
 #if defined(__APPLE__) && defined(__OBJC__)

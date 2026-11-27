@@ -411,13 +411,38 @@ static void remember_at_exit(void) {
     g_settings.window_w = w, g_settings.window_h = h;
     settings_save();
 }
+static bool g_size_remembered;
 extern "C" void rt_window_size(int *w, int *h) {  // before the window is made: the remembered size, if it's on
     if (g_settings.remember_window && g_settings.window_w >= 320 && g_settings.window_h >= 180)
-        *w = g_settings.window_w, *h = g_settings.window_h;
+        *w = g_settings.window_w, *h = g_settings.window_h, g_size_remembered = true;
+}
+// A remembered size is the client area only, and SDL centers the window on the whole display: a size close to the
+// screen height opened with the title bar above the top edge on Windows (issue #108). Fit the window, borders and
+// all, into the usable area (no taskbar / menu bar / Dock) of the display it opens on.
+static void fit_on_screen(SDL_Window *win) {
+    SDL_Rect ub;
+    SDL_DisplayID d = SDL_GetDisplayForWindow(win);
+    if (!d || !SDL_GetDisplayUsableBounds(d, &ub)) return;
+    int top = 0, left = 0, bottom = 0, right = 0, x, y, w, h;
+    SDL_GetWindowBordersSize(win, &top, &left, &bottom, &right);  // (stays 0 where the platform can't tell)
+    if (!SDL_GetWindowPosition(win, &x, &y) || !SDL_GetWindowSize(win, &w, &h)) return;
+    int max_w = ub.w - left - right, max_h = ub.h - top - bottom;
+    if (max_w < 320 || max_h < 180) return;
+    bool inside = x - left >= ub.x && y - top >= ub.y && x + w + right <= ub.x + ub.w && y + h + bottom <= ub.y + ub.h;
+    if (inside) return;
+    if (w > max_w || h > max_h) {
+        w = SDL_min(w, max_w), h = SDL_min(h, max_h);
+        SDL_SetWindowSize(win, w, h);
+    }
+    SDL_SetWindowPosition(win, ub.x + left + (max_w - w) / 2, ub.y + top + (max_h - h) / 2);
+    SDL_SyncWindow(win);
 }
 extern "C" void rt_window_remember(void *w) {
     if (!g_remember_win) atexit(remember_at_exit);
     g_remember_win = (SDL_Window *)w;
+#if !PLAT_TOUCH
+    if (g_size_remembered) fit_on_screen(g_remember_win);
+#endif
 }
 
 extern "C" uint32_t g_window_resize_request;  // (test scripts: runtime/hle/input.c "resize")
