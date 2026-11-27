@@ -1,5 +1,5 @@
 // The settings menu's sounds (in game and on the start screen): the game's own menu sounds, read from the player's
-// extracted files (romfs/region_common/audio/Richard.bfsar) and played on an audio stream of their own
+// extracted files (romfs/region_common/audio/edward.bfsar; LA's Richard.bfsar) and played on an audio stream of their own
 // (runtime/menu_sfx.c). Missing or unreadable files: silent (one log line). LARECOMP_NO_AUDIO=1: no sound at all.
 #pragma once
 #include <stdbool.h>
