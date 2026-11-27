@@ -3430,7 +3430,8 @@ static bool watch_on(void) {
 // too, are rewritten by the CPU every frame - their pages are never clean - so they never look written by the GPU.
 // A store on a shared page counts from a range's third look on, so the GPU's first writes (two frames at most with
 // the overlap) are seen first. Learning starts again when a range is bound after more than 8 frames without or on a
-// new level (snap_storage: the heap may hold something else there now) and stops after 600 looks.
+// new level (snap_storage: the heap may hold something else there now; on the same level a program's stores into it
+// are kept) and stops after 600 looks.
 // Which storage slots each compute program stores into, as the GPU reports it (#355): the GLSL compute path looks up
 // every store's address in the dispatch's table of bound ranges (gfast, translate.c gfindw) and stamps the range it
 // lands in; gfast_flags reads the stamps back once the dispatch is done and notes them here, per program code address
@@ -3653,8 +3654,12 @@ static uint64_t snap_storage(uint64_t addr, uint64_t size, bool cs_slot) {
     // probe again on a new level or after 10 s unused - only the hash fallback's in-place ranges: a copied range stays
     // copied (a draw's storage read, a CPU store seen), a watched one just gets its pages armed again
     bool again = !watch_on() && e->mode == RS_PLACE && (e->level != rs_level_gen || f - e->frame > 600);
-    if (e->mode == RS_PLACE && (e->level != rs_level_gen || f - e->frame > 8))  // (the watch's learning, again: the heap there may be reused)
-        e->gpu_parts = 0, e->looks = 0, e->wclass = 0;
+    // The watch's learning, again: the heap there may be reused. On the same level a range a program stored into keeps
+    // that mark (wclass 1): a game menu stops its writer while a reader goes on, and the reader binding it first again
+    // made it "an input" whose shared pages' CPU stores count at once - copied, the dispatch wrote the copy while the
+    // draws read the original (#555): the shadows flickered, then went, until a restart (#109, after the echo list).
+    if (e->mode == RS_PLACE && (e->level != rs_level_gen || f - e->frame > 8))
+        e->gpu_parts = 0, e->looks = 0, e->wclass = e->level == rs_level_gen ? e->wclass & 1 : 0;
     if (cs_slot) e->wclass |= wclass_bit(snap_slot_class);  // (how its program uses the slot: the GPU's report)
     e->level = rs_level_gen;
     e->frame = f;
