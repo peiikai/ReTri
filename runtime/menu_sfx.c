@@ -13,6 +13,7 @@
 #include "rt.h"
 #include "settings.h"
 #include "menu_sfx.h"
+#include "game_addresses.h"
 
 extern const char *g_romfs_dir;
 
@@ -22,6 +23,15 @@ extern const char *g_romfs_dir;
 static const char *const g_names[MENU_SFX_N] = {"SE_SY_CURSOL_MOVE", "SE_SY_MENU_LR_MOVE", "SE_SY_DECIDE",
                                                 "SE_SY_CANCEL", "SE_SY_MENU_OPEN", "SE_SY_MENU_CLOSE",
                                                 "SE_MAP_MATFACE_RUMBLE", "SE_MAP_BOMB_EXPLO", "SE_ENE_BUZZBLOB_SPARK"};
+// Echoes of Wisdom's (romfs/region_common/audio/edward.bfsar, the same sounds in 1.0.0 to 1.1.0): its own system
+// menu's cursor, decide and cancel, the pause menu's tab change (L / R) and its open / close. No weather (LA's only).
+static const char *const g_names_other[MENU_SFX_N] = {"SE_SYS_CURSOL_MOVE", "SE_SYS_CATEGORY_CHANGE", "SE_SYS_DECIDE",
+                                                      "SE_SYS_CANCEL", "SE_SYS_MENU_OPEN", "SE_SYS_MENU_CLOSE"};
+
+// EoW's archive and names unless LA's game is set up (game_other() is known once the game's version is: a start
+// screen without game files yet has none, and ReTri plays only EoW)
+static bool other_game(void) { return game_other() || !game_version(); }
+static const char *sfx_name(int id) { return (other_game() ? g_names_other : g_names)[id]; }
 
 #define RATE 48000
 
@@ -78,20 +88,57 @@ typedef struct {
     FILE *f;
     uint64_t file_body;  // (the FILE block's data)
     Buf info;            // the INFO block, from its data
-    int64_t sounds, banks, warcs, files;  // tables, in info
+    int64_t sounds, banks, warcs, groups, files;  // tables, in info
 } Archive;
 
-// A file of the archive (by file id): its offset in the archive and size (false: not in it - a group's own file)
+// A file of the archive (by file id): its offset in the archive and size (false: not in it). EoW keeps its banks and
+// wave archives only inside sound groups (FGRP files in the archive, listed in the file's group references); LA's
+// are in the archive itself.
 static bool arc_file(Archive *a, uint32_t id, uint64_t *off, uint32_t *size) {
     int64_t e = table_ref(a->info, a->files, id);
     if (e < 0) return false;
-    int64_t loc = e + (int32_t)u32(a->info, e + 4);  // (the internal file's location)
-    if (u16(a->info, loc) != 0x1F00) return false;
+    int64_t loc = e + (int32_t)u32(a->info, e + 4);  // (the internal file's location, then the groups it is in)
     int32_t o = (int32_t)u32(a->info, loc + 4);
     *size = u32(a->info, loc + 8);
-    if (o < 0 || !*size) return false;
-    *off = a->file_body + (uint32_t)o;
-    return true;
+    if (u16(a->info, loc) == 0x1F00 && o >= 0 && *size) {
+        *off = a->file_body + (uint32_t)o;
+        return true;
+    }
+    if (u16(a->info, loc + 12) != 0x0100 || a->groups < 0) return false;
+    int64_t gl = loc + 12 + (int32_t)u32(a->info, loc + 16);
+    for (uint32_t g = 0, ng = u32(a->info, gl); g < ng && g < 64; g++) {
+        int64_t ge = table_ref(a->info, a->groups, u32(a->info, gl + 4 + g * 4) & 0xFFFFFF);
+        if (ge < 0) continue;
+        // the group's own file: in the archive (its location's type 0 in EoW's), its INFO block read
+        int64_t gfe = table_ref(a->info, a->files, u32(a->info, ge));
+        if (gfe < 0) continue;
+        int64_t gloc = gfe + (int32_t)u32(a->info, gfe + 4);
+        int32_t go = (int32_t)u32(a->info, gloc + 4);
+        uint32_t gsize = u32(a->info, gloc + 8);
+        if (go < 0 || !gsize || gsize == 0xFFFFFFFF || gsize < 0x40) continue;
+        uint64_t gat = a->file_body + (uint32_t)go;
+        uint8_t *hdr = read_at(a->f, gat, 0x40), *gi = NULL;
+        Buf h = {hdr, hdr ? 0x40 : 0};
+        int64_t io = block(h, 0x7800), fo = block(h, 0x7801);
+        uint32_t isz = 0;
+        for (int i = 0; i < 3; i++)
+            if (u16(h, 0x14 + i * 12) == 0x7800) isz = u32(h, 0x14 + i * 12 + 8);
+        bool found = false;
+        if (hdr && !memcmp(hdr, "FGRP", 4) && io >= 0 && fo >= 0 && isz <= gsize && (gi = read_at(a->f, gat + io, isz))) {
+            Buf b = {gi, isz};  // INFO: a table of (u32 file id, reference into the FILE block's data, u32 size)
+            for (uint32_t i = 0, n = u32(b, 8); i < n && !found; i++) {
+                int64_t fe = table_ref(b, 8, i);
+                if (fe < 0 || u32(b, fe) != id || u16(b, fe + 4) != 0x1F00) continue;
+                int32_t fo2 = (int32_t)u32(b, fe + 8);
+                *size = u32(b, fe + 12);
+                if (fo2 >= 0 && *size && (uint64_t)fo + 8 + (uint32_t)fo2 + *size <= gsize)
+                    *off = gat + fo + 8 + (uint32_t)fo2, found = true;
+            }
+        }
+        free(hdr), free(gi);
+        if (found) return true;
+    }
+    return false;
 }
 
 // MIDI-style variable length number
@@ -166,7 +213,7 @@ static void decode(Buf w, int64_t data, int enc, const int16_t *coefs, int16_t h
 
 // One sound, by name, into g_sfx[id]; why says what failed
 static bool load_one(Archive *a, Buf strg, int id, char *why, size_t wn) {
-    const char *name = g_names[id];
+    const char *name = sfx_name(id);
     // its string's index (STRG: string table of (u16, u16, s32 offset, u32 size) from the table)
     int64_t st = 8 + (int32_t)u32(strg, 8 + 4);
     uint32_t nstr = u32(strg, st);
@@ -331,12 +378,14 @@ static int load_all(const char *path) {
     a.file_body = (uint64_t)fo + 8;
     a.sounds = ref_by_type(a.info, 0, 8, 0x2100, 0), a.banks = ref_by_type(a.info, 0, 8, 0x2101, 0);
     a.warcs = ref_by_type(a.info, 0, 8, 0x2103, 0), a.files = ref_by_type(a.info, 0, 8, 0x2106, 0);
+    a.groups = ref_by_type(a.info, 0, 8, 0x2105, 0);
     if (memcmp(strg_p, "STRG", 4) || memcmp(info_p, "INFO", 4) || a.sounds < 0 || a.banks < 0 || a.warcs < 0 || a.files < 0) goto out;
     int got = 0;
     for (int i = 0; i < MENU_SFX_N; i++) {
         char why[96];
+        if (!sfx_name(i)) continue;  // (not this game's)
         if (load_one(&a, strg, i, why, sizeof why)) got++;
-        else LOG("[menu_sfx] %s: %s\n", g_names[i], why);
+        else LOG("[menu_sfx] %s: %s\n", sfx_name(i), why);
     }
     ret = got ? 0 : 2;
 out:
@@ -357,8 +406,9 @@ static bool ensure_loaded(void) {
     uint64_t now = SDL_GetTicksNS();
     if (now < g_retry_ns) return false;
     char path[1200];
-    if (g_romfs_dir) snprintf(path, sizeof path, "%s/region_common/audio/Richard.bfsar", g_romfs_dir);
-    else snprintf(path, sizeof path, "%s/romfs/region_common/audio/Richard.bfsar", g_game_dir[0] ? g_game_dir : "extracted");
+    const char *arc = other_game() ? "edward.bfsar" : "Richard.bfsar";
+    if (g_romfs_dir) snprintf(path, sizeof path, "%s/region_common/audio/%s", g_romfs_dir, arc);
+    else snprintf(path, sizeof path, "%s/romfs/region_common/audio/%s", g_game_dir[0] ? g_game_dir : "extracted", arc);
     int r = load_all(path);
     static bool told;
     if (r == 1) {  // (not set up yet: the start screen may set the game files up, looked for again in a while)
