@@ -201,7 +201,9 @@ on a scratch save.
 | `LARECOMP_BLUR_REMOVAL` | 0 / 1 | Override the blur removal setting. |
 | `LARECOMP_PROMPTS` | `xbox`, `playstation`, `nintendo`, other = auto | Force the button icon style. |
 | `LARECOMP_MENU_AT` | frame | Open the overlay menu at that frame. |
-| `LARECOMP_MENU_TAB` | page number | The page the overlay menu opens on: `4` Warp, `9` Quit. Other numbers open Settings on that tab (`0` Video, `1` Audio, `8` Controls, `11` General). |
+| `LARECOMP_MENU_TAB` | page number | The page the overlay menu opens on: `4` Warp, `5` Cheats, `9` Quit. Other numbers open Settings on that tab (`0` Video, `1` Audio, `8` Controls, `11` General). |
+| `LARECOMP_CHEATS` | `hearts,energy,rupees` | Turn those cheats on for this run (not saved). |
+| `LARECOMP_CHEATS_DRAIN` | `frame,frame,...` | At each frame, leave Zelda with a quarter heart and an empty energy gauge (to see the cheats refill them). |
 | `LARECOMP_MENU_BAR` | entry number | Open the menu bar alone, its cursor on that entry: `0` Settings, `3` Warp, `7` Quit, `8` the close button. |
 | `LARECOMP_TOUCH_SHOW_INPUT` | 0 / 1 | iPhone, iPad and Android: show scripted input (`LARECOMP_INPUT`) on the touch controls, the buttons lit and the stick moved. |
 | `LARECOMP_UPDATE_TAGS` | `tag,tag,...` | The update check sees these release tags instead of asking GitHub (no network). |

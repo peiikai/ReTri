@@ -40,7 +40,7 @@ static void fill_ammo(uint32_t count_off, int item_bit, int up_bit, int base_cap
     if (F<uint8_t>(count_off) != cap) F<uint8_t>(count_off) = (uint8_t)cap;
 }
 
-// Once per presented frame (render thread), from save_editor_frame.
+// Once per presented frame (render thread), from save_editor_frame (LA's; Echoes of Wisdom's: cheats_other.c).
 extern "C" void cheats_frame(void) {
     if (!game_in_play()) return;
     static int env = -1;  // LARECOMP_CHEATS=hearts,ammo,rupees: force on for tests (not saved)
@@ -66,7 +66,38 @@ extern "C" void cheats_frame(void) {
 }
 
 extern "C" bool menu_page_head(const char *section, float scale);  // menu.mm
+
+// Echoes of Wisdom's page: the same rows, its own state (runtime/hle/cheats_other.c, applied on the game thread)
+extern "C" bool cheats_other_ready(void);
+extern "C" void cheats_other_once(int what);  // 1 hearts, 2 energy, 4 rupees
+static void cheats_draw_other(float scale) {
+    if (!cheats_other_ready()) {
+        ImGui::TextDisabled("%s", L("Load a save to use cheats."));
+        return;
+    }
+    opt_begin("##cheats", scale);
+    bool head = menu_page_head("Cheats", scale);  // (touch: the page's name on the X's line, menu.mm)
+    opt_section("Always on");
+    if (opt_toggle("Infinite hearts", &g_settings.cheat_hearts, false, "Health refills to full whenever Zelda is hurt."))
+        settings_save();
+    if (opt_toggle("Infinite energy", &g_settings.cheat_energy, false,
+                   "The energy gauge stays full, so Swordfighter Form never runs out."))
+        settings_save();
+    if (opt_toggle("Infinite rupees", &g_settings.cheat_rupees, false, "Rupees stay at 9999.")) settings_save();
+
+    opt_section("One time");
+    if (opt_button("Refill hearts", "Refills health to full.")) cheats_other_once(1);
+    if (opt_button("Refill energy", "Fills the energy gauge.")) cheats_other_once(2);
+    if (opt_button("Max rupees", "Sets rupees to 9999.")) cheats_other_once(4);
+    if (head) opt_list_end();
+    opt_end();
+}
+
 extern "C" void cheats_draw(float scale) {
+    if (game_other()) {
+        cheats_draw_other(scale);
+        return;
+    }
     if (!game_in_play()) {
         ImGui::TextDisabled("%s", L("Load a save to use cheats."));
         return;
