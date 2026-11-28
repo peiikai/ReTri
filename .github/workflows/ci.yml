@@ -402,6 +402,9 @@ jobs:
         run: TT_GMEM_CHUNK_SHIFT=24 REF=HEAD tools/test_translate.sh 2000 "$(nproc)" glsl
       - name: Shader translator fuzz (GLSL, guest heap in lazy chunks)
         run: TT_GMEM_CHUNK_SHIFT=24 TT_GMEM_LAZY=1 REF=HEAD tools/test_translate.sh 2000 "$(nproc)" glsl
+      # (discarding fragment shaders write gl_FragDepth: the default on Turnip, Adreno 7xx - shader.h maxwell_glsl_late_depth)
+      - name: Shader translator fuzz (GLSL, late depth)
+        run: TT_LATE_DEPTH=1 REF=HEAD tools/test_translate.sh 2000 "$(nproc)" glsl
       - name: Vulkan synchronization failure regression
         run: python tools/test_vulkan_sync_errors.py
       - name: Game address table tests
