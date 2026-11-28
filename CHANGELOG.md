@@ -25,6 +25,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 - Start screen: Back (B or Esc) no longer clears the selected row when there is nothing to go back to.
+- Vulkan, Turnip on Adreno 7xx (Android): fewer black specks along cut-out edges such as grass. From LAS Recomp,
+  where it was tested on an Adreno 740; not yet tested in ReTri. `LARECOMP_VK_LATE_DEPTH=0` turns it off.
 
 ## [0.1.2] - 2026-11-27
 

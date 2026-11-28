@@ -33,6 +33,7 @@ bool maxwell_glsl_image_stores;  // compute SUST.B as storage image stores (exec
 bool maxwell_glsl_push;  // c1 inlined + push constants by default (exec.c: Mali, Adreno)
 bool maxwell_glsl_tint_branch;  // the recolour code behind a specialization constant (exec.c: Adreno, Mali)
 bool maxwell_glsl_quad_deriv;  // fragment quad xor shuffles through derivatives (exec.c: no subgroups in fragment shaders)
+bool maxwell_glsl_late_depth;  // fragment shaders that discard write gl_FragDepth (exec.c: Turnip on Adreno 7xx and later)
 const uint8_t *maxwell_const_data;
 uint32_t maxwell_const_size;
 bool maxwell_gmem_mirror;
@@ -2846,6 +2847,8 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         if (c->omap_depth) {
             if (c->reg_used[r + 1]) sp(&s, "  gl_FragDepth = as_f(r%d);\n", r + 1);
             else sp(&s, "  gl_FragDepth = gl_FragCoord.z;\n");
+        } else if (maxwell_glsl_late_depth && info->uses_discard) {
+            sp(&s, "  gl_FragDepth = gl_FragCoord.z;\n");  // (maxwell_glsl_late_depth: the depth test after the discard)
         }
     }
     sp(&s, "}\n");

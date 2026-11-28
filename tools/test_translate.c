@@ -224,6 +224,8 @@ int main(int argc, char **argv) {
     maxwell_glsl_stack_vars = !(getenv("TT_STACK_ARRAYS") && atoi(getenv("TT_STACK_ARRAYS")) != 0);
     // TT_GMEM_MIRROR=1: every stage through the address table, no heap behind it (no host import: exec.c gmir_)
     maxwell_gmem_mirror = getenv("TT_GMEM_MIRROR") && atoi(getenv("TT_GMEM_MIRROR")) != 0;
+    // TT_LATE_DEPTH=1: fragment shaders that discard write gl_FragDepth (the runtime's default on Turnip, Adreno 7xx)
+    maxwell_glsl_late_depth = getenv("TT_LATE_DEPTH") && atoi(getenv("TT_LATE_DEPTH")) != 0;
 #ifdef WITH_GLSL
     shaderc_compiler_t comp = shaderc_compiler_initialize();
     shaderc_compile_options_t opt = shaderc_compile_options_initialize();
