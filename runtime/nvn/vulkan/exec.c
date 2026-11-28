@@ -27,6 +27,7 @@
 #include "../pace.h"
 #include "../recolour.h"
 #include "../screen_filter.h"
+#include "../present_area.h"
 #include "../shader_prep.h"
 #include "../../settings.h"
 #include "../weather.h"
@@ -1461,6 +1462,16 @@ void vk_exec_init(void) {
         const char *te = getenv("LARECOMP_VK_TINT_BRANCH");
         maxwell_glsl_tint_branch = te ? atoi(te) != 0 : g_vk.props.vendorID == 0x5143 || g_vk.props.vendorID == 0x13B5;
         LOG("[vk] recolour variants %s (%s)\n", maxwell_glsl_tint_branch ? "on" : "off", te ? "LARECOMP_VK_TINT_BRANCH" : "default for this GPU");
+    }
+    {   // late depth for discarding fragment shaders (shader.h maxwell_glsl_late_depth): Turnip on Adreno 7xx. From LAS
+        // Recomp #836 (Retroid Pocket 6, Adreno 740: black specks along alpha-tested grass edges while the camera moved;
+        // the 650 is fine). Not yet tested in EoW on a 7xx. LARECOMP_VK_LATE_DEPTH=0 / 1 overrides.
+        const char *name = strstr(g_vk.props.deviceName, "Adreno (TM) ");
+        int gen = name ? atoi(name + 12) / 100 : 0;
+        const char *le = getenv("LARECOMP_VK_LATE_DEPTH");
+        maxwell_glsl_late_depth = le ? atoi(le) != 0 : g_vk.driver_id == VK_DRIVER_ID_MESA_TURNIP && gen >= 7;
+        LOG("[vk] late depth in discarding shaders %s (%s)\n", maxwell_glsl_late_depth ? "on" : "off",
+            le ? "LARECOMP_VK_LATE_DEPTH" : "default for this GPU");
     }
     // fmin / fmax / saturate as the GPU's min / max / clamp (shader.h maxwell_glsl_fast_minmax) by default on Android,
     // where the fork it comes from measured it on Adreno (Turnip and Qualcomm's driver: the lit pass 1717 -> 1637
@@ -8851,6 +8862,8 @@ void vk_present_draw(VkCommandBuffer cb, TexBackend *b, float vx, float vy, floa
     memcpy(pc, pv, 32);
     pc[1] = (float)g_vk.sc_quarter;
     screen_filter_params(pc + 8);
+    // (the downscale average, present.frag: the game image or SMAA's, both its size; FSR's lands about 1:1)
+    if (!upscaled) present_area_params(pc + 8, pv[6] * b->width, pv[7] * b->height, vw, vh);
     rec_CmdPushConstants(cb, present_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 48, pc);
     fullscreen_vertex_bind(cb);
     rec_CmdDraw(cb, 3, 1, 0, 0);

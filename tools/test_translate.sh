@@ -28,7 +28,8 @@ RENAME="-Dmaxwell_translate=old_maxwell_translate -Dmaxwell_free=old_maxwell_fre
  -Dmaxwell_glsl_fast_minmax=old_maxwell_glsl_fast_minmax
  -Dmaxwell_glsl_quad_deriv=old_maxwell_glsl_quad_deriv -Dmaxwell_glsl_tint_branch=old_maxwell_glsl_tint_branch
  -Dmaxwell_glsl_image_stores=old_maxwell_glsl_image_stores -Dmaxwell_skip_unsupported_stores=old_maxwell_skip_unsupported_stores
- -Dmaxwell_shadow_texel_off=old_maxwell_shadow_texel_off"
+ -Dmaxwell_shadow_texel_off=old_maxwell_shadow_texel_off
+ -Dmaxwell_glsl_late_depth=old_maxwell_glsl_late_depth"
 PRE=""
 case "$(uname -s)" in MINGW*|MSYS*) PRE="-include malloc.h";; esac
 $CC -O2 -w $PRE $RENAME -c "$OUT/old/translate.c" -o "$OUT/old.o"

@@ -19,9 +19,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Save Editor in the in-game menu, in the same place as in LAS Recomp: max hearts, health, rupees and the energy
   gauge. Changes show at once and are kept when the game saves. Your save folder is backed up first.
 
+### Changed
+- Resolution above the window's size (2x-8x) now looks smoother: each window pixel averages all the game pixels it
+  covers instead of taking one, so edges and text no longer shimmer. From LAS Recomp.
+
 ### Fixed
 - Start screen: Back (B or Esc) no longer clears the selected row when there is nothing to go back to.
 - The in-game menu's Warp opens again with a save loaded (it showed "Load a save first.").
+- Vulkan, Turnip on Adreno 7xx (Android): fewer black specks along cut-out edges such as grass. From LAS Recomp,
+  where it was tested on an Adreno 740; not yet tested in ReTri. `LARECOMP_VK_LATE_DEPTH=0` turns it off.
 
 ## [0.1.2] - 2026-11-27
 
