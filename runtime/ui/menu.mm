@@ -48,6 +48,7 @@ bool widescreen_allowed(void);  // (runtime/hle/widescreen.c: the camera widened
 void input_reset(void);
 void save_editor_draw(float scale);  // save_editor.mm
 extern "C" int game_in_play(void);  // hle/warp.c
+extern "C" int warp_other_in_play(void);  // hle/warp_other.c (another game: a level is in play)
 void save_editor_on_open(void);
 void rando_tab_draw(float scale);
 bool warp_tab_draw(float scale);  // warp_tab.mm: true when a warp started
@@ -193,7 +194,9 @@ static void page_open(int page) {
     } else menu_tabs_focus(false);  // (a page alone: the first Down goes to its first row)
     // (Warp, the Save Editor and Cheats need a save: before one is loaded, a note over the bar instead of an empty
     // page - on a touch screen the empty Save Editor had no X to leave by)
-    if ((page == BAR_WARP || page == BAR_EDITOR || page == BAR_CHEATS) && !game_in_play()) { g_ask = page; return; }
+    // (EoW's Warp: its own in-play check - game_in_play is LA's and never true for another game)
+    bool in_play = page == BAR_WARP && game_other() ? warp_other_in_play() != 0 : game_in_play() != 0;
+    if ((page == BAR_WARP || page == BAR_EDITOR || page == BAR_CHEATS) && !in_play) { g_ask = page; return; }
     if (page == BAR_EDITOR) save_editor_on_open();
     if (page == BAR_RESET || page == BAR_QUIT) { g_ask = page; return; }  // (a question over the bar: ask_popup)
     g_page = page;
