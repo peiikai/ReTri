@@ -32,6 +32,18 @@ save/save_0/
 
 All integers are little-endian. `maps.bin` and `thumb.bin` aren't mapped.
 
+After the header, `main.bin` is a list of blocks: a two-letter tag, u16 version, u32 hash, u32 size (the 16-byte
+block header included). One of them, `Pl` (hash 0x597a2cab, at +0x160 in the saves seen so far), holds the player:
+
+| Block offset (after its header) | What |
+|---|---|
+| +0x0 (u32) | rupees |
+| +0x4 (u16) | health, in quarter hearts |
+| +0x74 (float) | Swordfighter Form energy |
+
+The game plays from a live copy of these values, not from the save: the Cheats page changes that copy
+(`runtime/hle/cheats_other.c`), and the save gets the values only when the game saves.
+
 ## How ReTri writes them
 
 A save is all or nothing, as on the Switch: a file opened for writing on the save mount works on a copy

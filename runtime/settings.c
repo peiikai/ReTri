@@ -321,6 +321,7 @@ static bool settings_apply(const char *key, const char *val) {
     else if (!strcmp(key, "cheat_hearts")) g_settings.cheat_hearts = atoi(val) != 0;
     else if (!strcmp(key, "cheat_ammo")) g_settings.cheat_ammo = atoi(val) != 0;
     else if (!strcmp(key, "cheat_rupees")) g_settings.cheat_rupees = atoi(val) != 0;
+    else if (!strcmp(key, "cheat_energy")) g_settings.cheat_energy = atoi(val) != 0;
     else if (!strcmp(key, "cheat_hookshot")) g_settings.cheat_hookshot = atoi(val) != 0;
     else if (!strcmp(key, "no_buff_drops")) g_settings.no_buff_drops = atoi(val) != 0;
     else if (!strcmp(key, "diff_damage")) g_settings.diff_damage = (float)atof(val);
@@ -622,6 +623,7 @@ static void write_settings(FILE *f) {
     fprintf(f, "onedrive_kept = %d\n", g_settings.onedrive_kept);
     fprintf(f, "cheat_hearts = %d\ncheat_ammo = %d\ncheat_rupees = %d\n", g_settings.cheat_hearts, g_settings.cheat_ammo,
             g_settings.cheat_rupees);
+    fprintf(f, "cheat_energy = %d\n", g_settings.cheat_energy);
     fprintf(f, "cheat_hookshot = %d\n", g_settings.cheat_hookshot);
     fprintf(f, "no_buff_drops = %d\n", g_settings.no_buff_drops);
     fprintf(f, "diff_damage = %.2f\ndiff_ohko = %d\ndiff_hero = %d\n", g_settings.diff_damage, g_settings.diff_ohko,

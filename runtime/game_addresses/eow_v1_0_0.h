@@ -1,5 +1,6 @@
 // Echoes of Wisdom 1.0.0: the game code ReTri patches (runtime/gen/patches.cpp, tools/gen.py) and calls
-// (runtime/hle/warp_other.c). Addresses only; the same names in every build's table (games.h), 0x0: not in this build.
+// (runtime/hle/warp_other.c) and reads (runtime/hle/cheats_other.c). Addresses only; the same names in every
+// build's table (games.h), 0x0: not in this build.
 OTHER_ADDR(OPTNONE_TABLE_FN, 0x7001389610)
 OTHER_ADDR(OPTNONE_SLOW_FN, 0x70020d5aa0)
 OTHER_ADDR(WARP_REQUEST_PROC, 0x7001605a30)
@@ -62,3 +63,5 @@ OTHER_ADDR(SPOT_SITE_2, 0x70024a1404)
 OTHER_ADDR(SPOT_SITE_3, 0x70024bda38)
 OTHER_ADDR(SPOT_SITE_4, 0x700253c71c)
 OTHER_ADDR(SPOT_SITE_5, 0x70025d84c8)
+OTHER_ADDR(PLAYER_STATUS, 0x7003fed230)
+OTHER_ADDR(RUPEE_LOAD_SITE, 0x7000e8ff20)

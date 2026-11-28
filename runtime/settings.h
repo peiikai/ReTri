@@ -86,6 +86,7 @@ typedef struct {
     bool cheat_hearts;   // health kept full
     bool cheat_ammo;     // bombs / arrows / magic powder kept full (for the bags Link owns)
     bool cheat_rupees;   // rupees kept at 9999
+    bool cheat_energy;   // EoW: Swordfighter Form energy kept full (runtime/hle/cheats_other.c)
     bool cheat_hookshot; // hookshot latches onto any surface (Gameplay tab; runtime/hle/hookshot.c)
     bool no_buff_drops;  // no Guardian Acorns / Pieces of Power (Gameplay tab; runtime/hle/qol.c)
     // difficulty (runtime/ui/difficulty.mm)

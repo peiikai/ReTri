@@ -125,11 +125,17 @@ enum { BAR_SETTINGS, BAR_COSMETICS, BAR_RANDO, BAR_WARP, BAR_EDITOR, BAR_CHEATS,
 static std::atomic<int> g_page{-1};  // the entry whose page is open (-1: the bar alone)
 static int g_bar_cur;  // the bar's cursor (render thread)
 static void page_open(int page);
-// Another game on the engine: the bar without LA's own pages (Cosmetics, Randomizer, Save Editor, Cheats read LA's
-// state) and without Reset (only LA's reboot is known to work - as Quit's Return to Launcher)
+// Another game on the engine: the bar without LA's own pages (Cosmetics, Randomizer, Save Editor read LA's state;
+// Cheats has its own page for EoW: cheats.mm) and without Reset (only LA's reboot is known to work - as Quit's Return
+// to Launcher)
 static bool bar_shown(int e) {
     if (e == BAR_RANDO && !RANDO_ON) return false;  // (waiting for the EoW randomizer: runtime/rando.h)
-    return !game_other() || !(e == BAR_COSMETICS || e == BAR_EDITOR || e == BAR_CHEATS || e == BAR_RESET);
+    return !game_other() || !(e == BAR_COSMETICS || e == BAR_EDITOR || e == BAR_RESET);
+}
+extern "C" bool cheats_other_ready(void);  // runtime/hle/cheats_other.c
+static bool page_needs_save(int page) {  // (Warp, the Save Editor and Cheats)
+    if (page == BAR_CHEATS && game_other()) return !cheats_other_ready();
+    return (page == BAR_WARP || page == BAR_EDITOR || page == BAR_CHEATS) && !game_in_play();
 }
 extern "C" void menu_toggle(void) { set_open(!g_open.load()); }  // (the touch controls' menu button)
 static int g_tab = -1000, g_tab_request = -2;  // (-2: no request; -1 is the Prelaunch tab; -1000: the first tab)
@@ -193,7 +199,7 @@ static void page_open(int page) {
     } else menu_tabs_focus(false);  // (a page alone: the first Down goes to its first row)
     // (Warp, the Save Editor and Cheats need a save: before one is loaded, a note over the bar instead of an empty
     // page - on a touch screen the empty Save Editor had no X to leave by)
-    if ((page == BAR_WARP || page == BAR_EDITOR || page == BAR_CHEATS) && !game_in_play()) { g_ask = page; return; }
+    if (page_needs_save(page)) { g_ask = page; return; }
     if (page == BAR_EDITOR) save_editor_on_open();
     if (page == BAR_RESET || page == BAR_QUIT) { g_ask = page; return; }  // (a question over the bar: ask_popup)
     g_page = page;
@@ -1165,7 +1171,7 @@ static void reset_to_vanilla(bool in_game) {
     s.diff_damage = 1.0f, s.diff_ohko = false;
     s.timer = false, s.timer_pos = TIMER_POS_LEFT;
     if (s.livesplit) s.livesplit = false, livesplit_poke();
-    s.cheat_hearts = s.cheat_ammo = s.cheat_rupees = false;
+    s.cheat_hearts = s.cheat_ammo = s.cheat_rupees = s.cheat_energy = false;
     for (CosColour *c : {&s.tunic, &s.hearts, &s.hair, &s.skin, &s.shield, &s.leaves, &s.grass, &s.sand, &s.water,
                          &s.fences, &s.walls, &s.houses})
         c->pick = COL_DEFAULT;
