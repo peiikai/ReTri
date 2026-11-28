@@ -90,11 +90,7 @@ static bool copy_file(const char *from, const char *to) {
     return fclose(out) == 0 && ok;
 }
 static bool copy_tree(const char *from, const char *to) {
-#ifdef _WIN32
-    if (mkdir(to) && errno != EEXIST) return false;
-#else
-    if (mkdir(to, 0755) && errno != EEXIST) return false;
-#endif
+    if (mkdir(to, 0755) && errno != EEXIST) return false;  // (win_compat.h takes the mode too)
     DIR *d = opendir(from);
     if (!d) return false;
     bool ok = true;
