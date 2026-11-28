@@ -130,6 +130,8 @@ None of these need game files unless they say so. CI runs most of them on every 
   `tools/test_update_e2e.sh` (download, check, swap and restart against a local web server),
   `tools/test_update_tags.cpp` (tags, labels, the update dialog's changelog) and `python3 tools/test_update_paths.py`
   (what each shipped build offers).
+- Linux soft page write tracking: `clang -O2 -pthread tools/test_soft_tracking.c -o build/test-soft-tracking &&
+  build/test-soft-tracking` (needs 4K pages: Linux, or macOS with `-arch x86_64`).
 - Windows: `python tools/test_windows_processes.py` (helper processes and crash exit codes).
 - Shaders: `tools/test_translate.sh` and `tools/test_vk_pipelines.sh` ([docs/BUILD-windows.md](docs/BUILD-windows.md)).
 
