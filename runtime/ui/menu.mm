@@ -48,6 +48,7 @@ bool widescreen_allowed(void);  // (runtime/hle/widescreen.c: the camera widened
 void input_reset(void);
 void save_editor_draw(float scale);  // save_editor.mm
 extern "C" int game_in_play(void);  // hle/warp.c
+extern "C" int warp_other_in_play(void);  // hle/warp_other.c (another game: a level is in play)
 void save_editor_on_open(void);
 void rando_tab_draw(float scale);
 bool warp_tab_draw(float scale);  // warp_tab.mm: true when a warp started
@@ -137,6 +138,8 @@ extern "C" bool save_editor_ready(void);   // save_editor.mm (a save in play it 
 static bool page_needs_save(int page) {  // (Warp, the Save Editor and Cheats)
     if (page == BAR_CHEATS && game_other()) return !cheats_other_ready();
     if (page == BAR_EDITOR) return !save_editor_ready();
+    // (EoW's Warp: its own in-play check - game_in_play is LA's and never true for another game)
+    if (page == BAR_WARP && game_other()) return !warp_other_in_play();
     return (page == BAR_WARP || page == BAR_CHEATS) && !game_in_play();
 }
 extern "C" void menu_toggle(void) { set_open(!g_open.load()); }  // (the touch controls' menu button)
