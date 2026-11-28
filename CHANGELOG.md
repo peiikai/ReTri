@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- The in-game menu's Warp opens again with a save loaded (it showed "Load a save first.").
+
 ## [0.1.2] - 2026-11-27
 
 ### Fixed
