@@ -9,6 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - The in-game menu's Warp opens again with a save loaded (it showed "Load a save first.").
+- Linux: the game no longer crashes when two threads write to the same tracked page at once (seen with RADV, for
+  example on a Steam Deck). A write the game was allowed to make was taken for a real crash.
 
 ## [0.1.2] - 2026-11-27
 
