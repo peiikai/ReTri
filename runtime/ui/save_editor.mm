@@ -17,6 +17,7 @@
 #include "osk.h"
 #include "item_names.h"
 #include "option_rows.h"
+#include "../hle/player_other.h"
 
 extern "C" void give_item_request(int id, int count, int index);
 extern "C" void hud_hearts_refresh(void);        // runtime/hle/hud_hearts.c
@@ -62,6 +63,7 @@ static void sync_header(void) {
 static char g_name[32];
 
 extern "C" void save_editor_on_open(void) {
+    if (game_other()) return;
     if (!loaded()) return;
     if (current_dungeon() >= 0) g_dungeon = current_dungeon();
     const uint16_t *u = (const uint16_t *)(S() + NAME);
@@ -346,6 +348,165 @@ static void sec_give(void) {
     }
 }
 
+// ---- Echoes of Wisdom (runtime/hle/save_other.c: the live save image's Pl chunk and the player status). The same
+// page, its own sections: the player's hearts, health, rupees and energy gauge. Every change waits for a backup of the
+// save folder (none: nothing changes) and applies at once; the game's next save writes it.
+extern "C" uint8_t *save_other_pl(void);
+extern "C" uint64_t save_other_status(void);
+extern "C" bool save_other_backup(void);
+
+// The status fields (runtime/hle/player_other.h) and the Pl chunk's (its body)
+enum { ST_MAX_HP = PLAYER_OTHER_MAX_HP, ST_HP = PLAYER_OTHER_HP, ST_RUPEES = PLAYER_OTHER_RUPEES,
+       ST_ENERGY = PLAYER_OTHER_ENERGY, ST_GAUGE = PLAYER_OTHER_ENERGY_LVL };
+enum { PL_CONTAINERS = 0x6, PL_PIECES = 0x8 };
+enum : uint32_t { GAUGE_1 = 0x2000, GAUGE_2 = 0x4000, GAUGE_3 = 0x8000 };  // the energy gauge's upgrades (15 -> 20, 30, 40)
+static uint64_t g_st;   // this frame's status (0: none)
+static uint8_t *g_pl;   // this frame's Pl body
+
+static bool eow_loaded(void) {
+    g_pl = save_other_pl();
+    g_st = g_pl ? save_other_status() : 0;
+    return g_st != 0;
+}
+static volatile int32_t &ST(int off) { return *(volatile int32_t *)(uintptr_t)(g_st + off); }
+static volatile float &ST_F(int off) { return *(volatile float *)(uintptr_t)(g_st + off); }
+static uint16_t &PL16(int off) { return *(uint16_t *)(g_pl + off); }
+static uint64_t &PL64(int off) { return *(uint64_t *)(g_pl + off); }
+
+// The game's own max health (quarter hearts): 3 hearts, one more for each Heart Container (a bit of a u16) and each
+// four Pieces of Heart (bits of a u64), at most 20
+static int eow_max_hp(void) {
+    int q = 12 + 4 * (__builtin_popcount(PL16(PL_CONTAINERS)) + __builtin_popcountll(PL64(PL_PIECES)) / 4);
+    return q < 80 ? q : 80;
+}
+static float eow_energy_max(void) {
+    uint32_t g = (uint32_t)ST(ST_GAUGE);
+    return g & GAUGE_3 ? 40.0f : g & GAUGE_2 ? 30.0f : g & GAUGE_1 ? 20.0f : 15.0f;
+}
+static int eow_gauge_level(void) {
+    uint32_t g = (uint32_t)ST(ST_GAUGE);
+    return g & GAUGE_3 ? 3 : g & GAUGE_2 ? 2 : g & GAUGE_1 ? 1 : 0;
+}
+
+// Max hearts t (3-20): Heart Containers make up the difference, the Pieces of Heart the player found stay (both are
+// one bit per container or piece the game hands out: the bits it set are kept, those added come from the top, so
+// lowering takes back the added ones first). Past 16 containers, Pieces of Heart from the top.
+static void eow_set_hearts(int t) {
+    uint16_t c = PL16(PL_CONTAINERS);
+    uint64_t p = PL64(PL_PIECES);
+    while (p && t - 3 - __builtin_popcountll(p) / 4 < 0) p &= ~(1ull << (63 - __builtin_clzll(p)));  // (fewer hearts than
+    int need = t - 3 - __builtin_popcountll(p) / 4;                                                    //  the pieces give)
+    if (need < 0) need = 0;
+    if (need > 16) need = 16;
+    while (__builtin_popcount(c) > need) c &= (uint16_t)~(1u << (31 - __builtin_clz(c)));
+    for (int b = 15; b >= 0 && __builtin_popcount(c) < need; b--) c |= (uint16_t)(1u << b);
+    for (int b = 63; b >= 0 && 3 + __builtin_popcount(c) + __builtin_popcountll(p) / 4 < t; b--) p |= 1ull << b;
+    PL16(PL_CONTAINERS) = c;
+    PL64(PL_PIECES) = p;
+    // (more hearts come full, as a Heart Container's: the HUD only draws a new heart as the health fills past the old
+    // max)
+    int old_max = ST(ST_MAX_HP), hp = ST(ST_HP);
+    ST(ST_MAX_HP) = eow_max_hp();
+    if (ST(ST_MAX_HP) > old_max && hp > 0) hp += ST(ST_MAX_HP) - old_max;
+    ST(ST_HP) = hp > ST(ST_MAX_HP) ? ST(ST_MAX_HP) : hp;
+}
+static void eow_set_gauge(int lv) {
+    uint32_t g = (uint32_t)ST(ST_GAUGE) & ~(GAUGE_1 | GAUGE_2 | GAUGE_3);
+    if (lv >= 1) g |= GAUGE_1;  // (each upgrade on top of the one before, as bought)
+    if (lv >= 2) g |= GAUGE_2;
+    if (lv >= 3) g |= GAUGE_3;
+    ST(ST_GAUGE) = (int32_t)g;
+    if (ST_F(ST_ENERGY) > eow_energy_max()) ST_F(ST_ENERGY) = eow_energy_max();
+}
+static void eow_refill(void) {
+    ST(ST_HP) = ST(ST_MAX_HP);
+    ST_F(ST_ENERGY) = eow_energy_max();
+}
+static void eow_max_out(void) {
+    eow_set_hearts(20);
+    ST(ST_RUPEES) = PLAYER_OTHER_RUPEE_MAX;
+    eow_set_gauge(3);
+    eow_refill();
+}
+
+static void eow_quick(void) {
+    if (opt_button("Max out everything", "20 hearts, 9999 rupees, every energy gauge upgrade, and full health and "
+                                         "energy.") && save_other_backup())
+        eow_max_out();
+    if (opt_button("Refill hearts & energy", "Refills your health and the energy gauge.") && save_other_backup())
+        eow_refill();
+}
+
+static void eow_player(void) {
+    int hearts = eow_max_hp() / 4;
+    if (opt_int("Max hearts", &hearts, 3, 20, 1, 3, "%d / 20",
+                "Zelda's max hearts. New hearts come full. Heart Containers make up the difference; Pieces of Heart you found stay.") &&
+        save_other_backup())
+        eow_set_hearts(hearts);
+    int mh = ST(ST_MAX_HP);
+    float h = ST(ST_HP) / 4.0f;
+    if (opt_slider("Health", &h, 0.25f, mh / 4.0f, 0.25f, mh / 4.0f, "%g hearts", "Zelda's health, in quarter hearts.") &&
+        save_other_backup()) {
+        int q = (int)roundf(h * 4);
+        ST(ST_HP) = q < 1 ? 1 : q > mh ? mh : q;
+    }
+    int rupees = ST(ST_RUPEES);
+    if (opt_int("Rupees", &rupees, 0, 9999, 1, 0, "%d", "Rupees, up to 9999. Hold left or right to go faster.") &&
+        save_other_backup())
+        ST(ST_RUPEES) = rupees;
+}
+
+static void eow_energy(void) {
+    static const char *const levels[] = {LN("None"), LN("1 of 3"), LN("2 of 3"), LN("3 of 3")};
+    int lv = eow_gauge_level();
+    if (opt_choice("Gauge upgrades", &lv, levels, 4, 0, "Energy gauge upgrades: the gauge holds 15, then 20, 30 and 40.",
+                   false) && save_other_backup())
+        eow_set_gauge(lv);
+    float em = eow_energy_max(), e = ST_F(ST_ENERGY);
+    if (e < 0) e = 0;
+    if (opt_slider("Energy", &e, 0, em, 1, em, "%g", "The energy gauge, used by Swordfighter Form.") && save_other_backup())
+        ST_F(ST_ENERGY) = fminf(fmaxf(e, 0), em);
+}
+
+enum { EOW_QUICK, EOW_PLAYER, EOW_ENERGY, N_EOW_SEC };
+static const char *const k_eow_sec_name[N_EOW_SEC] = {LN("Quick"), LN("Player"), LN("Energy")};
+static void (*const k_eow_sec_rows[N_EOW_SEC])(void) = {eow_quick, eow_player, eow_energy};
+
+// (test) LARECOMP_SAVE_EDIT=<frames in play>:<change>,...: changes as the rows make them, that long after the save
+// is in play: max, refill, hearts=<n>, health=<quarters>, rupees=<n>, gauge=<0-3>, energy=<n>
+extern "C" void save_other_frame(uint64_t frame) {
+    static const char *spec = getenv("LARECOMP_SAVE_EDIT");
+    static uint64_t play0;
+    if (!spec || !*spec) return;
+    extern int warp_other_in_play(void);
+    if (!play0) { if (!warp_other_in_play()) return; play0 = frame; }
+    if (frame - play0 < (uint64_t)atol(spec) || !eow_loaded()) return;
+    const char *p = strchr(spec, ':');
+    spec = "";
+    if (!p || !save_other_backup()) return;
+    for (p++; *p;) {
+        char key[16] = {0};
+        float v = 0;
+        int n = 0;
+        if (sscanf(p, "%15[a-z]%n", key, &n) < 1) break;
+        p += n;
+        if (*p == '=') v = strtof(p + 1, (char **)&p);
+        if (!strcmp(key, "max")) eow_max_out();
+        else if (!strcmp(key, "refill")) eow_refill();
+        else if (!strcmp(key, "hearts")) eow_set_hearts((int)v);
+        else if (!strcmp(key, "health")) ST(ST_HP) = (int32_t)v;
+        else if (!strcmp(key, "rupees")) ST(ST_RUPEES) = (int32_t)v;
+        else if (!strcmp(key, "gauge")) eow_set_gauge((int)v);
+        else if (!strcmp(key, "energy")) ST_F(ST_ENERGY) = v;
+        if (*p == ',') p++;
+    }
+    LOG("[saveedit] test: changed (hearts %d/4 max %d, rupees %d, gauge %d, energy %g)\n", ST(ST_HP), ST(ST_MAX_HP),
+        ST(ST_RUPEES), eow_gauge_level(), ST_F(ST_ENERGY));
+}
+
+extern "C" int game_in_play(void);  // runtime/hle/warp.c (LA)
+extern "C" bool save_editor_ready(void) { return game_other() ? eow_loaded() : game_in_play(); }
+
 // The tab, in two columns (as the Controls tab's Configure inputs): the sections on the left, the chosen section's rows
 // on the right, the selected row's description under them.
 enum { SEC_QUICK, SEC_PLAYER, SEC_EQUIPMENT, SEC_AMMO, SEC_SONGS, SEC_BOTTLES, SEC_INSTRUMENTS, SEC_KEYS, SEC_TRADE,
@@ -367,7 +528,11 @@ extern "C" bool save_editor_close_pressed(void) { bool r = g_close_pressed; g_cl
 extern "C" bool save_editor_took_back(void) { return g_back_frame == ImGui::GetFrameCount(); }
 
 extern "C" void save_editor_draw(float scale) {
-    if (!loaded()) return;  // (no save loaded: nothing to edit)
+    if (game_other() ? !eow_loaded() : !loaded()) return;  // (no save loaded: nothing to edit)
+    const int n_sec = game_other() ? (int)N_EOW_SEC : (int)N_SEC;
+    const char *const *sec_name = game_other() ? k_eow_sec_name : k_sec_name;
+    void (*const *sec_rows)(void) = game_other() ? k_eow_sec_rows : k_sec_rows;
+    if (g_sec >= n_sec) g_sec = 0;
     int frame = ImGui::GetFrameCount();
     if (frame - g_last_frame > 1) g_focus = FOCUS_NONE, g_in_right = false;  // (back on the tab)
     g_last_frame = frame;
@@ -375,15 +540,15 @@ extern "C" void save_editor_draw(float scale) {
     if (hook_frames < 0) {
         hook_frames = 0;
         if (const char *h = getenv("LARECOMP_SAVE_SEC")) {
-            for (int c = 0; c < N_SEC; c++)
-                if (!strncasecmp(h, k_sec_name[c], strlen(k_sec_name[c]))) g_sec = c;
+            for (int c = 0; c < n_sec; c++)
+                if (!strncasecmp(h, sec_name[c], strlen(sec_name[c]))) g_sec = c;
             hook_frames = strstr(h, ":right") ? 10 : 0;
         }
     }
     if (hook_frames > 0) hook_frames--, g_focus = FOCUS_RIGHT;
     static const int sec_cycle = getenv("LARECOMP_SAVE_SEC_CYCLE") ? atoi(getenv("LARECOMP_SAVE_SEC_CYCLE")) : 0;
     static int sec_frames;  // (test) <frames>: each section in turn, that many frames each (screenshot series)
-    if (sec_cycle > 0 && sec_frames++ % sec_cycle == 0) g_sec = sec_frames / sec_cycle % N_SEC;
+    if (sec_cycle > 0 && sec_frames++ % sec_cycle == 0) g_sec = sec_frames / sec_cycle % n_sec;
     // B / Esc in the right column (and Left on a row that doesn't step with it): back to the section
     if (g_in_right && !ui_text_busy() && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) &&
         (opt_pressed_back() || (opt_pressed_left() && !opt_focused_lr())))
@@ -401,9 +566,9 @@ extern "C" void save_editor_draw(float scale) {
     };
     heading("Settings");
 #endif
-    for (int c = 0; c < N_SEC; c++) {
+    for (int c = 0; c < n_sec; c++) {
         if (g_in_right && c == g_sec) opt_mark_next();
-        bool open = opt_link(k_sec_name[c], NULL, NULL);
+        bool open = opt_link(sec_name[c], NULL, NULL);
         bool clicked = ImGui::IsItemHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Left);  // (the row fires on the release)
         if (c == g_sec && g_focus == FOCUS_SEC) g_focus = FOCUS_NONE, opt_focus_item();
         if ((opt_item_nav_focused() && g_sec != c) || open) g_sec = c;  // (moving down the list shows each)
@@ -412,18 +577,18 @@ extern "C" void save_editor_draw(float scale) {
     opt_split();
 #if PLAT_TOUCH
     g_close_pressed = plastic_close_pane(44 * scale, scale);  // (in this pane's box: the page has the whole height)
-    heading(k_sec_name[g_sec]);
+    heading(sec_name[g_sec]);
 #else
-    opt_section(k_sec_name[g_sec]);
+    opt_section(sec_name[g_sec]);
 #endif
     opt_list_begin();
     if (g_focus == FOCUS_RIGHT) g_focus = FOCUS_NONE, opt_focus_next_row();
-    k_sec_rows[g_sec]();
+    sec_rows[g_sec]();
     opt_list_end();
     g_in_right = opt_in_right();
     opt_desc_text();
     opt_split_end();
-    sync_header();
+    if (!game_other()) sync_header();
 }
 
 // ---- debug helpers (LARECOMP_SAVE_DUMP_AT=<frame>: log the live save at that frame)

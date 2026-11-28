@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   open and close), read from your game files. Audio > ReTri menu sounds turns them off.
 - Cheats in the in-game menu, in the same place as in LAS Recomp: infinite hearts, energy and rupees, and one-time
   refills. They work on every supported game version.
+- Save Editor in the in-game menu, in the same place as in LAS Recomp: max hearts, health, rupees and the energy
+  gauge. Changes show at once and are kept when the game saves. Your save folder is backed up first.
 
 ### Fixed
 - Start screen: Back (B or Esc) no longer clears the selected row when there is nothing to go back to.

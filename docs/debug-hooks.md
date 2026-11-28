@@ -204,6 +204,7 @@ on a scratch save.
 | `LARECOMP_MENU_TAB` | page number | The page the overlay menu opens on: `4` Warp, `5` Cheats, `9` Quit. Other numbers open Settings on that tab (`0` Video, `1` Audio, `8` Controls, `11` General). |
 | `LARECOMP_CHEATS` | `hearts,energy,rupees` | Turn those cheats on for this run (not saved). |
 | `LARECOMP_CHEATS_DRAIN` | `frame,frame,...` | At each frame, leave Zelda with a quarter heart and an empty energy gauge (to see the cheats refill them). |
+| `LARECOMP_SAVE_EDIT` | `frames:change,...` | That many frames after the save is in play, change it as the Save Editor would: `max`, `refill`, `hearts=<3-20>`, `health=<quarter hearts>`, `rupees=<n>`, `gauge=<0-3>`, `energy=<n>`. The save folder is backed up first, as for the editor. |
 | `LARECOMP_MENU_BAR` | entry number | Open the menu bar alone, its cursor on that entry: `0` Settings, `3` Warp, `7` Quit, `8` the close button. |
 | `LARECOMP_TOUCH_SHOW_INPUT` | 0 / 1 | iPhone, iPad and Android: show scripted input (`LARECOMP_INPUT`) on the touch controls, the buttons lit and the stick moved. |
 | `LARECOMP_UPDATE_TAGS` | `tag,tag,...` | The update check sees these release tags instead of asking GitHub (no network). |

@@ -2625,6 +2625,8 @@ static void present_hooks(void) {
     } else {
         extern void warp_other_frame(uint64_t frame);  // runtime/hle/warp_other.c
         warp_other_frame(total_frames);
+        extern void save_other_frame(uint64_t frame);  // runtime/hle/save_other.c
+        save_other_frame(total_frames);
     }
     extern bool g_debug_frame;
     static long debug_at = -1;
